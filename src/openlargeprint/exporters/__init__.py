@@ -1,4 +1,4 @@
-"""Exporters package."""
+"""Exporters package (DOC-001, OUT-001..011)."""
 
 from .base import (
     BaseExporter,
@@ -9,6 +9,8 @@ from .base import (
     PRESET_CONFIGS,
 )
 from .docx import DocxExporter
+from .pdf import PdfExporter
+from .reader import ReaderExporter
 
 __all__ = [
     "BaseExporter",
@@ -16,6 +18,8 @@ __all__ = [
     "ExportOptions",
     "PRESET_CONFIGS",
     "PaperSize",
+    "PdfExporter",
     "PresetConfig",
     "PresetName",
+    "ReaderExporter",
 ]

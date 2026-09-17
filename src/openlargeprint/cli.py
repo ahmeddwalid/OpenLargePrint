@@ -1,4 +1,4 @@
-"""Standalone CLI interface for OpenLargePrint (DESIGN.md §1, UI-001, UI-005)."""
+"""Standalone CLI interface for OpenLargePrint (DESIGN.md §1, UI-001, UI-005, OUT-010..011)."""
 
 from __future__ import annotations
 
@@ -20,10 +20,16 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Convert command
-    convert_parser = subparsers.add_parser("convert", help="Convert a document to large-print DOCX")
+    convert_parser = subparsers.add_parser("convert", help="Convert a document to large-print DOCX, PDF, or Reader HTML")
     convert_parser.add_argument("input", type=Path, help="Path to input PDF document")
     convert_parser.add_argument(
-        "-o", "--output", type=Path, required=True, help="Path to write output DOCX file"
+        "-o", "--output", type=Path, required=True, help="Path to write output file (.docx, .pdf, .html)"
+    )
+    convert_parser.add_argument(
+        "--format",
+        choices=["docx", "pdf", "reader"],
+        default=None,
+        help="Explicit output format (default: inferred from output extension)",
     )
     convert_parser.add_argument(
         "--preset",
@@ -36,6 +42,13 @@ def main() -> int:
         choices=[p.value for p in PaperSize],
         default=PaperSize.A4.value,
         help="Paper size target: A4 (default) or A3",
+    )
+    convert_parser.add_argument(
+        "--page-range",
+        nargs=2,
+        type=int,
+        metavar=("START", "END"),
+        help="Export only a selected page range (e.g. --page-range 2 5)",
     )
     convert_parser.add_argument(
         "--mode",
@@ -73,11 +86,22 @@ def main() -> int:
                 include_page_markers=not args.no_page_markers,
             )
 
-            result = orchestrator.convert(args.input, args.output, options)
+            page_range = tuple(args.page_range) if args.page_range else None
+
+            result = orchestrator.convert(
+                input_path=args.input,
+                output_path=args.output,
+                options=options,
+                export_format=args.format,
+                page_range=page_range,
+            )
+
             print(f"Successfully converted: {args.input.name} -> {args.output.name}")
+            print(f"  Format: {result.format.upper()}")
             print(f"  Preset: {args.preset} ({options.body_pt}pt, line spacing {options.line_spacing})")
             print(f"  Paper size: {args.paper_size}")
-            print(f"  Routing mode: {args.mode}")
+            if page_range:
+                print(f"  Selected range: Pages {page_range[0]} to {page_range[1]}")
             print(f"  Total pages processed: {result.document_ir.metadata.page_count}")
             print(f"  Total semantic blocks: {len(result.document_ir.blocks)}")
             print("  Note: Print at 100% / actual size (not 'fit to page') to preserve text size.")

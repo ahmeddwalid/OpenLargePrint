@@ -1,4 +1,4 @@
-"""Unified PDF extraction with automatic routing across native, scanned, and broken pages (PDF-001..007)."""
+"""Unified PDF extraction with automatic routing across native, scanned, and mixed pages (PDF-001..007)."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ class TextLine:
 
 
 class NativePdfImporter(BaseImporter):
-    """Imports PDF documents, dynamically routing pages across native extraction and OCR (DOC-001, PDF-001..007)."""
+    """Imports PDF documents, dynamically routing pages across native extraction, OCR, and mixed reconciliation (DOC-001, PDF-001..007)."""
 
     def __init__(
         self,
@@ -123,7 +123,7 @@ class NativePdfImporter(BaseImporter):
                             except Exception:
                                 pass
 
-                        # On a scanned page, do not treat the full-page scanned background as an inline figure
+                        # On a scanned page, do not treat full-page scan background as an inline figure
                         is_scanned_background = (
                             page_meta.classification == PageClassification.SCANNED
                             and bbox is not None
@@ -162,10 +162,11 @@ class NativePdfImporter(BaseImporter):
                     all_blocks.extend(ocr_blocks)
 
                 elif page_meta.classification == PageClassification.MIXED:
-                    # Mixed page path (PDF-004)
-                    page_blocks = self._extract_native_text(page, page_num, block_counter, page_meta)
-                    block_counter += len(page_blocks)
-                    all_blocks.extend(page_blocks)
+                    # Mixed page reconciliation path (PDF-004)
+                    log_safe_info(f"Page {page_num} routed to mixed reconciliation (PDF-004)")
+                    mixed_blocks = self._reconcile_mixed_page(page, page_num, block_counter, page_meta)
+                    block_counter += len(mixed_blocks)
+                    all_blocks.extend(mixed_blocks)
 
         finally:
             pike_doc.close()
@@ -182,6 +183,57 @@ class NativePdfImporter(BaseImporter):
             metadata=metadata,
             pages=pages_metadata,
             blocks=all_blocks,
+        )
+
+    def _reconcile_mixed_page(
+        self,
+        page: pdfium.PdfPage,
+        page_num: int,
+        start_idx: int,
+        page_meta: PageMetadata,
+    ) -> List[Block]:
+        """Reconcile native text with selective OCR of regions lacking native text, deduplicating overlaps (PDF-004)."""
+        # 1. Native text extraction
+        native_blocks = self._extract_native_text(page, page_num, start_idx, page_meta)
+        idx_after_native = start_idx + len(native_blocks)
+
+        # 2. Run OCR over entire page
+        ocr_blocks = self.scanned_extractor.extract_page(page, page_num, idx_after_native)
+
+        # 3. Deduplicate: keep only OCR blocks that DO NOT overlap native text (Principle 1)
+        accepted_ocr_blocks: List[Block] = []
+        for ocr_b in ocr_blocks:
+            if not ocr_b.source_bounding_box:
+                continue
+            ocr_box = ocr_b.source_bounding_box
+
+            overlaps_native = False
+            for nat_b in native_blocks:
+                if not nat_b.source_bounding_box:
+                    continue
+                nat_box = nat_b.source_bounding_box
+
+                # Check bounding box overlap
+                x_overlap = max(0.0, min(ocr_box.x1, nat_box.x1) - max(ocr_box.x0, nat_box.x0))
+                y_overlap = max(0.0, min(ocr_box.y1, nat_box.y1) - max(ocr_box.y0, nat_box.y0))
+                overlap_area = x_overlap * y_overlap
+                ocr_area = max(1.0, ocr_box.width * ocr_box.height)
+
+                if (overlap_area / ocr_area) > 0.25:
+                    overlaps_native = True
+                    break
+
+            if not overlaps_native:
+                accepted_ocr_blocks.append(ocr_b)
+
+        # 4. Merge native blocks and non-overlapping OCR blocks in reading order
+        combined = native_blocks + accepted_ocr_blocks
+        return sorted(
+            combined,
+            key=lambda b: (
+                -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
+                (b.source_bounding_box.x0 if b.source_bounding_box else 0.0),
+            ),
         )
 
     def _extract_native_text(

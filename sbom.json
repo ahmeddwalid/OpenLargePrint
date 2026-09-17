@@ -91,6 +91,17 @@
       "network_behavior": "none",
       "parses_untrusted_content": true,
       "purpose": "Headless image array manipulation and geometric transformations for OCR"
+    },
+    {
+      "component": "reportlab",
+      "version": "5.0.1",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "High-quality reflowed large-print PDF generation via Platypus"
     }
   ]
 }

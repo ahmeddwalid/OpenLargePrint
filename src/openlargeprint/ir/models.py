@@ -1,4 +1,4 @@
-"""Canonical DocumentIR schema (DOC-001..003).
+"""Canonical DocumentIR schema (DOC-001..003, OUT-010).
 
 Every importer in OpenLargePrint normalizes into DocumentIR, and every exporter
 reads exclusively from DocumentIR.
@@ -135,3 +135,26 @@ class DocumentIR(BaseModel):
     metadata: DocumentMetadata
     pages: list[PageMetadata] = Field(default_factory=list)
     blocks: list[Block] = Field(default_factory=list)
+
+    def slice_by_source_pages(self, start_page: int, end_page: int) -> DocumentIR:
+        """Return a sliced DocumentIR containing only blocks from start_page to end_page (OUT-010)."""
+        if start_page < 1 or end_page < start_page:
+            raise ValueError(f"Invalid page range: [{start_page}, {end_page}]")
+
+        filtered_pages = [p for p in self.pages if start_page <= p.page_number <= end_page]
+        filtered_blocks = [b for b in self.blocks if start_page <= b.source_page <= end_page]
+
+        title_suffix = f" (Pages {start_page}–{end_page})" if start_page != end_page else f" (Page {start_page})"
+        base_title = self.metadata.title or "Document"
+        new_metadata = DocumentMetadata(
+            title=f"{base_title}{title_suffix}",
+            source_file_name=self.metadata.source_file_name,
+            page_count=len(filtered_pages) if filtered_pages else (end_page - start_page + 1),
+        )
+
+        return DocumentIR(
+            schema_version=self.schema_version,
+            metadata=new_metadata,
+            pages=filtered_pages,
+            blocks=filtered_blocks,
+        )
