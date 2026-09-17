@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "productName": "OpenLargePrint",
+  "version": "0.1.0",
+  "identifier": "org.openlargeprint.app",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../ui run dev",
+    "beforeBuildCommand": "npm --prefix ../ui run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenLargePrint",
+        "width": 1040,
+        "height": 820,
+        "minWidth": 640,
+        "minHeight": 480,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "Accessibility",
+    "shortDescription": "Accessible document enlargement for low-vision readers",
+    "longDescription": "OpenLargePrint turns dense PDFs, law books, Word documents, and presentations into genuine large-print publications with preserved reading order and high optical accuracy."
+  }
+}

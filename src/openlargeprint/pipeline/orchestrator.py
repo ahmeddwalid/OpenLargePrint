@@ -12,6 +12,7 @@ from openlargeprint.exporters import (
     PdfExporter,
     ReaderExporter,
 )
+from openlargeprint.importers.base import CancelCheck, CheckpointCallback, ProgressCallback
 from openlargeprint.importers.office import (
     DocxImporter,
     LibreOfficeBridge,
@@ -51,21 +52,37 @@ class PipelineOrchestrator:
         self.reader_exporter = ReaderExporter()
 
     def _import_by_format(
-        self, input_file: Path, format_type: str, workspace: JobWorkspace
+        self,
+        input_file: Path,
+        format_type: str,
+        workspace: JobWorkspace,
+        progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
+        checkpoint_callback: Optional[CheckpointCallback] = None,
     ) -> DocumentIR:
         """Route to appropriate format importer or legacy bridge (DOC-001, OFF-001..003)."""
         if format_type == "pdf":
-            return self.pdf_importer.import_document(input_file, workspace)
+            return self.pdf_importer.import_document(
+                input_file, workspace, progress_callback, cancel_check, checkpoint_callback
+            )
         elif format_type == "docx":
-            return self.docx_importer.import_document(input_file, workspace)
+            return self.docx_importer.import_document(
+                input_file, workspace, progress_callback, cancel_check, checkpoint_callback
+            )
         elif format_type == "pptx":
-            return self.pptx_importer.import_document(input_file, workspace)
+            return self.pptx_importer.import_document(
+                input_file, workspace, progress_callback, cancel_check, checkpoint_callback
+            )
         elif format_type == "doc":
             modern_path = self.legacy_bridge.convert_to_modern(input_file, "docx", workspace)
-            return self.docx_importer.import_document(modern_path, workspace)
+            return self.docx_importer.import_document(
+                modern_path, workspace, progress_callback, cancel_check, checkpoint_callback
+            )
         elif format_type == "ppt":
             modern_path = self.legacy_bridge.convert_to_modern(input_file, "pptx", workspace)
-            return self.pptx_importer.import_document(modern_path, workspace)
+            return self.pptx_importer.import_document(
+                modern_path, workspace, progress_callback, cancel_check, checkpoint_callback
+            )
         else:
             raise ValueError(f"Unsupported file format for this pipeline: {format_type}")
 
@@ -76,6 +93,9 @@ class PipelineOrchestrator:
         options: Optional[ExportOptions] = None,
         export_format: Optional[ExportFormat] = None,
         page_range: Optional[Tuple[int, int]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
+        checkpoint_callback: Optional[CheckpointCallback] = None,
     ) -> ConversionResult:
         """Execute full conversion pipeline into target format (DOCX, Large PDF, or HTML Reader)."""
         input_file = Path(input_path).resolve()
@@ -104,7 +124,14 @@ class PipelineOrchestrator:
             log_safe_info(f"Starting conversion in isolated workspace: {ws.path.name}")
 
             # 4. Import document into canonical DocumentIR
-            doc_ir = self._import_by_format(input_file, format_type, ws)
+            doc_ir = self._import_by_format(
+                input_file,
+                format_type,
+                ws,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+                checkpoint_callback=checkpoint_callback,
+            )
 
             # 5. Validate canonical DocumentIR (DOC-003, DESIGN.md §3)
             ir_warnings = validate_document_ir(doc_ir)

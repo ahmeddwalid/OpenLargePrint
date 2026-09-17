@@ -71,6 +71,11 @@ def main() -> int:
         "--json", action="store_true", help="Output raw DocumentIR JSON"
     )
 
+    # Sidecar command
+    subparsers.add_parser(
+        "sidecar", help="Run the JSON-Lines sidecar protocol loop for desktop shell integration (DESIGN.md §9)"
+    )
+
     args = parser.parse_args()
 
     try:
@@ -130,6 +135,12 @@ def main() -> int:
                         f"rotation: {page.rotation}°)"
                     )
                 print(f"\nExtracted blocks: {len(doc_ir.blocks)}")
+            return 0
+
+        elif args.command == "sidecar":
+            from openlargeprint.sidecar import SidecarRunner
+            runner = SidecarRunner()
+            runner.run_loop()
             return 0
 
     except Exception as e:

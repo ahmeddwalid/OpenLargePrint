@@ -83,8 +83,15 @@ class NativePdfImporter(BaseImporter):
         self.ocr_engine = ocr_engine or self._router.get_engine(routing_mode)
         self.scanned_extractor = ScannedPageExtractor(self.ocr_engine, dpi=ocr_dpi)
 
-    def import_document(self, file_path: Path, workspace: JobWorkspace) -> DocumentIR:
-        """Parse PDF and construct canonical DocumentIR."""
+    def import_document(
+        self,
+        file_path: Path,
+        workspace: JobWorkspace,
+        progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
+        checkpoint_callback: Optional[CheckpointCallback] = None,
+    ) -> DocumentIR:
+        """Parse PDF and construct canonical DocumentIR with progress and checkpointing (UI-002, UI-003)."""
         log_safe_info(f"Opening PDF document: {file_path.name}")
         pdf = pdfium.PdfDocument(file_path)
         pike_doc = pikepdf.open(file_path)
@@ -96,12 +103,26 @@ class NativePdfImporter(BaseImporter):
 
         try:
             for page_idx in range(page_count):
+                if cancel_check and cancel_check():
+                    log_safe_info("Cancellation signal received during PDF import (UI-002)")
+                    raise InterruptedError("Operation cancelled by user.")
+
                 page_num = page_idx + 1
                 page = pdf[page_idx]
 
                 # 1. Classify page diagnostics (PDF-001, PDF-007)
                 page_meta = classify_pdf_page(page, page_num)
                 pages_metadata.append(page_meta)
+
+                # Send real-time progress event (UI-002)
+                if progress_callback:
+                    stage = "ocr" if page_meta.classification in (PageClassification.SCANNED, PageClassification.BROKEN_DIGITAL) else "extracting"
+                    msg = (
+                        f"Recognizing scanned text — page {page_num} of {page_count}"
+                        if stage == "ocr"
+                        else f"Extracting digital text — page {page_num} of {page_count}"
+                    )
+                    progress_callback(page_num, page_count, stage, msg)
 
                 # 2. Add source-page transition marker (OUT-005)
                 marker_block = Block(
@@ -114,67 +135,97 @@ class NativePdfImporter(BaseImporter):
                 )
                 all_blocks.append(marker_block)
 
-                # 3. Extract lossless embedded images (IMG-001) & query image bounds (PDF-006)
+                page_blocks: List[Block] = []
                 try:
-                    pike_page = pike_doc.pages[page_idx]
-                    images = extract_lossless_images_for_page(
-                        pike_page, page_num, workspace.assets_dir
-                    )
-                    image_objs = list(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]))
-
-                    for idx, img in enumerate(images):
-                        bbox = None
-                        if idx < len(image_objs):
-                            try:
-                                l, b, r, t = image_objs[idx].get_bounds()
-                                bbox = BoundingBox(x0=float(l), y0=float(b), x1=float(r), y1=float(t))
-                            except Exception:
-                                pass
-
-                        # On a scanned page, do not treat full-page scan background as an inline figure
-                        is_scanned_background = (
-                            page_meta.classification == PageClassification.SCANNED
-                            and bbox is not None
-                            and (bbox.width * bbox.height) / (page_meta.width * page_meta.height) > 0.80
+                    # 3. Extract lossless embedded images (IMG-001) & query image bounds (PDF-006)
+                    try:
+                        pike_page = pike_doc.pages[page_idx]
+                        images = extract_lossless_images_for_page(
+                            pike_page, page_num, workspace.assets_dir
                         )
+                        image_objs = list(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]))
 
-                        if not is_scanned_background:
-                            img_block = Block(
-                                id=f"p{page_num}_b{block_counter}",
-                                type=BlockType.IMAGE,
-                                source_page=page_num,
-                                source_bounding_box=bbox,
-                                extraction_method=ExtractionMethod.NATIVE,
-                                image_asset=img,
-                                confidence=1.0,
+                        for idx, img in enumerate(images):
+                            bbox = None
+                            if idx < len(image_objs):
+                                try:
+                                    l, b, r, t = image_objs[idx].get_bounds()
+                                    bbox = BoundingBox(x0=float(l), y0=float(b), x1=float(r), y1=float(t))
+                                except Exception:
+                                    pass
+
+                            # On a scanned page, do not treat full-page scan background as an inline figure
+                            is_scanned_background = (
+                                page_meta.classification == PageClassification.SCANNED
+                                and bbox is not None
+                                and (bbox.width * bbox.height) / (page_meta.width * page_meta.height) > 0.80
                             )
-                            block_counter += 1
-                            all_blocks.append(img_block)
-                except Exception as e:
-                    log_safe_info(f"Image extraction skipped on page {page_num}: {type(e).__name__}")
 
-                # 4. Route page processing according to classification (PDF-001..005)
-                if page_meta.classification == PageClassification.NATIVE:
-                    # Native extraction path (PDF-002: no OCR on native text)
-                    page_blocks = self._extract_native_text(page, page_num, block_counter, page_meta)
-                    block_counter += len(page_blocks)
+                            if not is_scanned_background:
+                                img_block = Block(
+                                    id=f"p{page_num}_b{block_counter}",
+                                    type=BlockType.IMAGE,
+                                    source_page=page_num,
+                                    source_bounding_box=bbox,
+                                    extraction_method=ExtractionMethod.NATIVE,
+                                    image_asset=img,
+                                    confidence=1.0,
+                                )
+                                block_counter += 1
+                                page_blocks.append(img_block)
+                    except Exception as e:
+                        log_safe_info(f"Image extraction skipped on page {page_num}: {type(e).__name__}")
+
+                    # 4. Route page processing according to classification (PDF-001..005)
+                    if page_meta.classification == PageClassification.NATIVE:
+                        # Native extraction path (PDF-002: no OCR on native text)
+                        extracted = self._extract_native_text(page, page_num, block_counter, page_meta)
+                        block_counter += len(extracted)
+                        page_blocks.extend(extracted)
+
+                    elif page_meta.classification in (PageClassification.SCANNED, PageClassification.BROKEN_DIGITAL):
+                        # OCR path for scanned pages and broken-digital fallback (PDF-003, PDF-005)
+                        log_safe_info(
+                            f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
+                        )
+                        extracted = self.scanned_extractor.extract_page(page, page_num, block_counter)
+                        block_counter += len(extracted)
+                        page_blocks.extend(extracted)
+
+                    elif page_meta.classification == PageClassification.MIXED:
+                        # Mixed page reconciliation path (PDF-004)
+                        log_safe_info(f"Page {page_num} routed to mixed reconciliation (PDF-004)")
+                        extracted = self._reconcile_mixed_page(page, page_num, block_counter, page_meta)
+                        block_counter += len(extracted)
+                        page_blocks.extend(extracted)
+
                     all_blocks.extend(page_blocks)
 
-                elif page_meta.classification in (PageClassification.SCANNED, PageClassification.BROKEN_DIGITAL):
-                    # OCR path for scanned pages and broken-digital fallback (PDF-003, PDF-005)
-                    log_safe_info(
-                        f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
-                    )
-                    ocr_blocks = self.scanned_extractor.extract_page(page, page_num, block_counter)
-                    block_counter += len(ocr_blocks)
-                    all_blocks.extend(ocr_blocks)
+                    # 5. Checkpoint callback per page (UI-003)
+                    if checkpoint_callback:
+                        has_warn = any(bool(b.warnings) for b in page_blocks)
+                        warn_msg = None
+                        if has_warn:
+                            for b in page_blocks:
+                                if b.warnings:
+                                    warn_msg = b.warnings[0]
+                                    break
+                        checkpoint_callback(page_num, page_meta.classification, has_warn, warn_msg)
 
-                elif page_meta.classification == PageClassification.MIXED:
-                    # Mixed page reconciliation path (PDF-004)
-                    log_safe_info(f"Page {page_num} routed to mixed reconciliation (PDF-004)")
-                    mixed_blocks = self._reconcile_mixed_page(page, page_num, block_counter, page_meta)
-                    block_counter += len(mixed_blocks)
-                    all_blocks.extend(mixed_blocks)
+                except Exception as page_err:
+                    # UI-003: Single failed page must not discard already-converted pages
+                    log_safe_info(f"Page {page_num} encountered extraction error: {type(page_err).__name__}")
+                    fallback_block = Block(
+                        id=f"p{page_num}_err_fallback",
+                        type=BlockType.PARAGRAPH,
+                        text=f"[Original page {page_num} preserved for review]",
+                        warnings=[f"Page {page_num} extraction failed: {str(page_err)}"],
+                        source_page=page_num,
+                        confidence=0.0,
+                    )
+                    all_blocks.append(fallback_block)
+                    if checkpoint_callback:
+                        checkpoint_callback(page_num, page_meta.classification, True, f"Page {page_num} extraction error")
 
         finally:
             pike_doc.close()

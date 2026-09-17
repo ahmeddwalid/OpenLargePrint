@@ -45,3 +45,12 @@ htmlcov/
 scratch/
 tmp/
 temp/
+
+# Node / UI
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# Rust / Tauri
+src-tauri/target/
+

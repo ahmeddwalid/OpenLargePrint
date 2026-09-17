@@ -1,0 +1,491 @@
+/* OpenLargePrint Accessibility & Subject-Grounded Design System */
+/* Adheres strictly to SPEC.md A11Y-001..005, VIS-001..004, and AGENTS.md §7 */
+
+:root {
+  /* Warm Parchment Light Theme (default) */
+  --bg-primary: #faf8f5;
+  --bg-surface: #f1ede4;
+  --bg-surface-raised: #e8e3d8;
+  --text-primary: #1c1b18;
+  --text-secondary: #4a473f;
+  --text-muted: #736f66;
+  --border-color: #d6d0c2;
+  --border-focus: #9c4a1a;
+  --focus-ring: #9c4a1a;
+  --accent-primary: #9c4a1a;
+  --accent-hover: #803912;
+  --accent-text: #faf8f5;
+  --warning-bg: #fdf3e7;
+  --warning-border: #d97724;
+  --warning-text: #7a3a00;
+  --success-bg: #edf5ea;
+  --success-border: #437a3b;
+  --success-text: #1d4717;
+
+  /* Typography */
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Georgia", "Times New Roman", serif;
+  --font-size-base: 18px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+  --font-size-2xl: 28px;
+  --line-height-base: 1.5;
+
+  /* Sizing & Touch Targets (A11Y-001: minimum 48px) */
+  --touch-target-min: 48px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+/* Sepia Theme */
+[data-theme="sepia"] {
+  --bg-primary: #f4ecd8;
+  --bg-surface: #e9dfc6;
+  --bg-surface-raised: #ded3b7;
+  --text-primary: #2d261e;
+  --text-secondary: #594d3f;
+  --text-muted: #7d705f;
+  --border-color: #cbbe9f;
+  --border-focus: #824317;
+  --focus-ring: #824317;
+  --accent-primary: #824317;
+  --accent-hover: #69320e;
+  --accent-text: #f4ecd8;
+}
+
+/* Dark High-Contrast Theme */
+[data-theme="dark"] {
+  --bg-primary: #161614;
+  --bg-surface: #22221f;
+  --bg-surface-raised: #2d2d29;
+  --text-primary: #f5f4ef;
+  --text-secondary: #cfccc2;
+  --text-muted: #9e9a8f;
+  --border-color: #47453e;
+  --border-focus: #e07a38;
+  --focus-ring: #e07a38;
+  --accent-primary: #d96820;
+  --accent-hover: #f07e35;
+  --accent-text: #161614;
+  --warning-bg: #2d2113;
+  --warning-border: #f09543;
+  --warning-text: #ffcf99;
+  --success-bg: #162414;
+  --success-border: #5fa852;
+  --success-text: #a6e39d;
+}
+
+/* Base Styles */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* Visible Focus Indicator (A11Y-003) */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Skip Link for Screen Readers and Keyboard Users */
+.skip-link {
+  position: absolute;
+  top: -999px;
+  left: 12px;
+  background: var(--accent-primary);
+  color: var(--accent-text);
+  padding: 12px 18px;
+  font-weight: bold;
+  z-index: 1000;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+/* Accessible Interactive Controls (A11Y-001: >= 48px target) */
+button, input, select, .interactive-target {
+  min-height: var(--touch-target-min);
+  font-family: inherit;
+  font-size: inherit;
+}
+
+button {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 22px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  background-color: var(--bg-surface-raised);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Primary Action Button */
+button.primary-btn {
+  background-color: var(--accent-primary);
+  color: var(--accent-text);
+  border-color: var(--accent-primary);
+  font-size: var(--font-size-lg);
+  padding: 12px 28px;
+}
+
+button.primary-btn:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Secondary Button */
+button.secondary-btn {
+  background-color: transparent;
+  border: 2px solid var(--border-color);
+}
+
+/* Application Layout */
+.app-container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* Header */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 20px;
+}
+
+.app-title-group h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.app-title-group p {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.header-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Card Container */
+.panel {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+/* Decision Step */
+.decision-step {
+  margin-bottom: 24px;
+}
+
+.step-label {
+  display: block;
+  font-size: 19px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+/* Radio Option Grid */
+.radio-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.radio-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 18px;
+  background-color: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  min-height: 64px;
+  justify-content: center;
+}
+
+.radio-card:hover {
+  border-color: var(--accent-primary);
+}
+
+.radio-card.selected {
+  border-color: var(--accent-primary);
+  background-color: var(--bg-surface-raised);
+}
+
+.radio-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.radio-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.radio-sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* Drag and Drop Zone */
+.dropzone {
+  border: 2px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 36px 20px;
+  text-align: center;
+  background-color: var(--bg-primary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.dropzone.active {
+  border-color: var(--accent-primary);
+  background-color: var(--bg-surface-raised);
+}
+
+.dropzone-prompt {
+  font-size: 19px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.dropzone-help {
+  font-size: 15px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+/* File Selected Badge */
+.file-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background-color: var(--bg-surface-raised);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-top: 12px;
+}
+
+.file-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-name {
+  font-weight: 600;
+}
+
+.file-meta {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* Disclosure / Advanced Area (UI-001) */
+.disclosure-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 600;
+  padding: 8px 0;
+  cursor: pointer;
+}
+
+.disclosure-toggle:hover {
+  color: var(--text-primary);
+  background: none;
+}
+
+.disclosure-body {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Progress Screen (UI-002) */
+.progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-message {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.progress-bar-wrapper {
+  width: 100%;
+  height: 20px;
+  background-color: var(--bg-primary);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--accent-primary);
+  transition: width 0.25s ease;
+}
+
+/* Review Screen Side-by-Side (UI-004) */
+.review-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.review-banner {
+  padding: 16px 20px;
+  background-color: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  border-radius: var(--radius-md);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.review-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  min-height: 400px;
+}
+
+@media (max-width: 768px) {
+  .review-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.review-pane {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  max-height: 520px;
+}
+
+.pane-title {
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.pane-content {
+  font-size: 20px;
+  line-height: 1.6;
+}
+
+.review-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* Reader View (OUT-002) */
+.reader-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.reader-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+}
+
+.reader-body {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 36px 40px;
+  font-size: var(--reading-size, 20px);
+  line-height: var(--reading-line, 1.5);
+  font-family: var(--font-serif);
+}
+
+/* RTL Support (A11Y-005, LANG-001) */
+[dir="rtl"] {
+  text-align: right;
+}
+
+[dir="rtl"] .skip-link {
+  left: auto;
+  right: 12px;
+}

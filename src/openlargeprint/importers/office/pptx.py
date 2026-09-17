@@ -27,10 +27,20 @@ from openlargeprint.security import JobWorkspace, validate_image_dimensions
 from openlargeprint.text.direction import detect_language, detect_text_direction
 
 
+from openlargeprint.importers.base import BaseImporter, CancelCheck, CheckpointCallback, ProgressCallback
+
+
 class PptxImporter(BaseImporter):
     """Imports PowerPoint (.pptx) presentations into canonical DocumentIR."""
 
-    def import_document(self, file_path: Path, workspace: JobWorkspace) -> DocumentIR:
+    def import_document(
+        self,
+        file_path: Path,
+        workspace: JobWorkspace,
+        progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
+        checkpoint_callback: Optional[CheckpointCallback] = None,
+    ) -> DocumentIR:
         """Parse PowerPoint (.pptx) document and return normalized DocumentIR."""
         path = Path(file_path).resolve()
         try:
@@ -50,6 +60,17 @@ class PptxImporter(BaseImporter):
         first_title: Optional[str] = None
 
         for slide_idx, slide in enumerate(prs.slides, start=1):
+            if cancel_check and cancel_check():
+                raise InterruptedError("Operation cancelled by user.")
+
+            if progress_callback:
+                progress_callback(
+                    slide_idx,
+                    total_slides,
+                    "extracting",
+                    f"Extracting slide presentation — slide {slide_idx} of {total_slides}",
+                )
+
             # 1. Slide PageMetadata
             pages.append(
                 PageMetadata(

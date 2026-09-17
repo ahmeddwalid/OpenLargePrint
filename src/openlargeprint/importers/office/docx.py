@@ -33,10 +33,20 @@ from openlargeprint.security import JobWorkspace, validate_image_dimensions
 from openlargeprint.text.direction import detect_language, detect_text_direction
 
 
+from openlargeprint.importers.base import BaseImporter, CancelCheck, CheckpointCallback, ProgressCallback
+
+
 class DocxImporter(BaseImporter):
     """Imports Word (.docx) documents preserving structural hierarchy into DocumentIR."""
 
-    def import_document(self, file_path: Path, workspace: JobWorkspace) -> DocumentIR:
+    def import_document(
+        self,
+        file_path: Path,
+        workspace: JobWorkspace,
+        progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
+        checkpoint_callback: Optional[CheckpointCallback] = None,
+    ) -> DocumentIR:
         """Parse Word (.docx) document and return normalized DocumentIR."""
         path = Path(file_path).resolve()
         try:
@@ -47,6 +57,9 @@ class DocxImporter(BaseImporter):
         blocks: List[Block] = []
         current_page = 1
         img_counter = 0
+
+        if progress_callback:
+            progress_callback(1, 1, "extracting", f"Importing Word document — {path.name}")
 
         # Always start with page 1 marker
         blocks.append(
