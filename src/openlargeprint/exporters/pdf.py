@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import List, Optional
 from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A3, A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch, mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
@@ -17,9 +21,42 @@ from reportlab.platypus import (
     Spacer,
 )
 
-from openlargeprint.ir.models import Block, BlockType, DocumentIR
+from openlargeprint.ir.models import Block, BlockType, DocumentIR, TextDirection
 from openlargeprint.security.isolation import log_safe_info
+from openlargeprint.text.bidi import reorder_bidi_for_display
 from .base import BaseExporter, ExportOptions, PaperSize, PresetName
+
+
+_ARABIC_FONT_REGISTERED = False
+_ARABIC_FONT_NAME = "OpenLargePrintArabic"
+
+
+def _ensure_arabic_font() -> str:
+    """Ensure an Arabic-capable TrueType font is registered in ReportLab (LANG-001, LANG-002)."""
+    global _ARABIC_FONT_REGISTERED, _ARABIC_FONT_NAME
+    if _ARABIC_FONT_REGISTERED:
+        return _ARABIC_FONT_NAME
+
+    font_candidates = [
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/local/share/fonts/a/Amiri_Regular.ttf",
+        "/usr/share/fonts/amiri-quran-fonts/AmiriQuran.ttf",
+        "/usr/share/fonts/google-noto-vf/NotoSansArabic[wght].ttf",
+        "/usr/local/share/fonts/s/ScheherazadeNew_Regular.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    ]
+
+    for path in font_candidates:
+        if os.path.exists(path):
+            try:
+                pdfmetrics.registerFont(TTFont(_ARABIC_FONT_NAME, path))
+                _ARABIC_FONT_REGISTERED = True
+                return _ARABIC_FONT_NAME
+            except Exception:
+                continue
+
+    return "Helvetica"
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -106,6 +143,7 @@ class PdfExporter(BaseExporter):
         """Create paragraph styles calibrated to the chosen preset (OUT-006, FN-002)."""
         body_pt = options.body_pt
         leading_pt = body_pt * options.line_spacing
+        arabic_font = _ensure_arabic_font()
 
         return {
             "title": ParagraphStyle(
@@ -114,6 +152,17 @@ class PdfExporter(BaseExporter):
                 fontSize=max(28.0, body_pt * 1.5),
                 leading=max(36.0, body_pt * 1.5 * 1.25),
                 textColor=HexColor("#111111"),
+                spaceBefore=16,
+                spaceAfter=14,
+                keepWithNext=True,
+            ),
+            "title_rtl": ParagraphStyle(
+                "TitleRtl",
+                fontName=arabic_font,
+                fontSize=max(28.0, body_pt * 1.5),
+                leading=max(36.0, body_pt * 1.5 * 1.25),
+                textColor=HexColor("#111111"),
+                alignment=TA_RIGHT,
                 spaceBefore=16,
                 spaceAfter=14,
                 keepWithNext=True,
@@ -128,12 +177,34 @@ class PdfExporter(BaseExporter):
                 spaceAfter=10,
                 keepWithNext=True,
             ),
+            "h1_rtl": ParagraphStyle(
+                "H1Rtl",
+                fontName=arabic_font,
+                fontSize=max(26.0, body_pt * 1.4),
+                leading=max(34.0, body_pt * 1.4 * 1.25),
+                textColor=HexColor("#111111"),
+                alignment=TA_RIGHT,
+                spaceBefore=18,
+                spaceAfter=10,
+                keepWithNext=True,
+            ),
             "h2": ParagraphStyle(
                 "H2",
                 fontName="Helvetica-Bold",
                 fontSize=max(23.0, body_pt * 1.25),
                 leading=max(30.0, body_pt * 1.25 * 1.25),
                 textColor=HexColor("#222222"),
+                spaceBefore=14,
+                spaceAfter=8,
+                keepWithNext=True,
+            ),
+            "h2_rtl": ParagraphStyle(
+                "H2Rtl",
+                fontName=arabic_font,
+                fontSize=max(23.0, body_pt * 1.25),
+                leading=max(30.0, body_pt * 1.25 * 1.25),
+                textColor=HexColor("#222222"),
+                alignment=TA_RIGHT,
                 spaceBefore=14,
                 spaceAfter=8,
                 keepWithNext=True,
@@ -148,12 +219,32 @@ class PdfExporter(BaseExporter):
                 spaceAfter=6,
                 keepWithNext=True,
             ),
+            "h3_rtl": ParagraphStyle(
+                "H3Rtl",
+                fontName=arabic_font,
+                fontSize=max(21.0, body_pt * 1.15),
+                leading=max(28.0, body_pt * 1.15 * 1.25),
+                textColor=HexColor("#222222"),
+                alignment=TA_RIGHT,
+                spaceBefore=12,
+                spaceAfter=6,
+                keepWithNext=True,
+            ),
             "body": ParagraphStyle(
                 "Body",
                 fontName="Helvetica",
                 fontSize=body_pt,
                 leading=leading_pt,
                 textColor=HexColor("#111111"),
+                spaceAfter=body_pt * 0.55,
+            ),
+            "body_rtl": ParagraphStyle(
+                "BodyRtl",
+                fontName=arabic_font,
+                fontSize=body_pt,
+                leading=leading_pt,
+                textColor=HexColor("#111111"),
+                alignment=TA_RIGHT,
                 spaceAfter=body_pt * 0.55,
             ),
             "list": ParagraphStyle(
@@ -163,6 +254,16 @@ class PdfExporter(BaseExporter):
                 leading=leading_pt,
                 textColor=HexColor("#111111"),
                 leftIndent=24,
+                spaceAfter=body_pt * 0.35,
+            ),
+            "list_rtl": ParagraphStyle(
+                "ListRtl",
+                fontName=arabic_font,
+                fontSize=body_pt,
+                leading=leading_pt,
+                textColor=HexColor("#111111"),
+                alignment=TA_RIGHT,
+                rightIndent=24,
                 spaceAfter=body_pt * 0.35,
             ),
             "quote": ParagraphStyle(
@@ -175,12 +276,32 @@ class PdfExporter(BaseExporter):
                 spaceBefore=8,
                 spaceAfter=body_pt * 0.5,
             ),
+            "quote_rtl": ParagraphStyle(
+                "QuoteRtl",
+                fontName=arabic_font,
+                fontSize=body_pt,
+                leading=leading_pt,
+                textColor=HexColor("#222222"),
+                alignment=TA_RIGHT,
+                rightIndent=30,
+                spaceBefore=8,
+                spaceAfter=body_pt * 0.5,
+            ),
             "footnote": ParagraphStyle(
                 "Footnote",
                 fontName="Helvetica-Oblique",
                 fontSize=max(14.0, body_pt * 0.8),
                 leading=max(14.0, body_pt * 0.8) * 1.3,
                 textColor=HexColor("#444444"),
+                spaceAfter=8,
+            ),
+            "footnote_rtl": ParagraphStyle(
+                "FootnoteRtl",
+                fontName=arabic_font,
+                fontSize=max(14.0, body_pt * 0.8),
+                leading=max(14.0, body_pt * 0.8) * 1.3,
+                textColor=HexColor("#444444"),
+                alignment=TA_RIGHT,
                 spaceAfter=8,
             ),
             "page_marker": ParagraphStyle(
@@ -205,6 +326,7 @@ class PdfExporter(BaseExporter):
     ) -> List[object]:
         """Convert a semantic Block into ReportLab Platypus flowable elements."""
         flowables: List[object] = []
+        is_rtl = block.text_direction == TextDirection.RTL
 
         # Handle page markers (OUT-005)
         if block.type == BlockType.PAGE_MARKER:
@@ -217,28 +339,42 @@ class PdfExporter(BaseExporter):
         # Handle headings
         if block.type in (BlockType.TITLE, BlockType.HEADING):
             level = block.level or 1
-            style_key = "title" if block.type == BlockType.TITLE else (f"h{level}" if level in (1, 2, 3) else "h3")
-            safe_text = (block.text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            base_key = "title" if block.type == BlockType.TITLE else (f"h{level}" if level in (1, 2, 3) else "h3")
+            style_key = f"{base_key}_rtl" if is_rtl else base_key
+            raw_text = block.text or ""
+            reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL) if is_rtl else raw_text
+            safe_text = reordered.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             flowables.append(Paragraph(safe_text, styles[style_key]))
             return flowables
 
         # Handle lists
         if block.type == BlockType.LIST:
             raw_text = (block.text or "").lstrip("•-* \t")
-            safe_text = f"• &nbsp; {raw_text}".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            flowables.append(Paragraph(safe_text, styles["list"]))
+            if is_rtl:
+                reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL)
+                safe_text = f"{reordered} &nbsp; •".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                flowables.append(Paragraph(safe_text, styles["list_rtl"]))
+            else:
+                safe_text = f"• &nbsp; {raw_text}".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                flowables.append(Paragraph(safe_text, styles["list"]))
             return flowables
 
         # Handle quotes
         if block.type == BlockType.QUOTE:
-            safe_text = (block.text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            flowables.append(Paragraph(safe_text, styles["quote"]))
+            raw_text = block.text or ""
+            reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL) if is_rtl else raw_text
+            safe_text = reordered.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            style_key = "quote_rtl" if is_rtl else "quote"
+            flowables.append(Paragraph(safe_text, styles[style_key]))
             return flowables
 
         # Handle footnotes and captions (FN-002)
         if block.type in (BlockType.FOOTNOTE, BlockType.CAPTION):
-            safe_text = (block.text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            flowables.append(Paragraph(safe_text, styles["footnote"]))
+            raw_text = block.text or ""
+            reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL) if is_rtl else raw_text
+            safe_text = reordered.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            style_key = "footnote_rtl" if is_rtl else "footnote"
+            flowables.append(Paragraph(safe_text, styles[style_key]))
             return flowables
 
         # Handle images (IMG-001, IMG-003)
@@ -255,6 +391,9 @@ class PdfExporter(BaseExporter):
             return flowables
 
         # Regular body paragraph
-        safe_text = (block.text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        flowables.append(Paragraph(safe_text, styles["body"]))
+        raw_text = block.text or ""
+        reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL) if is_rtl else raw_text
+        safe_text = reordered.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        style_key = "body_rtl" if is_rtl else "body"
+        flowables.append(Paragraph(safe_text, styles[style_key]))
         return flowables

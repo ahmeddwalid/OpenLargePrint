@@ -10,7 +10,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Mm, Pt, RGBColor
 
-from openlargeprint.ir.models import Block, BlockType, DocumentIR
+from openlargeprint.ir.models import Block, BlockType, DocumentIR, TextDirection
 from openlargeprint.security.isolation import log_safe_info
 from .base import BaseExporter, ExportOptions, PaperSize, PresetName
 
@@ -117,6 +117,7 @@ class DocxExporter(BaseExporter):
             run.font.size = Pt(size_pt)
             run.font.bold = True
             run.font.color.rgb = RGBColor(20, 20, 20)
+            self._apply_text_direction(p, run, block, options)
             return
 
         # Handle lists
@@ -129,6 +130,7 @@ class DocxExporter(BaseExporter):
             run = p.add_run(raw_text)
             run.font.name = options.font_family
             run.font.size = Pt(options.body_pt)
+            self._apply_text_direction(p, run, block, options)
             return
 
         # Handle quotes
@@ -141,6 +143,7 @@ class DocxExporter(BaseExporter):
             run.font.name = options.font_family
             run.font.size = Pt(options.body_pt)
             run.font.italic = True
+            self._apply_text_direction(p, run, block, options)
             return
 
         # Handle footnotes and captions (FN-002: enforce minimum readable size)
@@ -154,6 +157,7 @@ class DocxExporter(BaseExporter):
             run.font.size = Pt(min_size)
             run.font.italic = True
             run.font.color.rgb = RGBColor(70, 70, 70)
+            self._apply_text_direction(p, run, block, options)
             return
 
         # Handle images (IMG-001, IMG-003)
@@ -181,3 +185,25 @@ class DocxExporter(BaseExporter):
         run.font.name = options.font_family
         run.font.size = Pt(options.body_pt)
         run.font.color.rgb = RGBColor(20, 20, 20)
+        self._apply_text_direction(p, run, block, options)
+
+    def _apply_text_direction(self, p, run, block: Block, options: ExportOptions) -> None:
+        """Apply RTL paragraph alignment and OpenXML attributes if block is RTL (LANG-001)."""
+        if block.text_direction == TextDirection.RTL:
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            pPr = p._p.get_or_add_pPr()
+            if pPr.find(qn("w:bidi")) is None:
+                pPr.append(OxmlElement("w:bidi"))
+
+            rPr = run._r.get_or_add_rPr()
+            if rPr.find(qn("w:rtl")) is None:
+                rPr.append(OxmlElement("w:rtl"))
+
+            # Complex script font for Arabic
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.append(rFonts)
+            rFonts.set(qn("w:cs"), "Traditional Arabic")
+            rFonts.set(qn("w:ascii"), options.font_family)
+            rFonts.set(qn("w:hAnsi"), options.font_family)

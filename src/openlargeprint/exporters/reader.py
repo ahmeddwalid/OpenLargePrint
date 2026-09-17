@@ -7,7 +7,7 @@ import html
 from pathlib import Path
 from typing import Optional
 
-from openlargeprint.ir.models import Block, BlockType, DocumentIR
+from openlargeprint.ir.models import Block, BlockType, DocumentIR, TextDirection
 from openlargeprint.security.isolation import log_safe_info
 from .base import BaseExporter, ExportOptions
 
@@ -57,6 +57,8 @@ class ReaderExporter(BaseExporter):
       --base-font-size: {int(options.body_pt)}px;
       --line-height: {options.line_spacing};
       --reading-width: 85ch;
+      --reading-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      --reading-font-arabic: "Amiri", "Scheherazade New", "Traditional Arabic", "Noto Sans Arabic", "Geeza Pro", "Arial", sans-serif;
       --bg-color: #fcfbf9;
       --surface-color: #ffffff;
       --text-color: #1a1a1a;
@@ -99,12 +101,19 @@ class ReaderExporter(BaseExporter):
     }}
 
     body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-family: var(--reading-font-family);
       background-color: var(--bg-color);
       color: var(--text-color);
       line-height: var(--line-height);
       font-size: var(--base-font-size);
       transition: background-color 0.15s ease, color 0.15s ease;
+    }}
+
+    /* RTL / Arabic support (LANG-001, LANG-002) */
+    [dir="rtl"], .rtl {{
+      direction: rtl;
+      text-align: right;
+      font-family: var(--reading-font-arabic), var(--reading-font-family);
     }}
 
     /* Accessible focus state (A11Y-003) */
@@ -396,31 +405,36 @@ class ReaderExporter(BaseExporter):
                 return b_html, toc_html
             return None, None
 
+        is_rtl = block.text_direction == TextDirection.RTL
+        dir_attr = ' dir="rtl" class="rtl"' if is_rtl else ""
+
         # Headings
         if block.type in (BlockType.TITLE, BlockType.HEADING):
             level = block.level or 1
             tag = "h1" if block.type == BlockType.TITLE or level == 1 else (f"h{min(level, 4)}")
             heading_id = f"heading-{block.id}"
             safe_text = html.escape(block.text or "")
-            b_html = f'<{tag} id="{heading_id}">{safe_text}</{tag}>'
-            toc_html = f'<li><a href="#{heading_id}">{safe_text}</a></li>'
+            b_html = f'<{tag} id="{heading_id}"{dir_attr}>{safe_text}</{tag}>'
+            toc_dir = ' dir="rtl"' if is_rtl else ""
+            toc_html = f'<li><a href="#{heading_id}"{toc_dir}>{safe_text}</a></li>'
             return b_html, toc_html
 
         # Lists
         if block.type == BlockType.LIST:
             raw_text = (block.text or "").lstrip("•-* \t")
             safe_text = html.escape(raw_text)
-            return f"<ul><li>{safe_text}</li></ul>", None
+            return f"<ul{dir_attr}><li>{safe_text}</li></ul>", None
 
         # Quotes
         if block.type == BlockType.QUOTE:
             safe_text = html.escape(block.text or "")
-            return f"<blockquote><p>{safe_text}</p></blockquote>", None
+            return f"<blockquote{dir_attr}><p>{safe_text}</p></blockquote>", None
 
         # Footnotes / Captions
         if block.type in (BlockType.FOOTNOTE, BlockType.CAPTION):
             safe_text = html.escape(block.text or "")
-            return f'<div class="footnote-block"><p>{safe_text}</p></div>', None
+            fn_class = "footnote-block rtl" if is_rtl else "footnote-block"
+            return f'<div class="{fn_class}"{dir_attr}><p>{safe_text}</p></div>', None
 
         # Images (IMG-001)
         if block.type == BlockType.IMAGE and block.image_asset:
@@ -434,4 +448,4 @@ class ReaderExporter(BaseExporter):
 
         # Default body paragraph
         safe_text = html.escape(block.text or "")
-        return f"<p>{safe_text}</p>", None
+        return f"<p{dir_attr}>{safe_text}</p>", None

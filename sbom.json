@@ -102,6 +102,17 @@
       "network_behavior": "none",
       "parses_untrusted_content": false,
       "purpose": "High-quality reflowed large-print PDF generation via Platypus"
+    },
+    {
+      "component": "arabic-reshaper",
+      "version": "3.0.1",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Contextual Arabic glyph shaping (isolated, initial, medial, final forms)"
     }
   ]
 }

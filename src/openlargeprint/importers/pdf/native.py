@@ -25,6 +25,11 @@ from openlargeprint.ir.models import (
 from openlargeprint.ocr.base import DocumentOcrEngine
 from openlargeprint.ocr.router import OcrRouter, RoutingMode
 from openlargeprint.security.isolation import JobWorkspace, log_safe_info
+from openlargeprint.text.direction import (
+    detect_language,
+    detect_text_direction,
+    normalize_arabic_logical_order,
+)
 from .classifier import classify_pdf_page
 from .images import extract_lossless_images_for_page
 from .scanned import ScannedPageExtractor
@@ -267,6 +272,9 @@ class NativePdfImporter(BaseImporter):
             if not text:
                 continue
 
+            # Normalize visual-order Arabic if needed
+            text = normalize_arabic_logical_order(text)
+
             mid_x = (rect[0] + rect[2]) / 2.0
             mid_y = (rect[1] + rect[3]) / 2.0
             char_idx = textpage.get_index(mid_x, mid_y, 10.0, 10.0)
@@ -323,6 +331,10 @@ class NativePdfImporter(BaseImporter):
         if not is_two_column:
             return sorted(lines, key=lambda l: -l.y1)
 
+        # Detect page text direction for multi-column ordering (PDF-003, LANG-002)
+        sample_text = " ".join(l.text for l in lines)
+        page_dir = detect_text_direction(sample_text)
+
         col_top = max(max(l.y1 for l in left_col), max(l.y1 for l in right_col))
         col_bottom = min(min(l.y0 for l in left_col), min(l.y0 for l in right_col))
 
@@ -332,8 +344,13 @@ class NativePdfImporter(BaseImporter):
 
         ordered: List[TextLine] = []
         ordered.extend(sorted(top_headers, key=lambda l: -l.y1))
-        ordered.extend(sorted(left_col, key=lambda l: -l.y1))
-        ordered.extend(sorted(right_col, key=lambda l: -l.y1))
+        if page_dir == TextDirection.RTL:
+            # In RTL scripts (Arabic), Column 1 is on the RIGHT, Column 2 is on the LEFT (LANG-002)
+            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
+            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
+        else:
+            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
+            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
         ordered.extend(sorted(middle_full, key=lambda l: -l.y1))
         ordered.extend(sorted(bottom_footers, key=lambda l: -l.y1))
         return ordered
@@ -360,6 +377,10 @@ class NativePdfImporter(BaseImporter):
                 return
 
             text_content = " ".join(l.text for l in current_lines)
+            normalized_text = normalize_arabic_logical_order(text_content)
+            blk_lang = detect_language(normalized_text)
+            blk_dir = detect_text_direction(normalized_text)
+
             min_x = min(l.x0 for l in current_lines)
             min_y = min(l.y0 for l in current_lines)
             max_x = max(l.x1 for l in current_lines)
@@ -369,8 +390,10 @@ class NativePdfImporter(BaseImporter):
             blk = Block(
                 id=f"p{page_num}_b{idx}",
                 type=current_type,
-                text=text_content,
+                text=normalized_text,
                 level=current_level,
+                language=blk_lang,
+                text_direction=blk_dir,
                 source_page=page_num,
                 source_bounding_box=bbox,
                 extraction_method=ExtractionMethod.NATIVE,

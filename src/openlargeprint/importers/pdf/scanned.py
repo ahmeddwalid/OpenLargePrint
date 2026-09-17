@@ -15,6 +15,7 @@ from openlargeprint.ir.models import (
 )
 from openlargeprint.ocr.base import DocumentOcrEngine, OcrDetectedLine
 from openlargeprint.security.isolation import log_safe_info
+from openlargeprint.text.direction import detect_language, detect_text_direction
 
 
 @dataclass
@@ -130,6 +131,9 @@ class ScannedPageExtractor:
             return sorted(lines, key=lambda l: -l.y1)
 
         # Multi-column layout:
+        sample_text = " ".join(l.text for l in lines)
+        page_dir = detect_text_direction(sample_text)
+
         col_top = max(max(l.y1 for l in left_col), max(l.y1 for l in right_col))
         col_bottom = min(min(l.y0 for l in left_col), min(l.y0 for l in right_col))
 
@@ -139,8 +143,13 @@ class ScannedPageExtractor:
 
         ordered: List[OcrPointLine] = []
         ordered.extend(sorted(top_headers, key=lambda l: -l.y1))
-        ordered.extend(sorted(left_col, key=lambda l: -l.y1))
-        ordered.extend(sorted(right_col, key=lambda l: -l.y1))
+        if page_dir == TextDirection.RTL:
+            # In RTL scripts (Arabic), Column 1 is on the RIGHT, Column 2 is on the LEFT (LANG-002)
+            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
+            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
+        else:
+            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
+            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
         ordered.extend(sorted(middle_full, key=lambda l: -l.y1))
         ordered.extend(sorted(bottom_footers, key=lambda l: -l.y1))
         return ordered
@@ -173,6 +182,8 @@ class ScannedPageExtractor:
 
             text_content = " ".join(l.text for l in current_lines)
             avg_confidence = sum(l.confidence for l in current_lines) / len(current_lines)
+            blk_lang = detect_language(text_content)
+            blk_dir = detect_text_direction(text_content)
 
             # Check OCR-005 quality gates
             block_warnings: List[str] = list(engine_warnings)
@@ -196,6 +207,8 @@ class ScannedPageExtractor:
                 type=current_type,
                 text=text_content,
                 level=current_level,
+                language=blk_lang,
+                text_direction=blk_dir,
                 source_page=page_num,
                 source_bounding_box=bbox,
                 extraction_method=ExtractionMethod.OCR_FAST,
