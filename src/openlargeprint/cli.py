@@ -21,7 +21,7 @@ def main() -> int:
 
     # Convert command
     convert_parser = subparsers.add_parser("convert", help="Convert a document to large-print DOCX, PDF, or Reader HTML")
-    convert_parser.add_argument("input", type=Path, help="Path to input PDF document")
+    convert_parser.add_argument("input", type=Path, help="Path to input document (PDF, DOCX, PPTX, DOC, PPT)")
     convert_parser.add_argument(
         "-o", "--output", type=Path, required=True, help="Path to write output file (.docx, .pdf, .html)"
     )
@@ -66,7 +66,7 @@ def main() -> int:
     inspect_parser = subparsers.add_parser(
         "inspect", help="Inspect and classify document structure without exporting"
     )
-    inspect_parser.add_argument("input", type=Path, help="Path to input PDF document")
+    inspect_parser.add_argument("input", type=Path, help="Path to input document (PDF, DOCX, PPTX, DOC, PPT)")
     inspect_parser.add_argument(
         "--json", action="store_true", help="Output raw DocumentIR JSON"
     )

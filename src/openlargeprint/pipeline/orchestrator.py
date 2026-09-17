@@ -12,6 +12,11 @@ from openlargeprint.exporters import (
     PdfExporter,
     ReaderExporter,
 )
+from openlargeprint.importers.office import (
+    DocxImporter,
+    LibreOfficeBridge,
+    PptxImporter,
+)
 from openlargeprint.importers.pdf.native import NativePdfImporter
 from openlargeprint.ir.models import DocumentIR
 from openlargeprint.ir.validator import validate_document_ir
@@ -38,9 +43,31 @@ class PipelineOrchestrator:
     def __init__(self, routing_mode: RoutingMode = RoutingMode.AUTOMATIC):
         self.routing_mode = routing_mode
         self.pdf_importer = NativePdfImporter(routing_mode=routing_mode)
+        self.docx_importer = DocxImporter()
+        self.pptx_importer = PptxImporter()
+        self.legacy_bridge = LibreOfficeBridge()
         self.docx_exporter = DocxExporter()
         self.pdf_exporter = PdfExporter()
         self.reader_exporter = ReaderExporter()
+
+    def _import_by_format(
+        self, input_file: Path, format_type: str, workspace: JobWorkspace
+    ) -> DocumentIR:
+        """Route to appropriate format importer or legacy bridge (DOC-001, OFF-001..003)."""
+        if format_type == "pdf":
+            return self.pdf_importer.import_document(input_file, workspace)
+        elif format_type == "docx":
+            return self.docx_importer.import_document(input_file, workspace)
+        elif format_type == "pptx":
+            return self.pptx_importer.import_document(input_file, workspace)
+        elif format_type == "doc":
+            modern_path = self.legacy_bridge.convert_to_modern(input_file, "docx", workspace)
+            return self.docx_importer.import_document(modern_path, workspace)
+        elif format_type == "ppt":
+            modern_path = self.legacy_bridge.convert_to_modern(input_file, "pptx", workspace)
+            return self.pptx_importer.import_document(modern_path, workspace)
+        else:
+            raise ValueError(f"Unsupported file format for this pipeline: {format_type}")
 
     def convert(
         self,
@@ -69,8 +96,6 @@ class PipelineOrchestrator:
 
         # 2. Content-based type validation (SEC-001)
         format_type = detect_file_type(input_file)
-        if format_type != "pdf":
-            raise ValueError(f"Unsupported file format for this pipeline: {format_type}")
 
         all_warnings: List[str] = []
 
@@ -78,8 +103,8 @@ class PipelineOrchestrator:
         with JobWorkspace() as ws:
             log_safe_info(f"Starting conversion in isolated workspace: {ws.path.name}")
 
-            # 4. Import document into canonical DocumentIR (native, OCR, or mixed)
-            doc_ir = self.pdf_importer.import_document(input_file, ws)
+            # 4. Import document into canonical DocumentIR
+            doc_ir = self._import_by_format(input_file, format_type, ws)
 
             # 5. Validate canonical DocumentIR (DOC-003, DESIGN.md §3)
             ir_warnings = validate_document_ir(doc_ir)
@@ -113,9 +138,7 @@ class PipelineOrchestrator:
         """Inspect and classify a document into DocumentIR without exporting."""
         input_file = Path(input_path).resolve()
         format_type = detect_file_type(input_file)
-        if format_type != "pdf":
-            raise ValueError(f"Unsupported file format for inspection: {format_type}")
 
         with JobWorkspace() as ws:
-            doc_ir = self.pdf_importer.import_document(input_file, ws)
+            doc_ir = self._import_by_format(input_file, format_type, ws)
             return doc_ir

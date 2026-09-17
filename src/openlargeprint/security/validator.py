@@ -19,7 +19,16 @@ class SecurityValidationError(ValueError):
     pass
 
 
-SupportedFormat = Literal["pdf", "docx", "pptx"]
+import zipfile
+
+SupportedFormat = Literal["pdf", "docx", "pptx", "doc", "ppt"]
+
+# OLE2 Compound File Binary Format magic bytes (D0 CF 11 E0 A1 B1 1A E1)
+OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+# UTF-16LE stream names embedded in OLE2 directory entries
+OLE2_WORD_STREAM = "WordDocument".encode("utf-16le")
+OLE2_PPT_STREAM_1 = "PowerPoint Document".encode("utf-16le")
+OLE2_PPT_STREAM_2 = "Current User".encode("utf-16le")
 
 
 def detect_file_type(path: str | Path) -> SupportedFormat:
@@ -40,20 +49,48 @@ def detect_file_type(path: str | Path) -> SupportedFormat:
             f"File exceeds maximum allowed size ({file_size / (1024*1024):.1f} MB > {MAX_FILE_SIZE_BYTES / (1024*1024):.0f} MB)."
         )
 
-    # Read the first 2048 bytes for magic number analysis
+    # Read the first 4096 bytes for magic number analysis
     with open(file_path, "rb") as f:
-        header = f.read(2048)
+        header = f.read(4096)
 
-    # Check PDF magic bytes (%PDF-) anywhere in first 1024 bytes (per PDF spec)
+    # 1. Check PDF magic bytes (%PDF-) anywhere in first 1024 bytes (per PDF spec)
     if b"%PDF-" in header[:1024]:
         return "pdf"
 
-    # Check ZIP / OOXML magic bytes (PK\x03\x04)
+    # 2. Check ZIP / OpenXML magic bytes (PK\x03\x04)
     if header.startswith(b"PK\x03\x04"):
-        return "docx"
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                names = set(zf.namelist())
+                # Check for Word OpenXML signatures
+                if any(n.startswith("word/") for n in names) or "word/document.xml" in names:
+                    return "docx"
+                # Check for PowerPoint OpenXML signatures
+                if any(n.startswith("ppt/") for n in names) or "ppt/presentation.xml" in names:
+                    return "pptx"
+                raise SecurityValidationError(
+                    "ZIP archive does not contain a valid Word (word/) or PowerPoint (ppt/) structure."
+                )
+        except zipfile.BadZipFile:
+            raise SecurityValidationError("Corrupted or invalid OpenXML ZIP archive.")
+
+    # 3. Check legacy OLE2 binary format (DOC / PPT)
+    if header.startswith(OLE2_MAGIC):
+        # Scan header and subsequent chunks for Word vs PowerPoint stream directory entries
+        with open(file_path, "rb") as f:
+            ole_data = f.read(min(file_size, 512 * 1024))  # Scan first 512KB for directory stream names
+
+        if OLE2_WORD_STREAM in ole_data:
+            return "doc"
+        if OLE2_PPT_STREAM_1 in ole_data or OLE2_PPT_STREAM_2 in ole_data:
+            return "ppt"
+
+        raise SecurityValidationError(
+            "Legacy OLE2 compound file is not a supported Word (.doc) or PowerPoint (.ppt) document."
+        )
 
     raise SecurityValidationError(
-        "File format not recognized or supported. The file must be a genuine PDF or modern Office document."
+        "File format not recognized or supported. The file must be a genuine PDF, DOCX, PPTX, DOC, or PPT document."
     )
 
 
