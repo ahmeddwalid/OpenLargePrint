@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "OpenLargePrint",
+  "version": "0.1.0",
+  "description": "SBOM and license inventory as mandated by LIC-001",
+  "dependencies": [
+    {
+      "component": "pydantic",
+      "version": "2.13.5",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "DocumentIR canonical schema validation and serialization"
+    },
+    {
+      "component": "pypdfium2",
+      "version": "5.13.0",
+      "code_license": "Apache-2.0, BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "PDF inspection, text extraction, font metrics, and page diagnostics"
+    },
+    {
+      "component": "pikepdf",
+      "version": "10.13.0.post1",
+      "code_license": "MPL-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Lossless embedded image extraction and PDF object-level manipulation"
+    },
+    {
+      "component": "python-docx",
+      "version": "1.2.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Generation of large-print DOCX documents"
+    },
+    {
+      "component": "pillow",
+      "version": "12.3.0",
+      "code_license": "HPND",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Image dimension and aspect-ratio validation"
+    }
+  ]
+}
