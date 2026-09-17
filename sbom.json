@@ -58,6 +58,39 @@
       "network_behavior": "none",
       "parses_untrusted_content": true,
       "purpose": "Image dimension and aspect-ratio validation"
+    },
+    {
+      "component": "rapidocr-onnxruntime",
+      "version": "1.4.4",
+      "code_license": "Apache-2.0",
+      "model_weight_license": "Apache-2.0",
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Default CPU-friendly text recognition and layout engine using PaddleOCR ONNX models"
+    },
+    {
+      "component": "onnxruntime",
+      "version": "1.30.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "High-performance on-device CPU inference runtime for ONNX models"
+    },
+    {
+      "component": "opencv-python-headless",
+      "version": "5.0.0.93",
+      "code_license": "Apache-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Headless image array manipulation and geometric transformations for OCR"
     }
   ]
 }

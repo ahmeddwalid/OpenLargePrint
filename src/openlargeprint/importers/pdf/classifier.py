@@ -7,6 +7,8 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 from openlargeprint.ir.models import PageClassification, PageMetadata
 
+REPLACEMENT_GLYPHS = {"\ufffd", "\u25a0", "\u25ae", "\u25af", "\u25fd", "\u25fe"}
+
 
 def classify_pdf_page(page: pdfium.PdfPage, page_number: int) -> PageMetadata:
     """Classify a single PDF page into native, scanned, mixed, or broken-digital (PDF-001).
@@ -45,14 +47,21 @@ def classify_pdf_page(page: pdfium.PdfPage, page_number: int) -> PageMetadata:
     clean_text = text.strip()
     is_broken = False
     if char_count > 0 and len(text) > 0:
-        printable_count = sum(1 for c in text if c.isprintable() or c in "\n\r\t")
-        replacement_count = text.count("\ufffd") + sum(
-            1 for c in text if ord(c) < 32 and c not in "\n\r\t"
+        replacement_count = sum(
+            1
+            for c in text
+            if c in REPLACEMENT_GLYPHS
+            or (0xE000 <= ord(c) <= 0xF8FF)  # Private Use Area (missing ToUnicode CMap)
+            or (ord(c) < 32 and c not in "\n\r\t")
         )
+        printable_count = sum(
+            1 for c in text if (c.isprintable() or c in "\n\r\t") and c not in REPLACEMENT_GLYPHS
+        )
+
         printable_ratio = printable_count / len(text)
         replacement_ratio = replacement_count / len(text)
 
-        # Broken text layer check (e.g. garbled font encodings)
+        # Broken text layer check (e.g. garbled font encodings, missing ToUnicode CMap)
         if printable_ratio < 0.70 or replacement_ratio > 0.15:
             is_broken = True
 
@@ -68,10 +77,8 @@ def classify_pdf_page(page: pdfium.PdfPage, page_number: int) -> PageMetadata:
     if is_broken:
         classification = PageClassification.BROKEN_DIGITAL
     elif len(clean_text) < 20:
-        # Very little or no text
         classification = PageClassification.SCANNED
     else:
-        # Significant text is present
         if raster_coverage > 0.60:
             classification = PageClassification.MIXED
         else:

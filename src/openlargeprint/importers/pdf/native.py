@@ -1,4 +1,4 @@
-"""Native PDF extraction with column reconstruction and provenance (PDF-002, PDF-006)."""
+"""Unified PDF extraction with automatic routing across native, scanned, and broken pages (PDF-001..007)."""
 
 from __future__ import annotations
 
@@ -22,9 +22,12 @@ from openlargeprint.ir.models import (
     PageMetadata,
     TextDirection,
 )
+from openlargeprint.ocr.base import DocumentOcrEngine
+from openlargeprint.ocr.router import OcrRouter, RoutingMode
 from openlargeprint.security.isolation import JobWorkspace, log_safe_info
 from .classifier import classify_pdf_page
 from .images import extract_lossless_images_for_page
+from .scanned import ScannedPageExtractor
 
 
 @dataclass
@@ -58,11 +61,23 @@ class TextLine:
 
 
 class NativePdfImporter(BaseImporter):
-    """Extracts exact text and embedded images from native/born-digital PDFs without OCR (PDF-002)."""
+    """Imports PDF documents, dynamically routing pages across native extraction and OCR (DOC-001, PDF-001..007)."""
+
+    def __init__(
+        self,
+        ocr_engine: Optional[DocumentOcrEngine] = None,
+        routing_mode: RoutingMode = RoutingMode.AUTOMATIC,
+        ocr_dpi: float = 200.0,
+    ):
+        self.routing_mode = routing_mode
+        self.ocr_dpi = ocr_dpi
+        self._router = OcrRouter()
+        self.ocr_engine = ocr_engine or self._router.get_engine(routing_mode)
+        self.scanned_extractor = ScannedPageExtractor(self.ocr_engine, dpi=ocr_dpi)
 
     def import_document(self, file_path: Path, workspace: JobWorkspace) -> DocumentIR:
-        """Parse native PDF and construct canonical DocumentIR."""
-        log_safe_info(f"Opening PDF document for native extraction: {file_path.name}")
+        """Parse PDF and construct canonical DocumentIR."""
+        log_safe_info(f"Opening PDF document: {file_path.name}")
         pdf = pdfium.PdfDocument(file_path)
         pike_doc = pikepdf.open(file_path)
 
@@ -108,57 +123,49 @@ class NativePdfImporter(BaseImporter):
                             except Exception:
                                 pass
 
-                        img_block = Block(
-                            id=f"p{page_num}_b{block_counter}",
-                            type=BlockType.IMAGE,
-                            source_page=page_num,
-                            source_bounding_box=bbox,
-                            extraction_method=ExtractionMethod.NATIVE,
-                            image_asset=img,
-                            confidence=1.0,
+                        # On a scanned page, do not treat the full-page scanned background as an inline figure
+                        is_scanned_background = (
+                            page_meta.classification == PageClassification.SCANNED
+                            and bbox is not None
+                            and (bbox.width * bbox.height) / (page_meta.width * page_meta.height) > 0.80
                         )
-                        block_counter += 1
-                        all_blocks.append(img_block)
+
+                        if not is_scanned_background:
+                            img_block = Block(
+                                id=f"p{page_num}_b{block_counter}",
+                                type=BlockType.IMAGE,
+                                source_page=page_num,
+                                source_bounding_box=bbox,
+                                extraction_method=ExtractionMethod.NATIVE,
+                                image_asset=img,
+                                confidence=1.0,
+                            )
+                            block_counter += 1
+                            all_blocks.append(img_block)
                 except Exception as e:
                     log_safe_info(f"Image extraction skipped on page {page_num}: {type(e).__name__}")
 
-                # 4. If page is confirmed native (or mixed), extract native text
-                if page_meta.classification in (PageClassification.NATIVE, PageClassification.MIXED):
-                    textpage = page.get_textpage()
-                    try:
-                        raw_lines = self._extract_raw_lines(textpage, page_num)
-                    finally:
-                        textpage.close()
+                # 4. Route page processing according to classification (PDF-001..005)
+                if page_meta.classification == PageClassification.NATIVE:
+                    # Native extraction path (PDF-002: no OCR on native text)
+                    page_blocks = self._extract_native_text(page, page_num, block_counter, page_meta)
+                    block_counter += len(page_blocks)
+                    all_blocks.extend(page_blocks)
 
-                    if raw_lines:
-                        # Reconstruct multi-column reading order
-                        ordered_lines = self._order_lines_by_layout(
-                            raw_lines, page_meta.width, page_meta.height
-                        )
-                        # Form semantic blocks (headings, paragraphs, lists)
-                        page_blocks = self._form_semantic_blocks(
-                            ordered_lines, page_num, block_counter
-                        )
-                        block_counter += len(page_blocks)
-                        all_blocks.extend(page_blocks)
-                else:
-                    # Non-native pages in Milestone 1: note warning
-                    # (Scanned/broken pages will be handled by OCR engine in Milestone 2)
+                elif page_meta.classification in (PageClassification.SCANNED, PageClassification.BROKEN_DIGITAL):
+                    # OCR path for scanned pages and broken-digital fallback (PDF-003, PDF-005)
                     log_safe_info(
-                        f"Page {page_num} is classified as {page_meta.classification.value}; "
-                        "marked for review (Principle 3)"
+                        f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
                     )
-                    warning_block = Block(
-                        id=f"p{page_num}_b{block_counter}",
-                        type=BlockType.PARAGRAPH,
-                        text=f"[Page {page_num} is {page_meta.classification.value} - marked for review]",
-                        source_page=page_num,
-                        extraction_method=ExtractionMethod.NATIVE,
-                        confidence=0.5,
-                        warnings=[f"Non-native page format: {page_meta.classification.value}"],
-                    )
-                    block_counter += 1
-                    all_blocks.append(warning_block)
+                    ocr_blocks = self.scanned_extractor.extract_page(page, page_num, block_counter)
+                    block_counter += len(ocr_blocks)
+                    all_blocks.extend(ocr_blocks)
+
+                elif page_meta.classification == PageClassification.MIXED:
+                    # Mixed page path (PDF-004)
+                    page_blocks = self._extract_native_text(page, page_num, block_counter, page_meta)
+                    block_counter += len(page_blocks)
+                    all_blocks.extend(page_blocks)
 
         finally:
             pike_doc.close()
@@ -177,6 +184,26 @@ class NativePdfImporter(BaseImporter):
             blocks=all_blocks,
         )
 
+    def _extract_native_text(
+        self,
+        page: pdfium.PdfPage,
+        page_num: int,
+        start_idx: int,
+        page_meta: PageMetadata,
+    ) -> List[Block]:
+        """Extract native text spans, order columns, and form semantic blocks."""
+        textpage = page.get_textpage()
+        try:
+            raw_lines = self._extract_raw_lines(textpage, page_num)
+        finally:
+            textpage.close()
+
+        if not raw_lines:
+            return []
+
+        ordered_lines = self._order_lines_by_layout(raw_lines, page_meta.width, page_meta.height)
+        return self._form_semantic_blocks(ordered_lines, page_num, start_idx)
+
     def _extract_raw_lines(self, textpage: pdfium.PdfTextPage, page_num: int) -> List[TextLine]:
         """Extract text rectangles with font metrics and coordinates from textpage."""
         rect_count = textpage.count_rects()
@@ -188,7 +215,6 @@ class NativePdfImporter(BaseImporter):
             if not text:
                 continue
 
-            # Query font metrics from midpoint of rect
             mid_x = (rect[0] + rect[2]) / 2.0
             mid_y = (rect[1] + rect[3]) / 2.0
             char_idx = textpage.get_index(mid_x, mid_y, 10.0, 10.0)
@@ -231,31 +257,20 @@ class NativePdfImporter(BaseImporter):
         right_col: List[TextLine] = []
         full_width: List[TextLine] = []
 
-        # Analyze column distribution
         for line in lines:
             if line.x0 < mid_x * 0.85 and line.x1 > mid_x * 1.15:
-                # Spans across center: full width
                 full_width.append(line)
             elif line.x1 <= mid_x + 15:
-                # Confined to left half
                 left_col.append(line)
             elif line.x0 >= mid_x - 15:
-                # Confined to right half
                 right_col.append(line)
             else:
                 full_width.append(line)
 
-        # Multi-column check: both columns must have substantial lines
         is_two_column = len(left_col) >= 2 and len(right_col) >= 2
         if not is_two_column:
-            # Single column: sort strictly top-to-bottom (descending Y in PDF coordinates)
             return sorted(lines, key=lambda l: -l.y1)
 
-        # In two-column mode:
-        # 1. Full-width top headers
-        # 2. Left column (top-to-bottom)
-        # 3. Right column (top-to-bottom)
-        # 4. Full-width bottom footers / notes
         col_top = max(max(l.y1 for l in left_col), max(l.y1 for l in right_col))
         col_bottom = min(min(l.y0 for l in left_col), min(l.y0 for l in right_col))
 
@@ -269,7 +284,6 @@ class NativePdfImporter(BaseImporter):
         ordered.extend(sorted(right_col, key=lambda l: -l.y1))
         ordered.extend(sorted(middle_full, key=lambda l: -l.y1))
         ordered.extend(sorted(bottom_footers, key=lambda l: -l.y1))
-
         return ordered
 
     def _form_semantic_blocks(
@@ -279,7 +293,6 @@ class NativePdfImporter(BaseImporter):
         if not lines:
             return []
 
-        # Find median/typical body font size
         font_sizes = sorted(l.font_size for l in lines)
         body_font_size = font_sizes[len(font_sizes) // 2]
 
@@ -295,7 +308,6 @@ class NativePdfImporter(BaseImporter):
                 return
 
             text_content = " ".join(l.text for l in current_lines)
-            # Compute union bounding box
             min_x = min(l.x0 for l in current_lines)
             min_y = min(l.y0 for l in current_lines)
             max_x = max(l.x1 for l in current_lines)
@@ -319,7 +331,6 @@ class NativePdfImporter(BaseImporter):
             current_level = None
 
         for line in lines:
-            # Check for heading
             is_heading = False
             heading_level = None
 
@@ -333,7 +344,6 @@ class NativePdfImporter(BaseImporter):
                 is_heading = True
                 heading_level = 3
 
-            # Check for list item
             is_list_item = line.text.startswith(("- ", "* ", "• ", "\u2022 ", "\u25e6 ")) or (
                 len(line.text) > 3 and line.text[0].isdigit() and line.text[1:3] in (". ", ") ")
             )
@@ -350,14 +360,11 @@ class NativePdfImporter(BaseImporter):
                 current_lines.append(line)
                 flush_block()
             else:
-                # Regular paragraph text: check continuity
                 if current_lines:
                     prev = current_lines[-1]
-                    # Check vertical distance
                     gap = prev.y0 - line.y1
                     same_column = abs(prev.x0 - line.x0) < 50
                     if gap > 2.0 * prev.height or not same_column:
-                        # New paragraph
                         flush_block()
                 current_lines.append(line)
 

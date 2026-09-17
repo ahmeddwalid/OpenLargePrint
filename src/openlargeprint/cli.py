@@ -8,6 +8,7 @@ from pathlib import Path
 
 from openlargeprint.exporters import ExportOptions, PaperSize, PresetName
 from openlargeprint.ir.serialization import document_to_json
+from openlargeprint.ocr.router import RoutingMode
 from openlargeprint.pipeline import PipelineOrchestrator
 
 
@@ -37,6 +38,12 @@ def main() -> int:
         help="Paper size target: A4 (default) or A3",
     )
     convert_parser.add_argument(
+        "--mode",
+        choices=[m.value for m in RoutingMode],
+        default=RoutingMode.AUTOMATIC.value,
+        help="Recognition routing mode: Automatic (default), Fast, or Maximum accuracy",
+    )
+    convert_parser.add_argument(
         "--no-page-markers",
         action="store_true",
         help="Do not insert 'Original page N' transition markers",
@@ -52,10 +59,12 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-    orchestrator = PipelineOrchestrator()
 
     try:
         if args.command == "convert":
+            routing_mode = RoutingMode(args.mode)
+            orchestrator = PipelineOrchestrator(routing_mode=routing_mode)
+
             preset_enum = PresetName(args.preset)
             paper_size_enum = PaperSize(args.paper_size)
             options = ExportOptions(
@@ -68,6 +77,7 @@ def main() -> int:
             print(f"Successfully converted: {args.input.name} -> {args.output.name}")
             print(f"  Preset: {args.preset} ({options.body_pt}pt, line spacing {options.line_spacing})")
             print(f"  Paper size: {args.paper_size}")
+            print(f"  Routing mode: {args.mode}")
             print(f"  Total pages processed: {result.document_ir.metadata.page_count}")
             print(f"  Total semantic blocks: {len(result.document_ir.blocks)}")
             print("  Note: Print at 100% / actual size (not 'fit to page') to preserve text size.")
@@ -79,6 +89,7 @@ def main() -> int:
             return 0
 
         elif args.command == "inspect":
+            orchestrator = PipelineOrchestrator()
             doc_ir = orchestrator.inspect(args.input)
             if args.json:
                 print(document_to_json(doc_ir))

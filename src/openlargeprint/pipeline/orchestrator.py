@@ -1,4 +1,4 @@
-"""End-to-end document conversion orchestrator (DOC-001, SEC-004)."""
+"""End-to-end document conversion orchestrator with OCR routing (DOC-001, OCR-001, SEC-004)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from openlargeprint.exporters import DocxExporter, ExportOptions
 from openlargeprint.importers.pdf.native import NativePdfImporter
 from openlargeprint.ir.models import DocumentIR
 from openlargeprint.ir.validator import validate_document_ir
+from openlargeprint.ocr.router import RoutingMode
 from openlargeprint.security import JobWorkspace, detect_file_type, log_safe_info
 
 
@@ -26,8 +27,9 @@ class ConversionResult:
 class PipelineOrchestrator:
     """Coordinates the full document reconstruction pipeline."""
 
-    def __init__(self):
-        self.pdf_importer = NativePdfImporter()
+    def __init__(self, routing_mode: RoutingMode = RoutingMode.AUTOMATIC):
+        self.routing_mode = routing_mode
+        self.pdf_importer = NativePdfImporter(routing_mode=routing_mode)
         self.docx_exporter = DocxExporter()
 
     def convert(
@@ -54,14 +56,14 @@ class PipelineOrchestrator:
         with JobWorkspace() as ws:
             log_safe_info(f"Starting conversion in isolated workspace: {ws.path.name}")
 
-            # 3. Import document into canonical DocumentIR
+            # 3. Import document into canonical DocumentIR (native or OCR)
             doc_ir = self.pdf_importer.import_document(input_file, ws)
 
             # 4. Validate canonical DocumentIR (DOC-003, DESIGN.md §3)
             ir_warnings = validate_document_ir(doc_ir)
             all_warnings.extend(ir_warnings)
 
-            # 5. Export to large-print DOCX
+            # 5. Export to large-print DOCX using the unmodified DocxExporter (OUT-001)
             self.docx_exporter.export(doc_ir, output_file, options)
 
         log_safe_info("Conversion finished successfully")
