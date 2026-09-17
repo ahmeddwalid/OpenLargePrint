@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import re
+import tempfile
 from typing import List, Optional, Tuple
+import uuid
 import pypdfium2 as pdfium
 
 from openlargeprint.ir.models import (
@@ -11,6 +15,9 @@ from openlargeprint.ir.models import (
     BlockType,
     BoundingBox,
     ExtractionMethod,
+    ImageAsset,
+    TableCell,
+    TableStructure,
     TextDirection,
 )
 from openlargeprint.ocr.base import DocumentOcrEngine, OcrDetectedLine
@@ -93,14 +100,44 @@ class ScannedPageExtractor:
                 )
             )
 
-        # 4. Reconstruct multi-column reading order (PDF-003)
-        ordered_lines = self._order_lines_by_columns(point_lines, page_w_pt, page_h_pt)
-
-        # 5. Form semantic blocks with confidence and warnings (OCR-004, OCR-005)
-        blocks = self._cluster_semantic_blocks(
-            ordered_lines, page_num, start_block_idx, ocr_res.warnings
+        # 4. Detect and extract tables before column ordering (TBL-001)
+        non_table_lines, table_blocks = self._extract_tables(
+            point_lines, page_num, start_block_idx, page_w_pt, page_h_pt, pil_img, scale
         )
-        return blocks
+        idx_after_tables = start_block_idx + len(table_blocks)
+
+        # 5. Reconstruct multi-column reading order (PDF-003)
+        ordered_lines = self._order_lines_by_columns(non_table_lines, page_w_pt, page_h_pt)
+
+        # 6. Form semantic blocks with confidence and warnings (OCR-004, OCR-005, FN-001)
+        text_blocks = self._cluster_semantic_blocks(
+            ordered_lines, page_num, idx_after_tables, ocr_res.warnings, page_h_pt
+        )
+
+        if not table_blocks:
+            return text_blocks
+
+        all_blocks: List[Block] = []
+        tbl_idx = 0
+        sorted_tables = sorted(
+            table_blocks,
+            key=lambda b: -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
+        )
+        for tb in text_blocks:
+            tb_y = tb.source_bounding_box.y1 if tb.source_bounding_box else 0.0
+            while tbl_idx < len(sorted_tables):
+                curr_tbl = sorted_tables[tbl_idx]
+                tbl_y = curr_tbl.source_bounding_box.y1 if curr_tbl.source_bounding_box else 0.0
+                if tbl_y >= tb_y:
+                    all_blocks.append(curr_tbl)
+                    tbl_idx += 1
+                else:
+                    break
+            all_blocks.append(tb)
+        while tbl_idx < len(sorted_tables):
+            all_blocks.append(sorted_tables[tbl_idx])
+            tbl_idx += 1
+        return all_blocks
 
     def _order_lines_by_columns(
         self, lines: List[OcrPointLine], page_w: float, page_h: float
@@ -154,18 +191,176 @@ class ScannedPageExtractor:
         ordered.extend(sorted(bottom_footers, key=lambda l: -l.y1))
         return ordered
 
+    def _extract_tables(
+        self,
+        lines: List[OcrPointLine],
+        page_num: int,
+        start_idx: int,
+        page_w: float,
+        page_h: float,
+        pil_img,
+        scale: float,
+    ) -> Tuple[List[OcrPointLine], List[Block]]:
+        """Identify multi-column aligned grids from OCR lines and construct TableStructure with crop (TBL-001)."""
+        if len(lines) < 4:
+            return lines, []
+
+        rows_by_y: List[List[OcrPointLine]] = []
+        sorted_by_y = sorted(lines, key=lambda l: -l.y0)
+
+        for line in sorted_by_y:
+            placed = False
+            for r in rows_by_y:
+                if abs(r[0].y0 - line.y0) <= 8.0 and abs(r[0].y1 - line.y1) <= 8.0:
+                    r.append(line)
+                    placed = True
+                    break
+            if not placed:
+                rows_by_y.append([line])
+
+        for r in rows_by_y:
+            r.sort(key=lambda l: l.x0)
+
+        multi_col_rows: List[Tuple[int, List[OcrPointLine]]] = []
+        for r_idx, r in enumerate(rows_by_y):
+            if len(r) >= 2:
+                has_gaps = all(r[i + 1].x0 - r[i].x1 >= 8.0 for i in range(len(r) - 1))
+                if has_gaps:
+                    multi_col_rows.append((r_idx, r))
+
+        if len(multi_col_rows) < 2:
+            return lines, []
+
+        table_clusters: List[List[List[OcrPointLine]]] = []
+        curr_cluster: List[List[OcrPointLine]] = []
+        prev_r_idx = -99
+
+        for r_idx, r in multi_col_rows:
+            if curr_cluster and (r_idx - prev_r_idx > 2 or abs(len(r) - len(curr_cluster[-1])) > 1):
+                if len(curr_cluster) >= 2:
+                    table_clusters.append(curr_cluster)
+                curr_cluster = []
+            curr_cluster.append(r)
+            prev_r_idx = r_idx
+
+        if len(curr_cluster) >= 2:
+            table_clusters.append(curr_cluster)
+
+        if not table_clusters:
+            return lines, []
+
+        table_blocks: List[Block] = []
+        consumed_line_ids: set[int] = set()
+        idx = start_idx
+
+        for cluster in table_clusters:
+            all_x0s = sorted(l.x0 for r in cluster for l in r)
+            col_anchors: List[float] = []
+            for x in all_x0s:
+                if not col_anchors or (x - col_anchors[-1] > 25.0):
+                    col_anchors.append(x)
+
+            if len(col_anchors) < 2:
+                continue
+
+            # Invariant: Disambiguate 2-column page layout from a table
+            if len(col_anchors) == 2:
+                avg_len = sum(len(l.text) for r in cluster for l in r) / max(1, sum(len(r) for r in cluster))
+                max_w = max((l.x1 - l.x0) for r in cluster for l in r)
+                if avg_len > 35 or max_w > 0.30 * page_w:
+                    continue
+
+            grid: List[List[TableCell]] = []
+            all_cluster_lines: List[OcrPointLine] = []
+
+            for r_idx, row_lines in enumerate(cluster):
+                row_cells: List[TableCell] = [
+                    TableCell(text="", is_header=(r_idx == 0)) for _ in col_anchors
+                ]
+                for line in row_lines:
+                    all_cluster_lines.append(line)
+                    consumed_line_ids.add(id(line))
+                    best_c = 0
+                    min_dist = 9999.0
+                    for c_idx, anchor in enumerate(col_anchors):
+                        dist = abs(line.x0 - anchor)
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_c = c_idx
+                    existing = row_cells[best_c].text
+                    row_cells[best_c].text = (existing + " " + line.text).strip() if existing else line.text
+
+                grid.append(row_cells)
+
+            has_cells = any(any(c.text for c in row) for row in grid)
+            if not has_cells:
+                continue
+
+            min_x = min(l.x0 for l in all_cluster_lines)
+            min_y = min(l.y0 for l in all_cluster_lines)
+            max_x = max(l.x1 for l in all_cluster_lines)
+            max_y = max(l.y1 for l in all_cluster_lines)
+            bbox = BoundingBox(x0=min_x, y0=min_y, x1=max_x, y1=max_y)
+
+            # Crop table region from scanned page bitmap for retained visual fallback (TBL-001)
+            image_asset: Optional[ImageAsset] = None
+            try:
+                px_x0 = max(0, int(min_x * scale) - 6)
+                px_y0 = max(0, int((page_h - max_y) * scale) - 6)
+                px_x1 = min(pil_img.width, int(max_x * scale) + 6)
+                px_y1 = min(pil_img.height, int((page_h - min_y) * scale) + 6)
+                if px_x1 > px_x0 and px_y1 > px_y0:
+                    table_crop = pil_img.crop((px_x0, px_y0, px_x1, px_y1))
+                    crop_id = str(uuid.uuid4())[:8]
+                    crop_path = Path(tempfile.gettempdir()) / f"table_{page_num}_{crop_id}.png"
+                    table_crop.save(crop_path, format="PNG")
+                    image_asset = ImageAsset(
+                        asset_id=f"asset_tbl_{crop_id}",
+                        file_path=str(crop_path),
+                        mime_type="image/png",
+                        width=table_crop.width,
+                        height=table_crop.height,
+                        alt_text=f"Original table scan from page {page_num}",
+                    )
+            except Exception:
+                image_asset = None
+
+            table_struct = TableStructure(rows=grid, has_header=True)
+            tbl_text = table_struct.to_markdown_table()
+            tbl_lang = detect_language(tbl_text)
+            tbl_dir = detect_text_direction(tbl_text)
+
+            tbl_block = Block(
+                id=f"p{page_num}_tbl{idx}",
+                type=BlockType.TABLE,
+                text=tbl_text,
+                table_structure=table_struct,
+                image_asset=image_asset,
+                source_page=page_num,
+                source_bounding_box=bbox,
+                extraction_method=ExtractionMethod.OCR_FAST,
+                confidence=0.95,
+                language=tbl_lang,
+                text_direction=tbl_dir,
+            )
+            table_blocks.append(tbl_block)
+            idx += 1
+
+        remaining_lines = [l for l in lines if id(l) not in consumed_line_ids]
+        return remaining_lines, table_blocks
+
     def _cluster_semantic_blocks(
         self,
         lines: List[OcrPointLine],
         page_num: int,
         start_idx: int,
         engine_warnings: List[str],
+        page_h: float = 792.0,
     ) -> List[Block]:
-        """Group OCR lines into semantic blocks (headings, paragraphs, lists) with warnings."""
+        """Group OCR lines into semantic blocks (headings, paragraphs, lists, footnotes, captions) with warnings."""
         if not lines:
             return []
 
-        # Find median line height to calibrate heading and paragraph thresholds
         sorted_heights = sorted(l.height for l in lines)
         body_height = sorted_heights[len(sorted_heights) // 2]
 
@@ -185,12 +380,10 @@ class ScannedPageExtractor:
             blk_lang = detect_language(text_content)
             blk_dir = detect_text_direction(text_content)
 
-            # Check OCR-005 quality gates
             block_warnings: List[str] = list(engine_warnings)
             if avg_confidence < 0.70:
                 block_warnings.append(f"Low OCR confidence ({avg_confidence:.2f})")
 
-            # Check for gibberish/replacement characters (OCR-005)
             replacement_count = text_content.count("\ufffd")
             if replacement_count > 0:
                 block_warnings.append(f"Contains {replacement_count} replacement characters")
@@ -222,23 +415,50 @@ class ScannedPageExtractor:
             current_level = None
 
         for line in lines:
-            # Check for heading
+            # 1. Footnote detection (FN-001, FN-002)
+            is_at_bottom = line.y1 <= 0.28 * page_h
+            starts_with_fn_marker = bool(
+                re.match(r"^(?:\[\d+\]|\d+[\.\)]|\*|¹|²|³|†|‡|\d+\s+)", line.text)
+            )
+            is_smaller = line.height <= 0.90 * body_height
+            is_footnote = is_at_bottom and (
+                starts_with_fn_marker or (is_smaller and current_type == BlockType.FOOTNOTE)
+            )
+
+            # 2. Caption detection
+            is_caption = bool(
+                re.match(
+                    r"^(?:Figure|Fig\.|Table|Exhibit|Illustration|جدول|شكل)\s+(?:\d+|[A-ZIVX]+)(?::|\.|\s-|\s—)",
+                    line.text,
+                    re.IGNORECASE,
+                )
+            )
+
             is_heading = False
             heading_level = None
+            if not is_footnote and not is_caption:
+                if line.height >= 1.5 * body_height:
+                    is_heading = True
+                    heading_level = 1
+                elif line.height >= 1.25 * body_height:
+                    is_heading = True
+                    heading_level = 2
 
-            if line.height >= 1.5 * body_height:
-                is_heading = True
-                heading_level = 1
-            elif line.height >= 1.25 * body_height:
-                is_heading = True
-                heading_level = 2
-
-            # Check for list item
             is_list = line.text.startswith(("- ", "* ", "• ", "\u2022 ", "\u25e6 ")) or (
                 len(line.text) > 3 and line.text[0].isdigit() and line.text[1:3] in (". ", ") ")
             )
 
-            if is_heading:
+            if is_footnote:
+                if current_type != BlockType.FOOTNOTE or starts_with_fn_marker:
+                    flush_block()
+                    current_type = BlockType.FOOTNOTE
+                current_lines.append(line)
+            elif is_caption:
+                flush_block()
+                current_type = BlockType.CAPTION
+                current_lines.append(line)
+                flush_block()
+            elif is_heading:
                 flush_block()
                 current_type = BlockType.HEADING
                 current_level = heading_level

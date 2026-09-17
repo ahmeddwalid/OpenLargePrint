@@ -20,8 +20,11 @@ from openlargeprint.ir.models import (
     ImageAsset,
     PageClassification,
     PageMetadata,
+    TableCell,
+    TableStructure,
     TextDirection,
 )
+import re
 from openlargeprint.ocr.base import DocumentOcrEngine
 from openlargeprint.ocr.router import OcrRouter, RoutingMode
 from openlargeprint.security.isolation import JobWorkspace, log_safe_info
@@ -258,8 +261,180 @@ class NativePdfImporter(BaseImporter):
         if not raw_lines:
             return []
 
-        ordered_lines = self._order_lines_by_layout(raw_lines, page_meta.width, page_meta.height)
-        return self._form_semantic_blocks(ordered_lines, page_num, start_idx)
+        # 1. Detect and extract tables before column ordering (TBL-001)
+        non_table_lines, table_blocks = self._extract_tables(raw_lines, page_num, start_idx, page_meta)
+        idx_after_tables = start_idx + len(table_blocks)
+
+        # 2. Reconstruct column order for regular text
+        ordered_lines = self._order_lines_by_layout(non_table_lines, page_meta.width, page_meta.height)
+
+        # 3. Form semantic blocks (headings, paragraphs, lists, footnotes, captions)
+        text_blocks = self._form_semantic_blocks(
+            ordered_lines, page_num, idx_after_tables, page_meta.height
+        )
+
+        # 4. If table blocks were extracted, insert them in reading order without
+        # disrupting multi-column ordering of text_blocks
+        if not table_blocks:
+            return text_blocks
+
+        all_blocks: List[Block] = []
+        tbl_idx = 0
+        sorted_tables = sorted(
+            table_blocks,
+            key=lambda b: -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
+        )
+        for tb in text_blocks:
+            tb_y = tb.source_bounding_box.y1 if tb.source_bounding_box else 0.0
+            while tbl_idx < len(sorted_tables):
+                curr_tbl = sorted_tables[tbl_idx]
+                tbl_y = curr_tbl.source_bounding_box.y1 if curr_tbl.source_bounding_box else 0.0
+                if tbl_y >= tb_y:
+                    all_blocks.append(curr_tbl)
+                    tbl_idx += 1
+                else:
+                    break
+            all_blocks.append(tb)
+        while tbl_idx < len(sorted_tables):
+            all_blocks.append(sorted_tables[tbl_idx])
+            tbl_idx += 1
+        return all_blocks
+
+    def _extract_tables(
+        self,
+        lines: List[TextLine],
+        page_num: int,
+        start_idx: int,
+        page_meta: PageMetadata,
+    ) -> Tuple[List[TextLine], List[Block]]:
+        """Identify multi-column aligned grids and construct TableStructure blocks (TBL-001)."""
+        if len(lines) < 4:
+            return lines, []
+
+        # 1. Group lines by horizontal row bands (similar y0 within 6pt tolerance)
+        rows_by_y: List[List[TextLine]] = []
+        sorted_by_y = sorted(lines, key=lambda l: -l.y0)
+
+        for line in sorted_by_y:
+            placed = False
+            for r in rows_by_y:
+                if abs(r[0].y0 - line.y0) <= 6.0 and abs(r[0].y1 - line.y1) <= 6.0:
+                    r.append(line)
+                    placed = True
+                    break
+            if not placed:
+                rows_by_y.append([line])
+
+        for r in rows_by_y:
+            r.sort(key=lambda l: l.x0)
+
+        # 2. Identify candidate multi-column rows (>= 2 cells separated by >= 8pt horizontal gap)
+        multi_col_rows: List[Tuple[int, List[TextLine]]] = []
+        for r_idx, r in enumerate(rows_by_y):
+            if len(r) >= 2:
+                has_gaps = all(r[i + 1].x0 - r[i].x1 >= 8.0 for i in range(len(r) - 1))
+                if has_gaps:
+                    multi_col_rows.append((r_idx, r))
+
+        if len(multi_col_rows) < 2:
+            return lines, []
+
+        # 3. Find contiguous clusters of multi-column rows
+        table_clusters: List[List[List[TextLine]]] = []
+        curr_cluster: List[List[TextLine]] = []
+        prev_r_idx = -99
+
+        for r_idx, r in multi_col_rows:
+            if curr_cluster and (r_idx - prev_r_idx > 2 or abs(len(r) - len(curr_cluster[-1])) > 1):
+                if len(curr_cluster) >= 2:
+                    table_clusters.append(curr_cluster)
+                curr_cluster = []
+            curr_cluster.append(r)
+            prev_r_idx = r_idx
+
+        if len(curr_cluster) >= 2:
+            table_clusters.append(curr_cluster)
+
+        if not table_clusters:
+            return lines, []
+
+        table_blocks: List[Block] = []
+        consumed_line_ids: set[int] = set()
+        idx = start_idx
+
+        for cluster in table_clusters:
+            all_x0s = sorted(l.x0 for r in cluster for l in r)
+            col_anchors: List[float] = []
+            for x in all_x0s:
+                if not col_anchors or (x - col_anchors[-1] > 25.0):
+                    col_anchors.append(x)
+
+            if len(col_anchors) < 2:
+                continue
+
+            # Invariant: Disambiguate 2-column page layout from a table.
+            # If there are only 2 columns, and both columns span wide portions of the page (> 30% page width each)
+            # or lines are long (> 35 chars average), it is a 2-column page layout, NOT a table!
+            if len(col_anchors) == 2:
+                avg_len = sum(len(l.text) for r in cluster for l in r) / max(1, sum(len(r) for r in cluster))
+                max_w = max((l.x1 - l.x0) for r in cluster for l in r)
+                if avg_len > 35 or max_w > 0.30 * page_meta.width:
+                    continue
+
+            grid: List[List[TableCell]] = []
+            all_cluster_lines: List[TextLine] = []
+
+            for r_idx, row_lines in enumerate(cluster):
+                row_cells: List[TableCell] = [
+                    TableCell(text="", is_header=(r_idx == 0)) for _ in col_anchors
+                ]
+                for line in row_lines:
+                    all_cluster_lines.append(line)
+                    consumed_line_ids.add(id(line))
+                    best_c = 0
+                    min_dist = 9999.0
+                    for c_idx, anchor in enumerate(col_anchors):
+                        dist = abs(line.x0 - anchor)
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_c = c_idx
+                    existing = row_cells[best_c].text
+                    row_cells[best_c].text = (existing + " " + line.text).strip() if existing else line.text
+
+                grid.append(row_cells)
+
+            has_cells = any(any(c.text for c in row) for row in grid)
+            if not has_cells:
+                continue
+
+            min_x = min(l.x0 for l in all_cluster_lines)
+            min_y = min(l.y0 for l in all_cluster_lines)
+            max_x = max(l.x1 for l in all_cluster_lines)
+            max_y = max(l.y1 for l in all_cluster_lines)
+            bbox = BoundingBox(x0=min_x, y0=min_y, x1=max_x, y1=max_y)
+
+            table_struct = TableStructure(rows=grid, has_header=True)
+            tbl_text = table_struct.to_markdown_table()
+            tbl_lang = detect_language(tbl_text)
+            tbl_dir = detect_text_direction(tbl_text)
+
+            tbl_block = Block(
+                id=f"p{page_num}_tbl{idx}",
+                type=BlockType.TABLE,
+                text=tbl_text,
+                table_structure=table_struct,
+                source_page=page_num,
+                source_bounding_box=bbox,
+                extraction_method=ExtractionMethod.NATIVE,
+                confidence=1.0,
+                language=tbl_lang,
+                text_direction=tbl_dir,
+            )
+            table_blocks.append(tbl_block)
+            idx += 1
+
+        remaining_lines = [l for l in lines if id(l) not in consumed_line_ids]
+        return remaining_lines, table_blocks
 
     def _extract_raw_lines(self, textpage: pdfium.PdfTextPage, page_num: int) -> List[TextLine]:
         """Extract text rectangles with font metrics and coordinates from textpage."""
@@ -356,9 +531,13 @@ class NativePdfImporter(BaseImporter):
         return ordered
 
     def _form_semantic_blocks(
-        self, lines: List[TextLine], page_num: int, start_idx: int
+        self,
+        lines: List[TextLine],
+        page_num: int,
+        start_idx: int,
+        page_height: float = 792.0,
     ) -> List[Block]:
-        """Cluster ordered lines into paragraphs, headings, and lists (DOC-002, PDF-006)."""
+        """Cluster ordered lines into paragraphs, headings, lists, footnotes, and captions (DOC-002, PDF-006, FN-001)."""
         if not lines:
             return []
 
@@ -406,24 +585,54 @@ class NativePdfImporter(BaseImporter):
             current_level = None
 
         for line in lines:
+            # 1. Footnote detection (FN-001, FN-002)
+            # Located in bottom 28% of page with footnote marker or smaller font
+            is_at_page_bottom = line.y1 <= 0.28 * page_height
+            is_smaller_font = line.font_size <= 0.92 * body_font_size
+            starts_with_fn_marker = bool(
+                re.match(r"^(?:\[\d+\]|\d+[\.\)]|\*|¹|²|³|†|‡|\d+\s+)", line.text)
+            )
+            is_footnote = is_at_page_bottom and (
+                starts_with_fn_marker or (is_smaller_font and current_type == BlockType.FOOTNOTE)
+            )
+
+            # 2. Caption detection
+            is_caption = bool(
+                re.match(
+                    r"^(?:Figure|Fig\.|Table|Exhibit|Illustration|جدول|شكل)\s+(?:\d+|[A-ZIVX]+)(?::|\.|\s-|\s—)",
+                    line.text,
+                    re.IGNORECASE,
+                )
+            )
+
             is_heading = False
             heading_level = None
-
-            if line.font_size >= 1.5 * body_font_size:
-                is_heading = True
-                heading_level = 1
-            elif line.font_size >= 1.25 * body_font_size:
-                is_heading = True
-                heading_level = 2
-            elif line.is_bold and len(line.text) < 80 and not line.text.endswith("."):
-                is_heading = True
-                heading_level = 3
+            if not is_footnote and not is_caption:
+                if line.font_size >= 1.5 * body_font_size:
+                    is_heading = True
+                    heading_level = 1
+                elif line.font_size >= 1.25 * body_font_size:
+                    is_heading = True
+                    heading_level = 2
+                elif line.is_bold and len(line.text) < 80 and not line.text.endswith("."):
+                    is_heading = True
+                    heading_level = 3
 
             is_list_item = line.text.startswith(("- ", "* ", "• ", "\u2022 ", "\u25e6 ")) or (
                 len(line.text) > 3 and line.text[0].isdigit() and line.text[1:3] in (". ", ") ")
             )
 
-            if is_heading:
+            if is_footnote:
+                if current_type != BlockType.FOOTNOTE or starts_with_fn_marker:
+                    flush_block()
+                    current_type = BlockType.FOOTNOTE
+                current_lines.append(line)
+            elif is_caption:
+                flush_block()
+                current_type = BlockType.CAPTION
+                current_lines.append(line)
+                flush_block()
+            elif is_heading:
                 flush_block()
                 current_type = BlockType.HEADING
                 current_level = heading_level

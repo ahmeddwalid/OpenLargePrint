@@ -299,6 +299,63 @@ class ReaderExporter(BaseExporter):
       margin-top: 1.5em;
     }}
 
+    .caption-block {{
+      font-weight: bold;
+      font-size: 0.9em;
+      color: var(--heading-color);
+      margin: 12px 0 6px 0;
+      text-align: center;
+    }}
+
+    .caption-block.rtl {{
+      text-align: right;
+    }}
+
+    .table-container {{
+      margin: 1.5em 0;
+      overflow-x: auto;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      background-color: var(--surface-color);
+    }}
+
+    .large-print-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9em;
+      text-align: left;
+    }}
+
+    .large-print-table.rtl {{
+      text-align: right;
+    }}
+
+    .large-print-table th, .large-print-table td {{
+      padding: 10px 14px;
+      border: 1px solid var(--border-color);
+      vertical-align: top;
+    }}
+
+    .large-print-table th {{
+      background-color: var(--button-bg);
+      font-weight: bold;
+      color: var(--heading-color);
+    }}
+
+    .large-print-table tr:hover {{
+      background-color: var(--button-bg);
+    }}
+
+    .table-warning {{
+      background-color: #FFF3CD;
+      color: #856404;
+      border: 1px solid #FFEEBA;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      font-size: 0.85em;
+    }}
+
     /* Print media styling */
     @media print {{
       .reader-toolbar, .reader-toc {{
@@ -406,7 +463,7 @@ class ReaderExporter(BaseExporter):
             return None, None
 
         is_rtl = block.text_direction == TextDirection.RTL
-        dir_attr = ' dir="rtl" class="rtl"' if is_rtl else ""
+        dir_attr = ' dir="rtl"' if is_rtl else ""
 
         # Headings
         if block.type in (BlockType.TITLE, BlockType.HEADING):
@@ -414,7 +471,8 @@ class ReaderExporter(BaseExporter):
             tag = "h1" if block.type == BlockType.TITLE or level == 1 else (f"h{min(level, 4)}")
             heading_id = f"heading-{block.id}"
             safe_text = html.escape(block.text or "")
-            b_html = f'<{tag} id="{heading_id}"{dir_attr}>{safe_text}</{tag}>'
+            tag_class = ' class="rtl"' if is_rtl else ""
+            b_html = f'<{tag} id="{heading_id}"{tag_class}{dir_attr}>{safe_text}</{tag}>'
             toc_dir = ' dir="rtl"' if is_rtl else ""
             toc_html = f'<li><a href="#{heading_id}"{toc_dir}>{safe_text}</a></li>'
             return b_html, toc_html
@@ -423,18 +481,69 @@ class ReaderExporter(BaseExporter):
         if block.type == BlockType.LIST:
             raw_text = (block.text or "").lstrip("•-* \t")
             safe_text = html.escape(raw_text)
-            return f"<ul{dir_attr}><li>{safe_text}</li></ul>", None
+            list_class = ' class="rtl"' if is_rtl else ""
+            return f"<ul{list_class}{dir_attr}><li>{safe_text}</li></ul>", None
 
         # Quotes
         if block.type == BlockType.QUOTE:
             safe_text = html.escape(block.text or "")
-            return f"<blockquote{dir_attr}><p>{safe_text}</p></blockquote>", None
+            quote_class = ' class="rtl"' if is_rtl else ""
+            return f"<blockquote{quote_class}{dir_attr}><p>{safe_text}</p></blockquote>", None
 
-        # Footnotes / Captions
-        if block.type in (BlockType.FOOTNOTE, BlockType.CAPTION):
+        # Captions
+        if block.type == BlockType.CAPTION:
+            safe_text = html.escape(block.text or "")
+            cap_class = "caption-block rtl" if is_rtl else "caption-block"
+            return f'<figcaption class="{cap_class}"{dir_attr}>{safe_text}</figcaption>', None
+
+        # Footnotes (FN-001, FN-002)
+        if block.type == BlockType.FOOTNOTE:
             safe_text = html.escape(block.text or "")
             fn_class = "footnote-block rtl" if is_rtl else "footnote-block"
-            return f'<div class="{fn_class}"{dir_attr}><p>{safe_text}</p></div>', None
+            return f'<aside class="{fn_class}"{dir_attr} role="doc-footnote"><p>{safe_text}</p></aside>', None
+
+        # Tables (TBL-001, TBL-002, FN-002)
+        if block.type == BlockType.TABLE and block.table_structure:
+            ts = block.table_structure
+            table_parts = []
+
+            # Warning banner if present (TBL-002)
+            if block.warnings:
+                for w in block.warnings:
+                    table_parts.append(f'<div class="table-warning" role="note">⚠️ {html.escape(w)}</div>')
+
+            # Retained source table image if available (TBL-001)
+            if block.image_asset and block.image_asset.file_path and Path(block.image_asset.file_path).exists():
+                img_bytes = Path(block.image_asset.file_path).read_bytes()
+                b64_src = f"data:{block.image_asset.mime_type};base64,{base64.b64encode(img_bytes).decode('ascii')}"
+                alt = html.escape(block.image_asset.alt_text or f"Original table scan from page {block.source_page}")
+                table_parts.append(f'<div class="figure-container"><img src="{b64_src}" alt="{alt}"></div>')
+
+            table_parts.append('<div class="table-container" role="region" aria-label="Data Table" tabindex="0">')
+            table_class = "large-print-table rtl" if is_rtl else "large-print-table"
+            table_parts.append(f'<table class="{table_class}"{dir_attr}>')
+
+            if ts.caption:
+                table_parts.append(f'<caption>{html.escape(ts.caption)}</caption>')
+
+            start_row = 0
+            if ts.has_header and ts.rows:
+                table_parts.append("<thead><tr>")
+                for cell in ts.rows[0]:
+                    table_parts.append(f'<th scope="col">{html.escape(cell.text or "")}</th>')
+                table_parts.append("</tr></thead>")
+                start_row = 1
+
+            table_parts.append("<tbody>")
+            for row in ts.rows[start_row:]:
+                table_parts.append("<tr>")
+                for cell in row:
+                    table_parts.append(f'<td>{html.escape(cell.text or "")}</td>')
+                table_parts.append("</tr>")
+            table_parts.append("</tbody>")
+            table_parts.append("</table></div>")
+
+            return "\n".join(table_parts), None
 
         # Images (IMG-001)
         if block.type == BlockType.IMAGE and block.image_asset:
@@ -448,4 +557,5 @@ class ReaderExporter(BaseExporter):
 
         # Default body paragraph
         safe_text = html.escape(block.text or "")
-        return f"<p{dir_attr}>{safe_text}</p>", None
+        p_class = ' class="rtl"' if is_rtl else ""
+        return f"<p{p_class}{dir_attr}>{safe_text}</p>", None

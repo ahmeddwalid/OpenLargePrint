@@ -79,6 +79,66 @@ class TableStructure(BaseModel):
     """Structure representation for semantic tables (TBL-001)."""
     rows: list[list[TableCell]] = Field(default_factory=list)
     has_header: bool = False
+    caption: Optional[str] = None
+
+    @property
+    def row_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def column_count(self) -> int:
+        if not self.rows:
+            return 0
+        return max((len(row) for row in self.rows), default=0)
+
+    def to_markdown_table(self) -> str:
+        """Render table as a standard GitHub-flavored markdown table."""
+        if not self.rows:
+            return ""
+        lines = []
+        if self.caption:
+            lines.append(f"**{self.caption}**\n")
+        header_row = self.rows[0]
+        header_cells = [c.text.replace("\n", " ").strip() for c in header_row]
+        lines.append("| " + " | ".join(header_cells) + " |")
+        lines.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
+
+        for row in self.rows[1:]:
+            row_cells = [c.text.replace("\n", " ").strip() for c in row]
+            # Pad or truncate if row length differs
+            while len(row_cells) < len(header_cells):
+                row_cells.append("")
+            lines.append("| " + " | ".join(row_cells[: len(header_cells)]) + " |")
+
+        return "\n".join(lines)
+
+    def to_linearized_text(self) -> str:
+        """Render table as an accessible, labeled linearized representation (TBL-001)."""
+        if not self.rows:
+            return ""
+        lines = []
+        if self.caption:
+            lines.append(f"[Table: {self.caption}]")
+        else:
+            lines.append("[Table]")
+
+        headers = []
+        start_row_idx = 0
+        if self.has_header and self.rows:
+            headers = [c.text.replace("\n", " ").strip() for c in self.rows[0]]
+            start_row_idx = 1
+        else:
+            col_count = self.column_count
+            headers = [f"Column {i + 1}" for i in range(col_count)]
+
+        for r_idx, row in enumerate(self.rows[start_row_idx:], start=1):
+            lines.append(f"• Row {r_idx}:")
+            for c_idx, cell in enumerate(row):
+                header_name = headers[c_idx] if c_idx < len(headers) else f"Column {c_idx + 1}"
+                val = cell.text.replace("\n", " ").strip()
+                lines.append(f"   - {header_name}: {val}")
+
+        return "\n".join(lines)
 
 
 class Block(BaseModel):
