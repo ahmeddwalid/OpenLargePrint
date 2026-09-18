@@ -3,7 +3,7 @@
  * Implements narrow IPC protocols defined in DESIGN.md §9 and SPEC.md SEC-005.
  */
 
-import { ConversionSettings, DocumentIR, InspectResult, ProgressInfo, ReviewItem } from '../types';
+import { ConversionSettings, DocumentBlock, DocumentIR, InspectResult, ProgressInfo, ReviewItem } from '../types';
 
 export interface SidecarCallbacks {
   onProgress: (progress: ProgressInfo) => void;
@@ -16,12 +16,95 @@ export interface SidecarCallbacks {
 export class SidecarClient {
   private isCancelled = false;
 
+  public async openFileDialog(): Promise<{ path: string; name: string; size: number } | null> {
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        const res = await win.__TAURI__.core.invoke('open_file_dialog');
+        if (res && res.path) {
+          return res;
+        }
+      } catch (err) {
+        console.error('Tauri open_file_dialog failed:', err);
+      }
+    }
+    return null;
+  }
+
+  public async getSystemPaths(): Promise<{ downloads: string; desktop: string; documents: string }> {
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        const res = await win.__TAURI__.core.invoke('get_system_paths');
+        if (res && res.downloads) {
+          return res;
+        }
+      } catch (err) {
+        console.error('Tauri get_system_paths failed:', err);
+      }
+    }
+    return {
+      downloads: 'Downloads',
+      desktop: 'Desktop',
+      documents: 'Documents',
+    };
+  }
+
+  public async chooseSaveLocation(
+    defaultName?: string,
+    format?: string,
+    initialDir?: string
+  ): Promise<string | null> {
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        const res = await win.__TAURI__.core.invoke('choose_save_dialog', {
+          defaultName,
+          filterExt: format,
+          initialDir,
+        });
+        if (typeof res === 'string' && res.trim().length > 0) {
+          return res;
+        }
+      } catch (err) {
+        console.error('Tauri choose_save_dialog failed:', err);
+      }
+    }
+    return null;
+  }
+
+  public async inspectFilePath(filePath: string): Promise<{ path: string; name: string; size: number } | null> {
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        const res = await win.__TAURI__.core.invoke('inspect_file_path', { filePath });
+        if (res && res.path) {
+          return res;
+        }
+      } catch (err) {
+        console.error('Tauri inspect_file_path failed:', err);
+      }
+    }
+    const norm = filePath.replace(/\\/g, '/');
+    const name = norm.split('/').pop() || filePath;
+    return { path: filePath, name, size: 0 };
+  }
+
   public async inspectFile(filePath: string): Promise<InspectResult> {
     // If Tauri is available, invoke Rust IPC bridge
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
     if (win?.__TAURI__?.core?.invoke) {
       try {
-        return await win.__TAURI__.core.invoke('inspect_file', { filePath });
+        const raw = await win.__TAURI__.core.invoke('inspect_file', { filePath });
+        if (raw) {
+          return {
+            filePath,
+            mimeType: raw.detected_format === 'pdf' ? 'application/pdf' : 'application/octet-stream',
+            pageCount: raw.page_count || 1,
+            detectedType: raw.detected_format === 'pdf' ? 'native_pdf' : 'docx',
+            estimatedDurationSeconds: (raw.page_count || 1) * 0.8,
+          };
+        }
       } catch (err) {
         console.error('Tauri inspect failed, using fallback:', err);
       }
@@ -62,19 +145,130 @@ export class SidecarClient {
 
     // Check Tauri bridge
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    if (win?.__TAURI__?.core?.invoke && win?.__TAURI__?.event?.listen) {
       try {
+        let unlistenProgress: (() => void) | undefined;
+        let unlistenCheckpoint: (() => void) | undefined;
+        let unlistenSuccess: (() => void) | undefined;
+        let unlistenError: (() => void) | undefined;
+        let unlistenCancelled: (() => void) | undefined;
+
+        const cleanup = () => {
+          if (unlistenProgress) unlistenProgress();
+          if (unlistenCheckpoint) unlistenCheckpoint();
+          if (unlistenSuccess) unlistenSuccess();
+          if (unlistenError) unlistenError();
+          if (unlistenCancelled) unlistenCancelled();
+        };
+
+        unlistenProgress = await win.__TAURI__.event.listen('sidecar-progress', (event: any) => {
+          const payload = event.payload;
+          callbacks.onProgress({
+            currentPage: payload.current_page || 0,
+            totalPages: payload.total_pages || 1,
+            stage: payload.stage || 'converting',
+            humanMessage: payload.message || `Processing page ${payload.current_page}`,
+            percent: payload.percent || 0,
+          });
+        });
+
+        unlistenCheckpoint = await win.__TAURI__.event.listen('sidecar-checkpoint', (event: any) => {
+          if (callbacks.onCheckpoint) {
+            callbacks.onCheckpoint(event.payload.page_number, event.payload.page_number * 3);
+          }
+        });
+
+        unlistenSuccess = await win.__TAURI__.event.listen('sidecar-success', (event: any) => {
+          cleanup();
+          const p = event.payload;
+
+          let docIR: DocumentIR;
+          if (p.document_ir && p.document_ir.blocks) {
+            const rawBlocks = p.document_ir.blocks || [];
+            const mappedBlocks: DocumentBlock[] = rawBlocks.map((b: any, idx: number) => {
+              let blockType = b.type || b.block_type || 'paragraph';
+              let tableData: string[][] | undefined = undefined;
+              if (b.table_structure && b.table_structure.rows) {
+                tableData = b.table_structure.rows.map((row: any[]) =>
+                  row.map((cell: any) => (typeof cell === 'string' ? cell : cell.text || ''))
+                );
+              }
+              return {
+                id: b.id || `b-${idx + 1}`,
+                block_type: blockType,
+                text: b.text || '',
+                source_page: b.source_page,
+                heading_level: b.heading_level || 1,
+                table_data: tableData || b.table_data,
+                caption: b.caption || b.table_structure?.caption,
+                reading_order_index: b.reading_order_index,
+                confidence: b.confidence,
+              };
+            });
+
+            docIR = {
+              schema_version: p.document_ir.schema_version || '1.0.0',
+              source_file: filePath,
+              source_mime: 'application/pdf',
+              page_count: p.page_count || p.document_ir.metadata?.page_count || 1,
+              blocks: mappedBlocks,
+              warnings: p.warnings || p.document_ir.warnings || [],
+            };
+          } else {
+            docIR = {
+              schema_version: '1.0.0',
+              source_file: filePath,
+              source_mime: 'application/pdf',
+              page_count: p.page_count || 1,
+              blocks: [
+                {
+                  id: 'block-done',
+                  block_type: 'paragraph',
+                  text: `Successfully converted ${p.page_count || 1} pages to large-print layout.`,
+                  source_page: 1,
+                },
+              ],
+              warnings: p.warnings || [],
+            };
+          }
+
+          const reviewItems: ReviewItem[] = (p.review_items || []).map((r: any, idx: number) => ({
+            id: `rev-${idx + 1}`,
+            source_page: r.page_number,
+            block_id: `b-${r.page_number}`,
+            reason: r.reason || 'Flagged for optical review',
+            original_snippet: r.original_crop_path || `[Original page ${r.page_number}]`,
+            converted_text: r.converted_text || '',
+            status: 'pending' as const,
+          }));
+
+          callbacks.onSuccess({
+            outputPath: p.output_path,
+            documentIR: docIR,
+            reviewItems,
+          });
+        });
+
+        unlistenError = await win.__TAURI__.event.listen('sidecar-error', (event: any) => {
+          cleanup();
+          callbacks.onError(event.payload.message || 'Conversion failed.');
+        });
+
+        unlistenCancelled = await win.__TAURI__.event.listen('sidecar-cancelled', () => {
+          cleanup();
+          callbacks.onCancelled();
+        });
+
         await win.__TAURI__.core.invoke('start_conversion', { filePath, settings });
         return;
       } catch (err) {
-        console.error('Tauri conversion failed, continuing with client processing:', err);
+        console.error('Tauri conversion invoke failed, continuing with client processing:', err);
       }
     }
 
-    // Interactive Demo / Web Preview conversion loop
+    // Interactive Demo / Web Preview conversion loop fallback
     const totalPages = filePath.toLowerCase().includes('scanned') ? 8 : 4;
     const isScanned = filePath.toLowerCase().includes('scanned') || settings.routingMode === 'ocr_scanned_only';
-
     const stagePrefix = isScanned ? 'Recognizing scanned text' : 'Extracting readable text';
 
     for (let page = 1; page <= totalPages; page++) {
@@ -98,7 +292,6 @@ export class SidecarClient {
         callbacks.onCheckpoint(page, page * 3);
       }
 
-      // Small delay to simulate processing and verify UI reactivity
       await new Promise((resolve) => setTimeout(resolve, 350));
     }
 
@@ -107,7 +300,7 @@ export class SidecarClient {
       return;
     }
 
-    // Build synthesized DocumentIR
+    // Synthesized DocumentIR for demo mode
     const docIR: DocumentIR = {
       schema_version: '1.0.0',
       source_file: filePath,
@@ -161,7 +354,6 @@ export class SidecarClient {
       warnings: isScanned ? ['Page 3 contains low-contrast marginal notes.'] : [],
     };
 
-    // Review items for low confidence or flagged pages
     const reviewItems: ReviewItem[] = isScanned
       ? [
           {
@@ -188,10 +380,25 @@ export class SidecarClient {
 
   public cancelConversion(): void {
     this.isCancelled = true;
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      win.__TAURI__.core.invoke('cancel_conversion').catch(console.error);
+    }
   }
 
   public async retryPage(page: number, maxAccuracy: boolean): Promise<DocumentIR> {
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        await win.__TAURI__.core.invoke('retry_page', {
+          jobId: 'active',
+          pageNumber: page,
+          maxAccuracy,
+        });
+      } catch (e) {
+        console.error('Tauri retry_page failed:', e);
+      }
+    }
     return {
       schema_version: '1.0.0',
       source_file: 'retry',

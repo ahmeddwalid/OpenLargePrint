@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AdvancedOptions } from './components/AdvancedOptions';
+import { DocumentTypeSelector } from './components/DocumentTypeSelector';
+import { ExportLocationPicker, LocationPreset } from './components/ExportLocationPicker';
 import { FilePicker } from './components/FilePicker';
 import { PaperSizeSelector } from './components/PaperSizeSelector';
 import { ProgressScreen } from './components/ProgressScreen';
@@ -31,6 +33,9 @@ export const App: React.FC = () => {
   const [textSize, setTextSize] = useState<TextSize>(20); // 20pt default per OUT-006
   const [paperSize, setPaperSize] = useState<PaperSize>('A4'); // A4 default per UI-006
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('pdf');
+  const [locationPreset, setLocationPreset] = useState<LocationPreset>('downloads');
+  const [customOutputPath, setCustomOutputPath] = useState<string | null>(null);
+  const [systemPaths, setSystemPaths] = useState<{ downloads: string; desktop: string; documents: string } | null>(null);
   const [routingMode, setRoutingMode] = useState<RoutingMode>('max_accuracy');
   const [pageRange, setPageRange] = useState<string>('');
 
@@ -58,6 +63,66 @@ export const App: React.FC = () => {
     document.documentElement.setAttribute('dir', direction);
   }, [direction]);
 
+  // Fetch native desktop system paths (Downloads, Desktop, Documents)
+  useEffect(() => {
+    sidecar.getSystemPaths().then((paths) => {
+      setSystemPaths(paths);
+    });
+  }, []);
+
+  const getProposedExportPath = (): string => {
+    const ext = outputFormat === 'docx' ? 'docx' : outputFormat === 'html' ? 'html' : 'pdf';
+
+    if (locationPreset === 'custom' && customOutputPath) {
+      const lastDot = customOutputPath.lastIndexOf('.');
+      if (lastDot > 0) {
+        return `${customOutputPath.substring(0, lastDot)}.${ext}`;
+      }
+      return `${customOutputPath}.${ext}`;
+    }
+
+    const docName = selectedFile ? selectedFile.name : 'document';
+    const lastDot = docName.lastIndexOf('.');
+    const stem = lastDot > 0 ? docName.substring(0, lastDot) : docName;
+    const targetFileName = `${stem}-largeprint.${ext}`;
+
+    const nativePath = (selectedFile as any)?.nativePath;
+    const isWindows = typeof window !== 'undefined' && (Boolean(systemPaths?.downloads?.includes('\\')) || (nativePath && nativePath.includes('\\')));
+    const separator = isWindows ? '\\' : '/';
+
+    if (locationPreset === 'downloads' && systemPaths?.downloads) {
+      return `${systemPaths.downloads}${separator}${targetFileName}`;
+    }
+
+    if (locationPreset === 'desktop' && systemPaths?.desktop) {
+      return `${systemPaths.desktop}${separator}${targetFileName}`;
+    }
+
+    if (locationPreset === 'source' && nativePath) {
+      const parts = nativePath.split(separator);
+      parts.pop();
+      const parentDir = parts.join(separator);
+      return `${parentDir}${separator}${targetFileName}`;
+    }
+
+    // Default fallback to Downloads if available
+    if (systemPaths?.downloads) {
+      return `${systemPaths.downloads}${separator}${targetFileName}`;
+    }
+    return targetFileName;
+  };
+
+  const handleFormatChange = (newFormat: OutputFormat) => {
+    setOutputFormat(newFormat);
+    if (customOutputPath) {
+      const ext = newFormat === 'docx' ? 'docx' : newFormat === 'html' ? 'html' : 'pdf';
+      const lastDot = customOutputPath.lastIndexOf('.');
+      if (lastDot > 0) {
+        setCustomOutputPath(`${customOutputPath.substring(0, lastDot)}.${ext}`);
+      }
+    }
+  };
+
   const handleStartConversion = async () => {
     if (!selectedFile) return;
 
@@ -71,15 +136,18 @@ export const App: React.FC = () => {
       percent: 0,
     });
 
+    const targetOutputPath = customOutputPath || getProposedExportPath();
     const settings: ConversionSettings = {
       textSize,
       paperSize,
       outputFormat,
       routingMode,
       pageRange,
+      outputPath: targetOutputPath,
     };
 
-    await sidecar.startConversion(selectedFile.name, settings, {
+    const targetDocPath = (selectedFile as any)?.nativePath || selectedFile.name;
+    await sidecar.startConversion(targetDocPath, settings, {
       onProgress: (p) => {
         setProgress(p);
       },
@@ -170,9 +238,19 @@ export const App: React.FC = () => {
 
       {/* Global Application Header */}
       <header className="app-header" role="banner">
-        <div className="app-title-group">
-          <h1>OpenLargePrint</h1>
-          <p>Accessible document enlargement for low vision</p>
+        <div className="app-title-group" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <img
+            src="/logo.svg"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = '/logo.png';
+            }}
+            alt="OpenLargePrint Logo"
+            style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'contain' }}
+          />
+          <div>
+            <h1>OpenLargePrint</h1>
+            <p>Accessible document enlargement for low vision</p>
+          </div>
         </div>
 
         <div className="header-controls">
@@ -233,7 +311,10 @@ export const App: React.FC = () => {
             <FilePicker
               selectedFile={selectedFile}
               onFileSelect={(file) => setSelectedFile(file)}
-              onClear={() => setSelectedFile(null)}
+              onClear={() => {
+                setSelectedFile(null);
+                setCustomOutputPath(null);
+              }}
             />
 
             {/* Step 2: Font size selection (OUT-006) */}
@@ -242,7 +323,31 @@ export const App: React.FC = () => {
             {/* Step 2.5: Direct choice of A4 vs A3 paper size (UI-006) */}
             <PaperSizeSelector value={paperSize} onChange={(size) => setPaperSize(size)} />
 
-            {/* Step 3: Convert Action */}
+            {/* Step 3: Export Format Selector (Default: PDF) */}
+            <DocumentTypeSelector
+              value={outputFormat}
+              onChange={handleFormatChange}
+            />
+
+            {/* Step 4: Export Location Picker */}
+            <ExportLocationPicker
+              outputPath={getProposedExportPath()}
+              defaultFileName={selectedFile ? selectedFile.name : 'document'}
+              outputFormat={outputFormat}
+              preset={locationPreset}
+              onPresetChange={(newPreset) => {
+                setLocationPreset(newPreset);
+                if (newPreset !== 'custom') {
+                  setCustomOutputPath(null);
+                }
+              }}
+              onCustomPathSelected={(chosenPath) => {
+                setCustomOutputPath(chosenPath);
+                setLocationPreset('custom');
+              }}
+            />
+
+            {/* Step 5: Convert Action */}
             <div style={{ marginTop: '28px', display: 'flex', alignItems: 'center', gap: '16px' }}>
               <button
                 type="button"
@@ -251,7 +356,7 @@ export const App: React.FC = () => {
                 onClick={handleStartConversion}
                 aria-label={
                   selectedFile
-                    ? `Convert ${selectedFile.name} to ${textSize} point large print on ${paperSize} paper`
+                    ? `Convert ${selectedFile.name} to ${textSize} point large print on ${paperSize} paper as ${outputFormat.toUpperCase()}`
                     : 'Choose a document first to convert'
                 }
               >
@@ -261,8 +366,6 @@ export const App: React.FC = () => {
 
             {/* Collapsible Disclosure for Advanced Settings (UI-001) */}
             <AdvancedOptions
-              format={outputFormat}
-              onFormatChange={setOutputFormat}
               routingMode={routingMode}
               onRoutingModeChange={setRoutingMode}
               pageRange={pageRange}
