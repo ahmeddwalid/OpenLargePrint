@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "OpenLargePrint",
   "version": "0.1.0",
-  "description": "SBOM and license inventory as mandated by LIC-001",
+  "description": "Software Bill of Materials (SBOM) and license inventory as mandated by LIC-001 and LIC-002",
   "dependencies": [
     {
       "component": "pydantic",
@@ -35,7 +35,7 @@
       "native_code": true,
       "network_behavior": "none",
       "parses_untrusted_content": true,
-      "purpose": "Lossless embedded image extraction and PDF object-level manipulation"
+      "purpose": "Lossless embedded image extraction, PDF object manipulation, and active-content stripping"
     },
     {
       "component": "python-docx",
@@ -135,6 +135,82 @@
       "network_behavior": "none",
       "parses_untrusted_content": false,
       "purpose": "Underlying tabular data serialisation helper for python-pptx charts and tables"
+    }
+  ],
+  "models": [
+    {
+      "model_key": "ch_PP-OCRv4_det",
+      "version": "v4.0.0",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "05a968a3e78e6f111812903b0d402325ce03531b7829283f5c94285aa16262fe",
+      "download_source": "https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_PP-OCRv4_det_infer.onnx",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Ultra-lightweight text detection on CPU"
+    },
+    {
+      "model_key": "ch_ppocr_mobile_v2.0_cls",
+      "version": "v2.0.0",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "5261d7bfa5d38a536da49fa5eb803e498c8f0003fb7c6d66e746522c069eb814",
+      "download_source": "https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Text direction and orientation classification"
+    },
+    {
+      "model_key": "ch_PP-OCRv4_rec",
+      "version": "v4.0.0",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "eb0c2a8c3d3a4658e3703c7e7b686d0614138e6ea47d4e339d2fead31e21b714",
+      "download_source": "https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_PP-OCRv4_rec_infer.onnx",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Multilingual character recognition on CPU"
+    },
+    {
+      "model_key": "picodet_lcnet_layout",
+      "version": "v3.0.0",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "b4e18d6bc9f0cf192534a6ef29bc7886470875e5339c02ffc457d7cfb3952f1e",
+      "download_source": "https://github.com/PaddlePaddle/PaddleOCR/releases/download/PP-StructureV3/picodet_lcnet_layout.onnx",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Document layout segmentation and reading order detection"
+    },
+    {
+      "model_key": "ch_ppstructure_table_slanet",
+      "version": "v2.0.0",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "a7d23910c6fe34beea23fef617d12108740c062c31e9c56fa769742eb518290f",
+      "download_source": "https://github.com/PaddlePaddle/PaddleOCR/releases/download/PP-StructureV2/ch_ppstructure_mobile_v2.0_SLANet_infer.onnx",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Table structure recognition and cell grid reconstruction"
+    }
+  ],
+  "excluded_candidates": [
+    {
+      "name": "olmOCR",
+      "reason": "Excluded from default distribution due to high VRAM footprint and non-permissive/commercial thresholds (DESIGN.md §4.1, LIC-002)"
+    },
+    {
+      "name": "Surya",
+      "reason": "Excluded from default distribution due to commercial license terms and MAU thresholds (DESIGN.md §4.1, LIC-002)"
+    },
+    {
+      "name": "MinerU",
+      "reason": "Excluded from default distribution due to AGPL license and heavyweight deployment requirements (DESIGN.md §4.1, LIC-002)"
     }
   ]
 }

@@ -109,3 +109,59 @@ def validate_image_dimensions(width: int, height: int) -> None:
         raise SecurityValidationError(
             f"Image total pixels ({total_pixels}) exceed safety limit of {MAX_IMAGE_PIXELS}"
         )
+
+
+import shutil
+
+
+def safe_extract_zip(
+    zip_path: str | Path,
+    dest_dir: str | Path,
+    max_uncompressed_bytes: int = MAX_FILE_SIZE_BYTES,
+    max_ratio: float = 100.0,
+) -> List[Path]:
+    """Safely extract ZIP archive members with zip-slip and zip-bomb prevention (SEC-003)."""
+    dest = Path(dest_dir).resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    extracted_paths: List[Path] = []
+
+    total_uncompressed = 0
+    total_compressed = 0
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for info in zf.infolist():
+            # Check for zip-slip (path traversal attempt)
+            member_path = (dest / info.filename).resolve()
+            try:
+                member_path.relative_to(dest)
+            except ValueError:
+                raise SecurityValidationError(
+                    f"Zip-slip path traversal attempt detected in archive member: {info.filename}"
+                )
+
+            # Check for zip bomb
+            total_uncompressed += info.file_size
+            total_compressed += info.compress_size
+
+            if total_uncompressed > max_uncompressed_bytes:
+                raise SecurityValidationError(
+                    f"Decompressed archive size exceeds safety limit ({total_uncompressed} > {max_uncompressed_bytes} bytes)."
+                )
+
+            if total_compressed > 0:
+                ratio = total_uncompressed / total_compressed
+                if ratio > max_ratio and total_uncompressed > 10 * 1024 * 1024:
+                    raise SecurityValidationError(
+                        f"Decompression bomb detected: expansion ratio {ratio:.1f} exceeds safety threshold of {max_ratio}."
+                    )
+
+            if info.is_dir():
+                member_path.mkdir(parents=True, exist_ok=True)
+            else:
+                member_path.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(member_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                extracted_paths.append(member_path)
+
+    return extracted_paths
+

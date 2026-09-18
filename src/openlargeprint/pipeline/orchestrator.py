@@ -22,7 +22,12 @@ from openlargeprint.importers.pdf.native import NativePdfImporter
 from openlargeprint.ir.models import DocumentIR
 from openlargeprint.ir.validator import validate_document_ir
 from openlargeprint.ocr.router import RoutingMode
-from openlargeprint.security import JobWorkspace, detect_file_type, log_safe_info
+from openlargeprint.security import (
+    JobWorkspace,
+    detect_file_type,
+    log_safe_info,
+    sanitize_document,
+)
 
 ExportFormat = Literal["docx", "pdf", "reader"]
 
@@ -123,9 +128,16 @@ class PipelineOrchestrator:
         with JobWorkspace() as ws:
             log_safe_info(f"Starting conversion in isolated workspace: {ws.path.name}")
 
+            # 3.1 Sanitize input document to neutralize active content (SEC-002)
+            clean_file, stripped_items = sanitize_document(input_file, ws.path)
+            if stripped_items:
+                all_warnings.append(
+                    f"Active content was removed for security ({len(stripped_items)} items neutralized)."
+                )
+
             # 4. Import document into canonical DocumentIR
             doc_ir = self._import_by_format(
-                input_file,
+                clean_file,
                 format_type,
                 ws,
                 progress_callback=progress_callback,
