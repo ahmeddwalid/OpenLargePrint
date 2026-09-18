@@ -2,10 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "OpenLargePrint",
   "version": "0.1.0",
-  "identifier": "org.openlargeprint.app",
+  "identifier": "org.openlargeprint.desktop",
   "build": {
-    "beforeDevCommand": "npm --prefix ../ui run dev",
-    "beforeBuildCommand": "npm --prefix ../ui run build",
+    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeBuildCommand": "npm --prefix ui run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../ui/dist"
   },
@@ -27,13 +27,24 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi", "deb", "appimage"],
-    "category": "Accessibility",
+    "targets": ["nsis"],
+    "externalBin": [
+      "binaries/openlargeprint-sidecar"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "category": "Utility",
     "shortDescription": "Accessible document enlargement for low-vision readers",
     "longDescription": "OpenLargePrint turns dense PDFs, law books, Word documents, and presentations into genuine large-print publications with preserved reading order and high optical accuracy.",
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "hooks.nsh"
       },
       "wix": {
         "language": "en-US"

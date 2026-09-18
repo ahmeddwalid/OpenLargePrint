@@ -116,6 +116,21 @@ export class SidecarClient {
     return false;
   }
 
+  public async getCliArgFile(): Promise<{ path: string; name: string; size: number } | null> {
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        const res = await win.__TAURI__.core.invoke('get_cli_arg_file');
+        if (res && res.path) {
+          return res;
+        }
+      } catch (err) {
+        console.error('Tauri get_cli_arg_file failed:', err);
+      }
+    }
+    return null;
+  }
+
   public async inspectFile(filePath: string): Promise<InspectResult> {
     // If Tauri is available, invoke Rust IPC bridge
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;

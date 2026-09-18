@@ -403,6 +403,26 @@ async fn reveal_in_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn get_cli_arg_file() -> Result<Option<serde_json::Value>, String> {
+    let args: Vec<String> = std::env::args().collect();
+    for arg in args.into_iter().skip(1) {
+        if !arg.starts_with('-') {
+            let p = PathBuf::from(&arg);
+            if p.exists() && p.is_file() {
+                let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                return Ok(Some(serde_json::json!({
+                    "path": arg,
+                    "name": name,
+                    "size": size
+                })));
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[tauri::command]
 async fn health_check(
     app: AppHandle,
     session: State<'_, AppSession>,
@@ -628,6 +648,7 @@ fn main() {
             inspect_file_path,
             open_path_in_system,
             reveal_in_folder,
+            get_cli_arg_file,
             health_check,
             inspect_file,
             start_conversion,

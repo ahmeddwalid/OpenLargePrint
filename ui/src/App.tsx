@@ -104,6 +104,18 @@ export const App: React.FC = () => {
     });
   }, []);
 
+  // Check for CLI argument file (e.g. from Windows Explorer right-click "Enlarge with OpenLargePrint")
+  useEffect(() => {
+    sidecar.getCliArgFile().then((argFile) => {
+      if (argFile) {
+        const mockFile = new File([''], argFile.name, { type: 'application/pdf' });
+        (mockFile as any).nativePath = argFile.path;
+        (mockFile as any).customSize = argFile.size;
+        setSelectedFile(mockFile);
+      }
+    });
+  }, []);
+
   const getProposedExportPath = (): string => {
     const ext = outputFormat === 'docx' ? 'docx' : outputFormat === 'html' ? 'html' : 'pdf';
 
