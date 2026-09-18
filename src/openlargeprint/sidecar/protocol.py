@@ -51,7 +51,7 @@ class ConvertCommand(BaseModel):
     preset: str = "Large"
     paper_size: str = "A4"
     export_format: str = "docx"
-    routing_mode: str = "maximum_accuracy"
+    routing_mode: str = "automatic"
     page_range: Optional[List[int]] = None
     include_page_markers: bool = True
 
@@ -73,7 +73,7 @@ class RetryPageCommand(BaseModel):
     command: Literal[CommandType.RETRY_PAGE] = CommandType.RETRY_PAGE
     job_id: str
     page_number: int
-    routing_mode: str = "maximum_accuracy"
+    routing_mode: str = "automatic"
 
 
 # --- Outbound Events ---

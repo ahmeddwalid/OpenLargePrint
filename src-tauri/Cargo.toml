@@ -3,6 +3,7 @@ name = "openlargeprint-desktop"
 version = "0.1.0"
 description = "OpenLargePrint Accessible Document Desktop Shell"
 authors = ["OpenLargePrint Contributors"]
+license = "GPL-3.0-or-later"
 edition = "2021"
 
 [dependencies]

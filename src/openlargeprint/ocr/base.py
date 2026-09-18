@@ -55,6 +55,23 @@ class EnginePageResult:
     lines: List[OcrDetectedLine]
     elapse_seconds: float = 0.0
     warnings: List[str] = field(default_factory=list)
+    cancelled: bool = False
+
+
+class CancellationToken:
+    """Cooperative cancellation flag for long OCR work (UI-002, DESIGN.md §4)."""
+
+    def __init__(self):
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+    def __bool__(self) -> bool:
+        return self._cancelled
 
 
 @runtime_checkable
@@ -71,6 +88,7 @@ class DocumentOcrEngine(Protocol):
         *,
         page_num: int,
         language_hints: Tuple[str, ...] = ("en",),
+        cancellation: Optional[CancellationToken] = None,
     ) -> EnginePageResult:
         """Run text recognition on a rendered page image."""
         ...

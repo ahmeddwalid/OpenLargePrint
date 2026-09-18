@@ -74,7 +74,7 @@ class NativePdfImporter(BaseImporter):
     def __init__(
         self,
         ocr_engine: Optional[DocumentOcrEngine] = None,
-        routing_mode: RoutingMode = RoutingMode.MAXIMUM_ACCURACY,
+        routing_mode: RoutingMode = RoutingMode.AUTOMATIC,
         ocr_dpi: float = 300.0,
     ):
         self.routing_mode = routing_mode

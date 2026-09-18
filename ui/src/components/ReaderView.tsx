@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { AppTheme, DocumentBlock, DocumentIR } from '../types';
+import { sidecar } from '../api/sidecarClient';
+import { useI18n } from '../i18n/i18n';
 
 interface ReaderViewProps {
   documentIR: DocumentIR;
   initialSize: number;
   currentTheme: AppTheme;
+  exportedFilePath?: string | null;
   onThemeChange: (theme: AppTheme) => void;
   onBack: () => void;
   onExport: (selectedPagesOnly?: number[]) => void;
@@ -52,10 +55,12 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   documentIR,
   initialSize,
   currentTheme,
+  exportedFilePath,
   onThemeChange,
   onBack,
   onExport,
 }) => {
+  const { t } = useI18n();
   const [fontSize, setFontSize] = useState<number>(initialSize);
   const [lineHeight, setLineHeight] = useState<number>(1.6);
   const [readerFont, setReaderFont] = useState<ReaderFont>('system');
@@ -89,6 +94,62 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         }
       }}
     >
+      {/* Export Success File Access Banner */}
+      {exportedFilePath && (
+        <aside
+          aria-label="Exported file destination"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            flexWrap: 'wrap',
+            padding: '12px 18px',
+            backgroundColor: 'var(--success-bg)',
+            border: '1px solid var(--success-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--success-text)',
+            fontSize: '15px',
+            marginBottom: '8px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+            <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{t('file.saved_file')}</span>
+            <span
+              style={{
+                fontFamily: 'Consolas, monospace',
+                fontSize: '13px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                direction: 'ltr',
+              }}
+              title={exportedFilePath}
+            >
+              {exportedFilePath}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() => sidecar.openPathInSystem(exportedFilePath)}
+              style={{ minHeight: '38px', padding: '6px 14px', fontSize: '14px' }}
+            >
+              {t('file.open_file')}
+            </button>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => sidecar.revealInFolder(exportedFilePath)}
+              style={{ minHeight: '38px', padding: '6px 14px', fontSize: '14px' }}
+            >
+              {t('file.show_in_folder')}
+            </button>
+          </div>
+        </aside>
+      )}
+
       {/* Floating Reading Ruler Line Focus Guide A11Y-001, A11Y-003 */}
       {showRuler && (
         <div
@@ -199,9 +260,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            <option value="light">Warm Parchment (Default)</option>
-            <option value="sepia">Sepia Book</option>
-            <option value="dark">High-Contrast Dark</option>
+            <option value="light">Light (Default)</option>
+            <option value="auto">Auto (follow system)</option>
+            <option value="sepia">Sepia</option>
+            <option value="dark">Dark</option>
           </select>
         </div>
 
@@ -288,7 +350,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           }}
           aria-label="Export this view"
         >
-          {selectedPageFilter === 'all' ? 'Save Document' : `Save Page ${selectedPageFilter}`}
+          {selectedPageFilter === 'all' ? t('reader.save_document') : t('reader.save_page', { page: String(selectedPageFilter) })}
         </button>
       </nav>
 

@@ -46,6 +46,8 @@ htmlcov/
 scratch/
 tmp/
 temp/
+test-documents/
+
 
 # Node / UI
 ui/node_modules/
@@ -61,6 +63,13 @@ src-tauri/binaries/*
 # Packaging
 packaging/dist/
 packaging/build/
+packaging/certs/
 *.spec
+*.pfx
+*.cer
+
+# Workspace caches
+.hermes/
+
 
 

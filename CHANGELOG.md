@@ -1,0 +1,30 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-09-18
+
+### Added
+
+- **PDF Classification**: Diagnostic pipeline that categorizes PDF pages into native digital, scanned, mixed, or broken-digital types using character counts, vector geometry, and raster coverage before routing to extraction ([`PDF-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`PDF-005`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Native Text Extraction**: Direct extraction of text, font metrics, and page objects via `pypdfium2` and `pikepdf` without OCR on verified digital pages ([`PDF-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **OCR Pipeline**: CPU-friendly layout analysis and optical character recognition powered by PaddleOCR (via RapidOCR ONNX runtime) with column detection and reading-order reconstruction ([`OCR-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`OCR-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`PDF-003`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Canonical Document Model (`DocumentIR`)**: Versioned intermediate document representation preserving semantic block types (headings, paragraphs, quotes, lists, tables, footnotes, captions, images), source bounding boxes, and provenance metadata ([`DOC-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`DOC-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`DOC-003`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Large-Print PDF Exporter**: Generates reflowed, single-column large-print PDF files supporting A4 (default) and A3 page sizes with true physical page dimensions embedded ([`OUT-003`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`OUT-007`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`OUT-008`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Large-Print DOCX Exporter**: Generates formatted Microsoft Word documents using semantic styles and customizable font presets ([`OUT-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`OUT-006`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **In-App Semantic HTML Reader**: Interactive reader with instant client-side adjustments for font size, line spacing, margins, and contrast themes without re-running document processing ([`OUT-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Searchable PDF Exporter**: Preserves original visual layout while embedding an OCR text layer ([`OUT-004`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Office Document Importers**: Native DOCX and PPTX structural importers preserving hierarchy, tables, lists, and images ([`OFF-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Legacy Office Bridge**: Isolated, headless LibreOffice conversion bridge for legacy binary formats (.doc and .ppt) ([`OFF-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`OFF-003`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Arabic and Bidirectional Support**: Arabic script reshaping, right-to-left layout analysis, and bidirectional text reconciliation ([`LANG-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`LANG-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Side-by-Side Review Screen**: Verification screen displaying original source page regions next to recognized text blocks for flagged or low-confidence pages ([`UI-004`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Accessible User Interface**: Desktop interface built to WCAG 2.2 standards with 48px minimum touch and pointer targets, full keyboard navigation, visible focus indicators, high-contrast themes, and 200% text enlargement support ([`A11Y-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md) through [`A11Y-005`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`UI-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Windows Explorer Context Menu Integration**: Shell extension registering "Enlarge with OpenLargePrint" on supported document file types (.pdf, .docx, .doc, .pptx, .ppt) for quick processing ([`PKG-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Windows NSIS Installer & Portable Bundle**: Standalone Windows installer and portable archive bundling the Tauri desktop shell and Python sidecar runtime without requiring pre-installed runtimes ([`PKG-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`PKG-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Cryptographic Release Manifest**: Automated SHA-256 digest generation (`SHA256SUMS.txt`) verifying installer integrity.
+- **In-App Update System**: Background release checker and direct installer download/launch mechanism for Windows releases while preserving offline zero-network conversion isolation ([`SEC-009`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Licensing**: Licensed under the GNU General Public License v3.0 (GPL-3.0-or-later) with a complete dependency license inventory ([`LIC-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Software Bill of Materials (SBOM)**: Machine-readable dependency inventory tracking code licenses, model-weight licenses, and security attributes ([`LIC-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md), [`LIC-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- **Security Boundaries**: Content-based file validation, bounded resource limits, sandboxed temporary execution directories, and zero network traffic during conversions ([`SEC-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md) through [`SEC-009`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).

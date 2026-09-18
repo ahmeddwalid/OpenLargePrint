@@ -89,6 +89,15 @@ class BenchmarkCorpusBuilder:
         c.save()
         return out_path
 
+    def _write_ground_truth(self, pdf_path: Path, text: str) -> Path:
+        """Write a rights-safe ground-truth .txt sidecar for a synthetic scanned page (QA-002)."""
+        gt_path = pdf_path.with_suffix(".txt")
+        gt_path.write_text(text, encoding="utf-8")
+        gt_dir = self.output_dir / "ocr_ground_truth"
+        gt_dir.mkdir(parents=True, exist_ok=True)
+        (gt_dir / f"{pdf_path.stem}.txt").write_text(text, encoding="utf-8")
+        return gt_path
+
     def _save_image_as_pdf(self, img: Image.Image, out_pdf_path: Path, pagesize=A4) -> Path:
         """Helper to render PIL image into a pure raster PDF page using ReportLab."""
         temp_img = out_pdf_path.with_suffix(".png")
@@ -104,12 +113,19 @@ class BenchmarkCorpusBuilder:
     def build_scanned_english(self) -> Path:
         """Case 4: Scanned English page (tests baseline OCR)."""
         out_path = self.output_dir / "04_scanned_english.pdf"
+        lines = [
+            "IN THE COURT OF APPEALS",
+            "This appeal concerns the interpretation of indemnity clauses.",
+            "We affirm the judgment of the district court.",
+        ]
         img = Image.new("RGB", (800, 1100), color=(250, 250, 248))
         draw = ImageDraw.Draw(img)
-        draw.text((60, 80), "IN THE COURT OF APPEALS", fill=(20, 20, 20))
-        draw.text((60, 130), "This appeal concerns the interpretation of indemnity clauses.", fill=(30, 30, 30))
-        draw.text((60, 170), "We affirm the judgment of the district court.", fill=(30, 30, 30))
-        return self._save_image_as_pdf(img, out_path)
+        draw.text((60, 80), lines[0], fill=(20, 20, 20))
+        draw.text((60, 130), lines[1], fill=(30, 30, 30))
+        draw.text((60, 170), lines[2], fill=(30, 30, 30))
+        out_path = self._save_image_as_pdf(img, out_path)
+        self._write_ground_truth(out_path, "\n".join(lines))
+        return out_path
 
     def build_arabic_scan(self) -> Path:
         """Case 5: Arabic scan (tests RTL OCR)."""
@@ -134,6 +150,11 @@ class BenchmarkCorpusBuilder:
     def build_scanned_table(self) -> Path:
         """Case 7: Scanned table (tests structure reconstruction)."""
         out_path = self.output_dir / "07_scanned_table.pdf"
+        gt_lines = [
+            "Schedule of Deliverables",
+            "Milestone Due Date Status",
+            "Initial Draft 30 Days Completed",
+        ]
         img = Image.new("RGB", (900, 1200), color=(255, 255, 255))
         draw = ImageDraw.Draw(img)
         draw.text((80, 80), "Schedule of Deliverables", fill=(0, 0, 0))
@@ -151,7 +172,9 @@ class BenchmarkCorpusBuilder:
         draw.text((90, 210), "Initial Draft", fill=(0, 0, 0))
         draw.text((320, 210), "30 Days", fill=(0, 0, 0))
         draw.text((580, 210), "Completed", fill=(0, 0, 0))
-        return self._save_image_as_pdf(img, out_path)
+        out_path = self._save_image_as_pdf(img, out_path)
+        self._write_ground_truth(out_path, "\n".join(gt_lines))
+        return out_path
 
     def build_images_captions(self) -> Path:
         """Case 8: Images + captions (tests asset association)."""
@@ -180,20 +203,26 @@ class BenchmarkCorpusBuilder:
     def build_skewed_page(self) -> Path:
         """Case 10: Skewed page (tests deskew/preprocessing)."""
         out_path = self.output_dir / "10_skewed_page.pdf"
+        gt_text = "Affidavit of Execution"
         img = Image.new("RGB", (700, 900), color=(255, 255, 255))
         draw = ImageDraw.Draw(img)
-        draw.text((100, 100), "Affidavit of Execution", fill=(0, 0, 0))
+        draw.text((100, 100), gt_text, fill=(0, 0, 0))
         # Rotate image slightly to simulate skew
         skewed = img.rotate(3.5, resample=Image.BICUBIC, fillcolor=(255, 255, 255))
-        return self._save_image_as_pdf(skewed, out_path)
+        out_path = self._save_image_as_pdf(skewed, out_path)
+        self._write_ground_truth(out_path, gt_text)
+        return out_path
 
     def build_low_res_scan(self) -> Path:
         """Case 11: Poor low-resolution scan (tests difficult OCR)."""
         out_path = self.output_dir / "11_low_res_scan.pdf"
+        gt_text = "Low Resolution Scan"
         img = Image.new("RGB", (300, 400), color=(240, 240, 240))
         draw = ImageDraw.Draw(img)
-        draw.text((20, 30), "Low Resolution Scan", fill=(50, 50, 50))
-        return self._save_image_as_pdf(img, out_path)
+        draw.text((20, 30), gt_text, fill=(50, 50, 50))
+        out_path = self._save_image_as_pdf(img, out_path)
+        self._write_ground_truth(out_path, gt_text)
+        return out_path
 
     def build_mixed_digital_scan(self) -> Path:
         """Case 12: Mixed digital/scan PDF (tests selective OCR)."""

@@ -99,12 +99,75 @@ try {
 }
 
 $NsisPath = Join-Path $RepoRoot "src-tauri\target\release\bundle\nsis"
+$DistPath = Join-Path $RepoRoot "packaging\dist"
+if (-not (Test-Path $DistPath)) {
+    New-Item -ItemType Directory -Path $DistPath -Force | Out-Null
+}
+
+$ChecksumLines = @()
+
 if (Test-Path $NsisPath) {
     $Installers = Get-ChildItem -Path $NsisPath -Filter "*.exe"
-    Write-Host "`n Packaging Complete!" -ForegroundColor Green
+    Write-Host "`n Packaging Complete" -ForegroundColor Green
+    if ($env:OLP_CODESIGN_THUMBPRINT) {
+        Write-Host "Signing installers with certificate thumbprint: $env:OLP_CODESIGN_THUMBPRINT" -ForegroundColor Green
+        foreach ($inst in $Installers) {
+            signtool.exe sign /sha1 $env:OLP_CODESIGN_THUMBPRINT /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 "$($inst.FullName)"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Code signing failed for $($inst.FullName)"
+            }
+        }
+    }
     foreach ($inst in $Installers) {
         $sizeMb = [math]::Round($inst.Length / 1048576, 2)
+        $hashResult = Get-FileHash -Algorithm SHA256 -LiteralPath $inst.FullName
+        $hashVal = $hashResult.Hash.ToLowerInvariant()
+        $fileName = $inst.Name
+        $ChecksumLines += ("{0}  {1}" -f $hashVal, $fileName)
+        Copy-Item -LiteralPath $inst.FullName -Destination (Join-Path $DistPath $fileName) -Force
+
         Write-Host (" Installer ready: {0} ({1} MB)" -f $inst.FullName, $sizeMb) -ForegroundColor Cyan
+        Write-Host (" SHA-256: {0}" -f $hashVal) -ForegroundColor Yellow
     }
+
+    # Also generate a standalone portable ZIP archive for users who prefer not to run an installer
+    $TargetRelease = Join-Path $RepoRoot "src-tauri\target\release"
+    $DesktopExe = Join-Path $TargetRelease "openlargeprint-desktop.exe"
+    $SidecarExe = Join-Path $TargetRelease "openlargeprint-sidecar.exe"
+    if (Test-Path $DesktopExe) {
+        $PortableDir = Join-Path $RepoRoot "packaging\build\OpenLargePrint_portable"
+        if (Test-Path $PortableDir) { Remove-Item -Recurse -Force $PortableDir }
+        New-Item -ItemType Directory -Path $PortableDir -Force | Out-Null
+
+        Copy-Item -LiteralPath $DesktopExe -Destination (Join-Path $PortableDir "OpenLargePrint.exe")
+        if (Test-Path $SidecarExe) {
+            Copy-Item -LiteralPath $SidecarExe -Destination (Join-Path $PortableDir "openlargeprint-sidecar.exe")
+        } elseif (Test-Path "$RepoRoot\src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe") {
+            Copy-Item -LiteralPath "$RepoRoot\src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe" -Destination (Join-Path $PortableDir "openlargeprint-sidecar.exe")
+        }
+        Copy-Item -LiteralPath "$RepoRoot\LICENSE" -Destination (Join-Path $PortableDir "LICENSE.txt")
+        Copy-Item -LiteralPath "$RepoRoot\README.md" -Destination (Join-Path $PortableDir "README.txt")
+
+        $PortableZip = Join-Path $DistPath "OpenLargePrint_0.1.0_windows_x64_portable.zip"
+        if (Test-Path $PortableZip) { Remove-Item -Force $PortableZip }
+        Compress-Archive -Path "$PortableDir\*" -DestinationPath $PortableZip -CompressionLevel Optimal
+        if (Test-Path $PortableZip) {
+            $zipItem = Get-Item $PortableZip
+            $zipSizeMb = [math]::Round($zipItem.Length / 1048576, 2)
+            $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $PortableZip).Hash.ToLowerInvariant()
+            $ChecksumLines += ("{0}  {1}" -f $zipHash, $zipItem.Name)
+            Write-Host (" Portable archive ready: {0} ({1} MB)" -f $PortableZip, $zipSizeMb) -ForegroundColor Cyan
+            Write-Host (" SHA-256: {0}" -f $zipHash) -ForegroundColor Yellow
+        }
+    }
+
+    # Write SHA256SUMS.txt in both bundle directory and dist directory
+    $SumsFile1 = Join-Path $NsisPath "SHA256SUMS.txt"
+    $SumsFile2 = Join-Path $DistPath "SHA256SUMS.txt"
+    $ChecksumContent = ($ChecksumLines -join "`r`n") + "`r`n"
+    Set-Content -Path $SumsFile1 -Value $ChecksumContent -Encoding ascii
+    Set-Content -Path $SumsFile2 -Value $ChecksumContent -Encoding ascii
+
+    Write-Host "`n Checksums generated and written to SHA256SUMS.txt" -ForegroundColor Green
     Write-Host "The user can double-click this installer to install OpenLargePrint on Windows without Python, terminal, or admin permissions." -ForegroundColor White
 }

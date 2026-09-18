@@ -218,3 +218,27 @@ class DocumentIR(BaseModel):
             pages=filtered_pages,
             blocks=filtered_blocks,
         )
+
+    def slice_by_source_pages_set(self, page_numbers: set[int]) -> DocumentIR:
+        """Return a DocumentIR containing only the specified source pages (OUT-010)."""
+        if not page_numbers or any(p < 1 for p in page_numbers):
+            raise ValueError(f"Invalid page selection: {page_numbers}")
+        filtered_pages = [p for p in self.pages if p.page_number in page_numbers]
+        filtered_blocks = [b for b in self.blocks if b.source_page in page_numbers]
+        ordered = sorted(page_numbers)
+        if len(ordered) == 1:
+            title_suffix = f" (Page {ordered[0]})"
+        else:
+            title_suffix = f" (Pages {', '.join(str(p) for p in ordered)})"
+        base_title = self.metadata.title or "Document"
+        new_metadata = DocumentMetadata(
+            title=f"{base_title}{title_suffix}",
+            source_file_name=self.metadata.source_file_name,
+            page_count=len(filtered_pages) if filtered_pages else len(ordered),
+        )
+        return DocumentIR(
+            schema_version=self.schema_version,
+            metadata=new_metadata,
+            pages=filtered_pages,
+            blocks=filtered_blocks,
+        )

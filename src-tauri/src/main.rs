@@ -42,12 +42,20 @@ impl AppSession {
             .args(["sidecar"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Failed to launch sidecar ({}): {}", sidecar_exe.display(), e))?;
 
         let stdin = child.stdin.take().ok_or("Failed to open sidecar stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to open sidecar stdout")?;
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let mut err_reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = err_reader.next_line().await {
+                    eprintln!("[sidecar:err] {}", line);
+                }
+            });
+        }
 
         *stdin_guard = Some(stdin);
         {
@@ -491,6 +499,13 @@ async fn start_conversion(
 
     // Determine output file path
     let input_path = Path::new(&file_path);
+    if !input_path.exists() {
+        return Err(format!("Input file not found: {}", file_path));
+    }
+
+    let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    let user_downloads = PathBuf::from(&user_profile).join("Downloads");
+
     let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
     let out_fmt = settings.get("outputFormat").and_then(|f| f.as_str()).unwrap_or("pdf");
     let ext = match out_fmt {
@@ -498,19 +513,51 @@ async fn start_conversion(
         "reader" | "html" => "html",
         _ => "pdf",
     };
-    let parent_dir = input_path.parent().unwrap_or_else(|| Path::new("."));
-    let default_output_path = parent_dir.join(format!("{}-largeprint.{}", stem, ext));
 
-    let output_path = if let Some(custom_path) = settings.get("outputPath").and_then(|p| p.as_str()) {
+    let default_output_path = if let Some(parent) = input_path.parent() {
+        if parent.is_absolute() && parent.exists() {
+            parent.join(format!("{}-largeprint.{}", stem, ext))
+        } else {
+            user_downloads.join(format!("{}-largeprint.{}", stem, ext))
+        }
+    } else {
+        user_downloads.join(format!("{}-largeprint.{}", stem, ext))
+    };
+
+    let mut output_path = if let Some(custom_path) = settings.get("outputPath").and_then(|p| p.as_str()) {
         let trimmed = custom_path.trim();
         if !trimmed.is_empty() {
-            PathBuf::from(trimmed)
+            let p = PathBuf::from(trimmed);
+            if p.is_absolute() {
+                p
+            } else if trimmed.starts_with("Downloads") || trimmed.starts_with("downloads") {
+                let rest = trimmed.trim_start_matches("Downloads").trim_start_matches("downloads").trim_start_matches('\\').trim_start_matches('/');
+                user_downloads.join(rest)
+            } else if let Some(parent) = input_path.parent() {
+                if parent.is_absolute() {
+                    parent.join(trimmed)
+                } else {
+                    user_downloads.join(trimmed)
+                }
+            } else {
+                user_downloads.join(trimmed)
+            }
         } else {
             default_output_path
         }
     } else {
         default_output_path
     };
+
+    // Ensure output path is strictly absolute
+    if output_path.is_relative() {
+        output_path = user_downloads.join(&output_path);
+    }
+
+    // Ensure destination directory exists on disk
+    if let Some(parent) = output_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
 
     let preset = settings.get("textSize").and_then(|t| t.as_u64()).map(|s| {
         match s {
@@ -638,6 +685,71 @@ fn uuid_short() -> String {
     format!("job-{:x}", ms)
 }
 
+#[tauri::command]
+async fn get_app_version() -> Result<String, String> {
+    Ok(env!("CARGO_PKG_VERSION").to_string())
+}
+
+#[tauri::command]
+async fn download_and_apply_update(
+    download_url: String,
+    expected_sha256: Option<String>,
+) -> Result<(), String> {
+    if !download_url.starts_with("https://") {
+        return Err("Insecure download URL: only HTTPS is permitted".to_string());
+    }
+
+    let temp_dir = std::env::temp_dir();
+    let installer_path = temp_dir.join("OpenLargePrint_setup_update.exe");
+
+    #[cfg(target_os = "windows")]
+    {
+        let status = tokio::process::Command::new("curl.exe")
+            .args(["-sSL", "--max-time", "300", &download_url, "-o", &installer_path.to_string_lossy()])
+            .status()
+            .await
+            .map_err(|e| format!("Downloader error: {}", e))?;
+
+        if !status.success() {
+            return Err("Download process failed to complete successfully".to_string());
+        }
+
+        if let Some(expected) = expected_sha256 {
+            let expected_trimmed = expected.trim().to_lowercase();
+            if expected_trimmed.len() == 64 {
+                let out = tokio::process::Command::new("powershell.exe")
+                    .args([
+                        "-NoProfile",
+                        "-Command",
+                        &format!("(Get-FileHash -Algorithm SHA256 -LiteralPath '{}').Hash", installer_path.display()),
+                    ])
+                    .output()
+                    .await
+                    .map_err(|e| format!("Hash verification command failed: {}", e))?;
+
+                let actual_hash = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+                if actual_hash != expected_trimmed {
+                    let _ = std::fs::remove_file(&installer_path);
+                    return Err(format!("Installer hash mismatch. Expected: {}, Got: {}", expected_trimmed, actual_hash));
+                }
+            }
+        }
+
+        let mut spawn_cmd = std::process::Command::new(&installer_path);
+        spawn_cmd
+            .spawn()
+            .map_err(|e| format!("Failed to start installer: {}", e))?;
+
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        std::process::exit(0);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("In-app update application is supported on Windows".to_string())
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppSession::default())
@@ -654,7 +766,9 @@ fn main() {
             start_conversion,
             cancel_conversion,
             get_review_data,
-            retry_page
+            retry_page,
+            get_app_version,
+            download_and_apply_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenLargePrint application");

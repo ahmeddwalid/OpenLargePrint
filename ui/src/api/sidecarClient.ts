@@ -13,14 +13,24 @@ export interface SidecarCallbacks {
   onCancelled: () => void;
 }
 
+function getTauri() {
+  const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+  const tauri = win?.__TAURI__;
+  if (!tauri) return null;
+  const invoke: ((cmd: string, args?: Record<string, any>) => Promise<any>) | undefined =
+    tauri.core?.invoke || tauri.invoke;
+  const listen = tauri.event?.listen;
+  return { tauri, invoke, listen };
+}
+
 export class SidecarClient {
   private isCancelled = false;
 
   public async openFileDialog(): Promise<{ path: string; name: string; size: number } | null> {
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    const t = getTauri();
+    if (t?.invoke) {
       try {
-        const res = await win.__TAURI__.core.invoke('open_file_dialog');
+        const res = await t.invoke('open_file_dialog');
         if (res && res.path) {
           return res;
         }
@@ -32,10 +42,10 @@ export class SidecarClient {
   }
 
   public async getSystemPaths(): Promise<{ downloads: string; desktop: string; documents: string }> {
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    const t = getTauri();
+    if (t?.invoke) {
       try {
-        const res = await win.__TAURI__.core.invoke('get_system_paths');
+        const res = await t.invoke('get_system_paths');
         if (res && res.downloads) {
           return res;
         }
@@ -55,10 +65,10 @@ export class SidecarClient {
     format?: string,
     initialDir?: string
   ): Promise<string | null> {
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    const t = getTauri();
+    if (t?.invoke) {
       try {
-        const res = await win.__TAURI__.core.invoke('choose_save_dialog', {
+        const res = await t.invoke('choose_save_dialog', {
           defaultName,
           filterExt: format,
           initialDir,
@@ -74,10 +84,10 @@ export class SidecarClient {
   }
 
   public async inspectFilePath(filePath: string): Promise<{ path: string; name: string; size: number } | null> {
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    const t = getTauri();
+    if (t?.invoke) {
       try {
-        const res = await win.__TAURI__.core.invoke('inspect_file_path', { filePath });
+        const res = await t.invoke('inspect_file_path', { filePath });
         if (res && res.path) {
           return res;
         }
@@ -91,10 +101,10 @@ export class SidecarClient {
   }
 
   public async openPathInSystem(filePath: string): Promise<boolean> {
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    const t = getTauri();
+    if (t?.invoke) {
       try {
-        await win.__TAURI__.core.invoke('open_path_in_system', { path: filePath });
+        await t.invoke('open_path_in_system', { path: filePath });
         return true;
       } catch (err) {
         console.error('Tauri open_path_in_system failed:', err);
@@ -104,10 +114,10 @@ export class SidecarClient {
   }
 
   public async revealInFolder(filePath: string): Promise<boolean> {
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    const t = getTauri();
+    if (t?.invoke) {
       try {
-        await win.__TAURI__.core.invoke('reveal_in_folder', { path: filePath });
+        await t.invoke('reveal_in_folder', { path: filePath });
         return true;
       } catch (err) {
         console.error('Tauri reveal_in_folder failed:', err);
@@ -117,10 +127,10 @@ export class SidecarClient {
   }
 
   public async getCliArgFile(): Promise<{ path: string; name: string; size: number } | null> {
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
+    const t = getTauri();
+    if (t?.invoke) {
       try {
-        const res = await win.__TAURI__.core.invoke('get_cli_arg_file');
+        const res = await t.invoke('get_cli_arg_file');
         if (res && res.path) {
           return res;
         }
@@ -184,9 +194,11 @@ export class SidecarClient {
   ): Promise<void> {
     this.isCancelled = false;
 
-    // Check Tauri bridge
-    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke && win?.__TAURI__?.event?.listen) {
+    // Check Tauri desktop bridge
+    const t = getTauri();
+    if (t?.invoke && t?.listen) {
+      const invoke = t.invoke;
+      const listen = t.listen;
       try {
         let unlistenProgress: (() => void) | undefined;
         let unlistenCheckpoint: (() => void) | undefined;
@@ -202,7 +214,7 @@ export class SidecarClient {
           if (unlistenCancelled) unlistenCancelled();
         };
 
-        unlistenProgress = await win.__TAURI__.event.listen('sidecar-progress', (event: any) => {
+        unlistenProgress = await listen('sidecar-progress', (event: any) => {
           const payload = event.payload;
           callbacks.onProgress({
             currentPage: payload.current_page || 0,
@@ -213,13 +225,13 @@ export class SidecarClient {
           });
         });
 
-        unlistenCheckpoint = await win.__TAURI__.event.listen('sidecar-checkpoint', (event: any) => {
+        unlistenCheckpoint = await listen('sidecar-checkpoint', (event: any) => {
           if (callbacks.onCheckpoint) {
             callbacks.onCheckpoint(event.payload.page_number, event.payload.page_number * 3);
           }
         });
 
-        unlistenSuccess = await win.__TAURI__.event.listen('sidecar-success', (event: any) => {
+        unlistenSuccess = await listen('sidecar-success', (event: any) => {
           cleanup();
           const p = event.payload;
 
@@ -290,20 +302,23 @@ export class SidecarClient {
           });
         });
 
-        unlistenError = await win.__TAURI__.event.listen('sidecar-error', (event: any) => {
+        unlistenError = await listen('sidecar-error', (event: any) => {
           cleanup();
           callbacks.onError(event.payload.message || 'Conversion failed.');
         });
 
-        unlistenCancelled = await win.__TAURI__.event.listen('sidecar-cancelled', () => {
+        unlistenCancelled = await listen('sidecar-cancelled', () => {
           cleanup();
           callbacks.onCancelled();
         });
 
-        await win.__TAURI__.core.invoke('start_conversion', { filePath, settings });
+        await invoke('start_conversion', { filePath, settings });
         return;
-      } catch (err) {
-        console.error('Tauri conversion invoke failed, continuing with client processing:', err);
+      } catch (err: any) {
+        console.error('Tauri conversion invoke failed:', err);
+        const errStr = typeof err === 'string' ? err : err?.message || 'Conversion failed.';
+        callbacks.onError(errStr);
+        return;
       }
     }
 

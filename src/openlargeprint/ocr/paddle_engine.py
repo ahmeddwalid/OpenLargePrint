@@ -6,13 +6,13 @@ import time
 from typing import Optional, Tuple
 from PIL import Image
 from openlargeprint.security.isolation import log_safe_info
-from .base import DocumentOcrEngine, EngineCapabilities, EnginePageResult, OcrDetectedLine
+from .base import CancellationToken, DocumentOcrEngine, EngineCapabilities, EnginePageResult, OcrDetectedLine
 
 
 class PaddleRapidOcrEngine:
     """CPU-friendly PaddleOCR engine adapter running on-device via ONNX Runtime."""
 
-    def __init__(self, use_gpu: bool = True):
+    def __init__(self, use_gpu: bool = False):
         self._engine = None
         self.use_gpu = use_gpu
 
@@ -68,7 +68,10 @@ class PaddleRapidOcrEngine:
         *,
         page_num: int,
         language_hints: Tuple[str, ...] = ("en",),
+        cancellation: Optional[CancellationToken] = None,
     ) -> EnginePageResult:
+        if cancellation is not None and cancellation.is_cancelled():
+            return EnginePageResult(lines=[], elapse_seconds=0.0, warnings=["Cancelled before OCR started"], cancelled=True)
         engine = self._get_engine()
         start_time = time.perf_counter()
 
@@ -83,6 +86,8 @@ class PaddleRapidOcrEngine:
 
         if raw_result:
             for item in raw_result:
+                if cancellation is not None and cancellation.is_cancelled():
+                    return EnginePageResult(lines=lines, elapse_seconds=time.perf_counter() - start_time, warnings=warnings + ["Cancelled mid-page"], cancelled=True)
                 try:
                     box_points, text, confidence = item
                     # box_points is [[x0,y0], [x1,y0], [x1,y1], [x0,y1]]

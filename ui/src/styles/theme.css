@@ -24,6 +24,7 @@
 
   /* Typography */
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-arabic: "Noto Sans Arabic", "Segoe UI", "Tahoma", sans-serif;
   --font-serif: "Georgia", "Times New Roman", serif;
   --font-size-base: 18px;
   --font-size-lg: 20px;
@@ -36,6 +37,28 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+}
+
+/* Explicit Light Theme (same as :root) */
+[data-theme="light"] {
+  --bg-primary: #faf8f5;
+  --bg-surface: #f1ede4;
+  --bg-surface-raised: #e8e3d8;
+  --text-primary: #1c1b18;
+  --text-secondary: #4a473f;
+  --text-muted: #736f66;
+  --border-color: #d6d0c2;
+  --border-focus: #9c4a1a;
+  --focus-ring: #9c4a1a;
+  --accent-primary: #9c4a1a;
+  --accent-hover: #803912;
+  --accent-text: #faf8f5;
+  --warning-bg: #fdf3e7;
+  --warning-border: #d97724;
+  --warning-text: #7a3a00;
+  --success-bg: #edf5ea;
+  --success-border: #437a3b;
+  --success-text: #1d4717;
 }
 
 /* Sepia Theme */
@@ -74,6 +97,31 @@
   --success-bg: #162414;
   --success-border: #5fa852;
   --success-text: #a6e39d;
+}
+
+/* Auto Theme: follow OS dark mode preference (A11Y-004) */
+/* When data-theme="auto", light is the default; dark activates via media query */
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    --bg-primary: #161614;
+    --bg-surface: #22221f;
+    --bg-surface-raised: #2d2d29;
+    --text-primary: #f5f4ef;
+    --text-secondary: #cfccc2;
+    --text-muted: #9e9a8f;
+    --border-color: #47453e;
+    --border-focus: #e07a38;
+    --focus-ring: #e07a38;
+    --accent-primary: #d96820;
+    --accent-hover: #f07e35;
+    --accent-text: #161614;
+    --warning-bg: #2d2113;
+    --warning-border: #f09543;
+    --warning-text: #ffcf99;
+    --success-bg: #162414;
+    --success-border: #5fa852;
+    --success-text: #a6e39d;
+  }
 }
 
 /* Base Styles */
@@ -480,14 +528,75 @@ button.secondary-btn {
   font-family: var(--font-serif);
 }
 
-/* RTL Support (A11Y-005, LANG-001) */
+/* RTL Support (A11Y-005, LANG-001, LANG-002) */
 [dir="rtl"] {
   text-align: right;
+  font-family: var(--font-family-arabic);
 }
 
 [dir="rtl"] .skip-link {
   left: auto;
   right: 12px;
+}
+
+[dir="rtl"] .app-header {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .app-title-group {
+  flex-direction: row-reverse;
+  text-align: right;
+}
+
+[dir="rtl"] .header-controls {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .file-badge {
+  flex-direction: row-reverse;
+  text-align: right;
+}
+
+[dir="rtl"] .file-info {
+  align-items: flex-end;
+}
+
+[dir="rtl"] .review-split {
+  direction: rtl;
+}
+
+[dir="rtl"] .review-actions {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .reader-toolbar {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .disclosure-toggle {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .radio-group-grid {
+  direction: rtl;
+}
+
+[dir="rtl"] .progress-header {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .pane-title {
+  text-align: right;
+}
+
+[dir="rtl"] .reader-body {
+  text-align: right;
+  direction: rtl;
+}
+
+[dir="rtl"] th,
+[dir="rtl"] td {
+  text-align: right;
 }
 
 /* Reading Ruler Guide for Low-Vision Focus (A11Y-001, A11Y-003) */

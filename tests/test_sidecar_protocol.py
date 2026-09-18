@@ -65,6 +65,27 @@ def test_sidecar_inspect_pdf(tmp_path: Path):
     assert event["file_name"] == "sample.pdf"
 
 
+def test_sidecar_inspect_classification_summary(tmp_path: Path):
+    """Inspect must return per-page classification counts (PDF-001)."""
+    from PIL import Image as PILImage
+
+    pdf_file = tmp_path / "scanned_like.pdf"
+    img = PILImage.new("RGB", (400, 400), color="white")
+    img.save(tmp_path / "page.png")
+    # Blank pages with no text classify as scanned
+    create_minimal_pdf(pdf_file)
+    cmd = json.dumps({"command": "inspect", "file_path": str(pdf_file)})
+    in_buf = io.StringIO(f"{cmd}\n")
+    out_buf = io.StringIO()
+    runner = SidecarRunner(in_stream=in_buf, out_stream=out_buf)
+    runner.run_loop()
+    out_lines = [json.loads(line) for line in out_buf.getvalue().strip().split("\n") if line.strip()]
+    event = out_lines[0]
+    summary = event.get("classification_summary", {})
+    assert sum(summary.values()) == 2
+    assert "scanned" in summary
+
+
 def test_sidecar_convert_with_progress_and_checkpoint(tmp_path: Path):
     """Verify convert command emits real-time progress and checkpoint events (UI-002, UI-003)."""
     docx_file = tmp_path / "sample.docx"

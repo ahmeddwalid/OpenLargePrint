@@ -113,3 +113,49 @@ def test_model_manager_offline_readiness(tmp_path: Path):
 
     # Now offline ready
     assert mgr.is_offline_ready(["m1"])
+
+
+def test_download_model_verifies_hash(tmp_path: Path):
+    """download_model must fetch bytes and verify pinned SHA-256 (OCR-003, SEC-006)."""
+    import functools
+    import hashlib
+    import http.server
+    import threading
+
+    payload = b"FAKE_ONNX_BYTES_FOR_TEST"
+    digest = hashlib.sha256(payload).hexdigest()
+    serve_dir = tmp_path / "serve"
+    serve_dir.mkdir()
+    (serve_dir / "model.onnx").write_bytes(payload)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(serve_dir))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/model.onnx"
+        catalog = ModelCatalog(
+            models={
+                "dl_model": ModelArtifact(
+                    key="dl_model",
+                    name="Downloadable Test Model",
+                    task=ModelTask.RECOGNITION,
+                    framework=ModelFramework.ONNX,
+                    version="1.0",
+                    sha256=digest,
+                    file_size_bytes=len(payload),
+                    code_license="Apache-2.0",
+                    weight_license="Apache-2.0",
+                    download_url=url,
+                )
+            }
+        )
+        cache = tmp_path / "cache"
+        mgr = ModelManager(catalog=catalog, cache_dir=cache)
+        dest = mgr.download_model("dl_model")
+        assert dest.exists()
+        assert dest.read_bytes() == payload
+        # Second call without force returns cached verified path
+        assert mgr.download_model("dl_model") == dest
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)

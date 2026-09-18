@@ -14,4 +14,9 @@ export default defineConfig({
     minify: true,
     sourcemap: false,
   },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/__tests__/setup.ts"],
+    globals: true,
+  },
 });

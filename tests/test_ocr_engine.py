@@ -50,3 +50,73 @@ def test_ocr_router_modes():
     assert isinstance(engine_auto, DocumentOcrEngine)
     assert isinstance(engine_fast, DocumentOcrEngine)
     assert isinstance(engine_max, DocumentOcrEngine)
+
+
+def test_default_engine_is_cpu_only():
+    """Default orchestrator must instantiate a CPU-only engine (PERF-001, OCR-006)."""
+    from openlargeprint.pipeline import PipelineOrchestrator
+
+    orch = PipelineOrchestrator()
+    assert orch.routing_mode == RoutingMode.AUTOMATIC
+    router = OcrRouter()
+    engine = router.get_engine()
+    assert isinstance(engine, DocumentOcrEngine)
+    # Default fast engine must not request GPU
+    assert getattr(engine, "use_gpu", False) is False
+
+
+def test_routing_mode_matrix():
+    """AUTOMATIC/FAST return CPU engine; MAXIMUM tries VLM then falls back (OCR-001)."""
+    router = OcrRouter()
+    auto_eng = router.get_engine(RoutingMode.AUTOMATIC)
+    fast_eng = router.get_engine(RoutingMode.FAST)
+    assert type(auto_eng) is type(fast_eng)
+    assert getattr(auto_eng, "use_gpu", False) is False
+    max_eng = router.get_engine(RoutingMode.MAXIMUM_ACCURACY)
+    assert isinstance(max_eng, DocumentOcrEngine)
+    # Without the optional VLM model installed, MAXIMUM falls back to CPU engine
+    from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
+
+    try:
+        from openlargeprint.ocr.vlm_engine import PaddleOcrVlEngine
+
+        assert isinstance(max_eng, (PaddleRapidOcrEngine, PaddleOcrVlEngine))
+    except ImportError:
+        assert isinstance(max_eng, PaddleRapidOcrEngine)
+
+
+def test_engine_swap_distinct_classes_when_vlm_available(monkeypatch):
+    """FAST vs MAXIMUM return different classes when VLM model is present (OCR-001)."""
+    from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
+    from openlargeprint.ocr.vlm_engine import PaddleOcrVlEngine
+
+    # Fake model_manager.get_model_path to succeed
+    import openlargeprint.models.manager as mgr_mod
+
+    def fake_get(key, verify=True):
+        from pathlib import Path
+
+        return Path("/tmp/fake-vlm.onnx")
+
+    monkeypatch.setattr(mgr_mod.model_manager, "get_model_path", fake_get)
+    router = OcrRouter()
+    fast_eng = router.get_engine(RoutingMode.FAST)
+    max_eng = router.get_engine(RoutingMode.MAXIMUM_ACCURACY)
+    assert isinstance(fast_eng, PaddleRapidOcrEngine)
+    assert isinstance(max_eng, PaddleOcrVlEngine)
+    assert type(fast_eng) is not type(max_eng)
+
+
+def test_ocr_cancellation_token():
+    """A tripped CancellationToken must short-circuit OCR without full run (UI-002)."""
+    from PIL import Image
+    from openlargeprint.ocr import CancellationToken
+
+    img = Image.new("RGB", (500, 120), color="white")
+    token = CancellationToken()
+    token.cancel()
+    assert bool(token) is True
+    engine = PaddleRapidOcrEngine()
+    result = engine.analyze_page(img, page_num=1, cancellation=token)
+    assert result.cancelled is True
+    assert result.lines == []

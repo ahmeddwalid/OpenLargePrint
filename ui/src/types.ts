@@ -7,7 +7,7 @@ export type TextSize = 18 | 20 | 24 | 28;
 export type PaperSize = 'A4' | 'A3';
 export type OutputFormat = 'pdf' | 'docx' | 'html';
 export type RoutingMode = 'auto' | 'native_only' | 'ocr_scanned_only' | 'max_accuracy';
-export type AppTheme = 'light' | 'sepia' | 'dark';
+export type AppTheme = 'auto' | 'light' | 'sepia' | 'dark';
 
 export interface DocumentBlock {
   id: string;

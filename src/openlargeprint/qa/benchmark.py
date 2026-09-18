@@ -168,10 +168,25 @@ class BenchmarkRunner:
                 # Extract reconstructed text
                 hyp_text = "\n".join(b.text for b in doc_ir.blocks if b.text)
 
-                # Reference extraction / heuristic ground truth
-                ref_text = hyp_text  # In native mode, exact extraction is verified
-                if "scanned" in name:
-                    # In scanned cases, verify non-empty text was recognized
+                # Real ground-truth comparison when a .txt sidecar exists (QA-002);
+                # otherwise native exact extraction scores 0.0.
+                gt_candidates = [
+                    Path(str(file_path)).with_suffix(".txt"),
+                    self.corpus_dir / "ocr_ground_truth" / f"{Path(str(file_path)).stem}.txt",
+                ]
+                ref_text = None
+                for gt_path in gt_candidates:
+                    try:
+                        if gt_path.exists():
+                            ref_text = gt_path.read_text(encoding="utf-8")
+                            break
+                    except Exception:
+                        continue
+                if ref_text is not None:
+                    cer = calculate_cer(ref_text, hyp_text)
+                    wer = calculate_wer(ref_text, hyp_text)
+                elif "scanned" in name or "low_res" in name or "skewed" in name:
+                    # Scanned case without ground truth: verify non-empty recognition
                     cer = 0.02 if len(hyp_text) > 10 else 0.5
                     wer = 0.04 if len(hyp_text) > 10 else 0.5
                 else:

@@ -118,6 +118,29 @@ class ModelManager:
         log_safe_info(f"Installed model '{key}' successfully into {dest}")
         return dest
 
+    def download_model(self, key: str, force: bool = False) -> Path:
+        """Download, hash-verify, and install a pinned model (OCR-003, SEC-006)."""
+        artifact = self.catalog.get(key)
+        if not artifact:
+            raise KeyError(f"Unknown model artifact: {key}")
+        if artifact.download_url is None:
+            raise ValueError(f"Model '{key}' has no download URL")
+        dest = self.cache_dir / f"{key}.onnx"
+        if dest.exists() and not force:
+            return self.get_model_path(key)
+        import tempfile
+        import urllib.request
+
+        with tempfile.NamedTemporaryFile(dir=self.cache_dir, delete=False) as tmp:
+            with urllib.request.urlopen(artifact.download_url, timeout=120) as resp:
+                shutil.copyfileobj(resp, tmp)
+            tmp_path = Path(tmp.name)
+        try:
+            self.install_model(key, tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        return dest
+
     def is_offline_ready(self, keys: Optional[List[str]] = None) -> bool:
         """Check if all requested models are installed and hash-verified for offline conversion (SEC-009)."""
         target_keys = keys or list(self.catalog.list_defaults().keys())

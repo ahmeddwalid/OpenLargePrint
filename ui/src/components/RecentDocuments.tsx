@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { DocumentIR, OutputFormat, TextSize } from '../types';
 import { sidecar } from '../api/sidecarClient';
+import { useI18n } from '../i18n/i18n';
 
 export interface RecentDocumentItem {
   id: string;
@@ -25,6 +26,7 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
   onOpenInReader,
   onClearHistory,
 }) => {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
 
   if (!items || items.length === 0) {
@@ -132,7 +134,16 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                     style={{ minHeight: '44px', padding: '8px 14px' }}
                     aria-label={`Open output file ${item.outputPath}`}
                   >
-                    Open File
+                    {t('file.open_file')}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => sidecar.revealInFolder(item.outputPath)}
+                    style={{ minHeight: '44px', padding: '8px 14px' }}
+                    aria-label={`Show output file in folder: ${item.outputPath}`}
+                  >
+                    {t('file.show_in_folder')}
                   </button>
                 </div>
               </div>

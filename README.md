@@ -1,4 +1,158 @@
 # OpenLargePrint
 
-Accessible, structure-preserving document reconstruction and large-print conversion engine.
-Designed specifically for low-vision readers who need dense documents (such as two-column law books) reflowed into clean, readable large-print documents.
+Open-source, local-first desktop application that reconstructs dense PDFs, law books, and Office documents into large-print publications for low-vision readers.
+
+![OpenLargePrint interface](docs/screenshot-home.png)
+
+## Overview
+
+When low-vision readers encounter materials with dense layouts (such as two-column law textbooks, academic papers, and scanned legal documents), basic magnification tools like standard PDF zoom fail. Fixed-layout pages clip text, require constant horizontal scrolling, and overlap columns when magnified.
+
+OpenLargePrint parses and reconstructs the underlying structure of a document instead of magnifying static page images. The application extracts native text, runs optical character recognition (OCR) where needed, reconstructs multi-column reading order, normalizes content into a canonical document model ([`DocumentIR`](src/openlargeprint/ir/models.py)), and reflows the text into single-column large-print output.
+
+All processing occurs locally on the computer. No document content, text, or images leave the device.
+
+## Core Capabilities
+
+- **Local-first and offline execution**: Document analysis, OCR, and rendering run on the local machine with zero external network calls during conversion ([`SEC-009`](SPEC.md)).
+- **Native text priority**: If extractable Unicode text exists in a digital PDF, OpenLargePrint extracts it directly. OCR is applied only to scanned pages or image regions lacking native text ([`PDF-002`](SPEC.md)).
+- **Reading order reconstruction**: Layout analysis detects multi-column layouts, tables, and images, preserving logical reading order for low-vision reading ([`OCR-001`](SPEC.md), [`PDF-003`](SPEC.md)).
+- **Arabic and bidirectional text support**: Supports Arabic script reshaping, right-to-left reading order, and mixed Arabic and English bidirectional text ([`LANG-001`](SPEC.md), [`LANG-002`](SPEC.md)).
+- **Multiple output formats**: Exports reflowed large-print PDF files (A4 and A3 paper sizes), editable large-print DOCX documents, and an in-app interactive Reader ([`OUT-001`](SPEC.md) through [`OUT-007`](SPEC.md)).
+- **Source provenance and side-by-side review**: Each reflowed block retains its source page number and bounding box coordinates. Pages with low OCR confidence are flagged for side-by-side review against the original page image ([`PDF-006`](SPEC.md), [`UI-004`](SPEC.md)).
+- **Accessible interface**: Built to WCAG 2.2 standards with controls meeting or exceeding 48px target sizes, visible keyboard focus indicators, high-contrast color modes, and full operability at 200% text enlargement ([`A11Y-001`](SPEC.md) through [`A11Y-005`](SPEC.md)).
+- **Update system**: Checks GitHub releases in the background and allows downloading and applying updates directly from the app without manual browser navigation. Respects offline isolation and can be toggled off in settings.
+
+## Supported Formats
+
+### Input Formats
+
+- **PDF (.pdf)**: Born-digital documents, scanned books, mixed digital and scanned pages, and documents with corrupted text layers.
+- **Word (.docx)**: Direct structural import of paragraphs, headings, lists, tables, and images.
+- **PowerPoint (.pptx)**: Direct structural import of slides, text frames, shapes, and notes.
+- **Legacy Word (.doc) and PowerPoint (.ppt)**: Converted through an isolated headless LibreOffice bridge into modern intermediate formats before processing ([`OFF-002`](SPEC.md)).
+
+### Output Formats
+
+- **Large-Print PDF (.pdf)**: Single-column reflowed layout at user-selected font sizes (18pt, 20pt, 24pt, 28pt, or custom). Supports A4 (default) and A3 page sizes with physical page dimensions embedded.
+- **Large-Print Word (.docx)**: Fully editable document structured with semantic styles and matching page setups for word processors.
+- **In-App Reader**: Interactive viewer allowing adjustments to font size, line spacing, margins, and color schemes without reprocessing the source document ([`OUT-002`](SPEC.md)).
+- **Searchable PDF**: Retains the original visual layout of scanned documents while embedding an OCR text layer ([`OUT-004`](SPEC.md)).
+
+## Downloads and Release Verification
+
+Pre-compiled packages for Windows 10 and 11 (64-bit) are available on the [GitHub Releases](https://github.com/ahmeddwalid/OpenLargePrint/releases) page.
+
+### Current Release: v0.1.0
+
+| Package | Format | File Size | Description |
+|---|---|---|---|
+| [`OpenLargePrint_0.1.0_x64-setup.exe`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.1.0/OpenLargePrint_0.1.0_x64-setup.exe) | NSIS Installer | ~116 MB | Standard Windows installer with start menu and context menu integration |
+| [`OpenLargePrint_0.1.0_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.1.0/OpenLargePrint_0.1.0_windows_x64_portable.zip) | Portable Archive | ~115 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
+
+### Checksums (SHA-256)
+
+```text
+d3c3dfe5751d6d7df73b79bd8936be3049b29c79ab32d8492d59d5a0c4c95358  OpenLargePrint_0.1.0_x64-setup.exe
+82d93182351b83b7381b0d1f4b2d1d4b29ba187e70987f616a8dabddb38355ba  OpenLargePrint_0.1.0_windows_x64_portable.zip
+```
+
+To verify the downloaded installer on Windows PowerShell:
+
+```powershell
+Get-FileHash -Algorithm SHA256 OpenLargePrint_0.1.0_x64-setup.exe
+```
+
+## Installation and Updates
+
+### Installer Behavior
+
+- Installs the complete standalone desktop shell and bundled Python processing engine.
+- Does not require pre-installed Python, Node.js, or command-line tools.
+- Runs under standard user accounts without requiring administrator privileges.
+- Registers an optional Windows Explorer context menu entry ("Enlarge with OpenLargePrint") for supported file types.
+
+### Software Updates
+
+OpenLargePrint includes an update checker that communicates with GitHub Releases:
+- On startup, the app checks if a newer version is available.
+- When an update is detected, an accessible notification banner appears with release details and a direct "Download and install update" action.
+- Clicking the update button downloads the verified installer and initiates the upgrade without requiring the user to navigate the GitHub website manually.
+- The update check is completely separate from document conversion. Users in air-gapped environments can disable update checks under "More options".
+
+## System Requirements
+
+- **Operating System**: Windows 10 or Windows 11 (64-bit). Linux and macOS support is in development.
+- **Processor**: Standard x64 processor (Intel or AMD). A dedicated GPU is not required; default layout analysis and OCR run on CPU.
+- **Memory**: 4 GB RAM minimum; 8 GB RAM recommended for documents over 200 pages.
+- **Disk Space**: Approximately 500 MB for the installed application and OCR model runtime.
+
+## Building from Source
+
+### Prerequisites
+
+- **Python**: Version 3.11 or later with the `uv` package manager ([https://astral.sh/uv](https://astral.sh/uv))
+- **Node.js**: Version 20 or later with `npm`
+- **Rust**: Current stable toolchain via `rustup` ([https://rustup.rs](https://rustup.rs))
+- **Visual Studio Build Tools**: C++ x64 workload for compiling native dependencies on Windows
+
+### Build Instructions
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/ahmeddwalid/OpenLargePrint.git
+   cd OpenLargePrint
+   ```
+
+2. Set up the Python environment and dependencies:
+   ```bash
+   uv sync --dev
+   ```
+
+3. Install frontend dependencies:
+   ```bash
+   cd ui
+   npm install
+   cd ..
+   ```
+
+4. Build the complete desktop installer:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File packaging/build_windows_app.ps1
+   ```
+
+The packaging pipeline produces the standalone installer executable in `src-tauri/target/release/bundle/nsis/` and release assets in `packaging/dist/`.
+
+## Running Tests
+
+Run the Python engine test suite:
+
+```bash
+uv run pytest tests/ -v
+```
+
+Run the frontend test suite:
+
+```bash
+cd ui
+npm test -- --run
+```
+
+Run the Rust Tauri checks:
+
+```bash
+cd src-tauri
+cargo check
+```
+
+## Technical Documentation
+
+- [SPEC.md](SPEC.md): Product requirements contract and normative specifications.
+- [DESIGN.md](DESIGN.md): System architecture, intermediate representation, and IPC design.
+- [CONTRIBUTING.md](CONTRIBUTING.md): Contribution guidelines and code standards.
+- [CHANGELOG.md](CHANGELOG.md): Version history and release notes.
+- [SIGNING.md](SIGNING.md): Windows code signing and SmartScreen trust documentation.
+
+## License
+
+OpenLargePrint is free software licensed under the GNU General Public License v3.0 (GPL-3.0-or-later). See the [LICENSE](LICENSE) file for the complete license terms.

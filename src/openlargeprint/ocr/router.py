@@ -22,14 +22,25 @@ class OcrRouter:
     def __init__(self):
         self._default_engine: Optional[DocumentOcrEngine] = None
 
-    def get_engine(self, mode: RoutingMode = RoutingMode.MAXIMUM_ACCURACY) -> DocumentOcrEngine:
-        """Return the OCR engine corresponding to the selected routing mode (default: Maximum Accuracy)."""
+    def get_engine(self, mode: RoutingMode = RoutingMode.AUTOMATIC) -> DocumentOcrEngine:
+        """Return the OCR engine corresponding to the selected routing mode (default: Automatic CPU-first)."""
         if self._default_engine is None:
-            self._default_engine = PaddleRapidOcrEngine(use_gpu=True)
+            self._default_engine = PaddleRapidOcrEngine(use_gpu=False)
 
         if mode == RoutingMode.MAXIMUM_ACCURACY:
-            log_safe_info("Routing to Maximum Accuracy OCR engine with GPU and high-thread acceleration")
-            return self._default_engine
+            # Prefer the heavier VLM adapter when its model is installed;
+            # otherwise fall back gracefully to the CPU-friendly default (OCR-001).
+            try:
+                from openlargeprint.ocr.vlm_engine import PaddleOcrVlEngine
+
+                from openlargeprint.models.manager import model_manager
+
+                model_manager.get_model_path("paddleocr_vl_1.6", verify=True)
+                log_safe_info("Routing to Maximum Accuracy VLM OCR engine")
+                return PaddleOcrVlEngine()
+            except Exception:
+                log_safe_info("VLM model not available; falling back to CPU-friendly OCR engine")
+                return self._default_engine
         elif mode in (RoutingMode.AUTOMATIC, RoutingMode.FAST):
             return self._default_engine
-        return self.get_engine(RoutingMode.MAXIMUM_ACCURACY)
+        return self.get_engine(RoutingMode.AUTOMATIC)

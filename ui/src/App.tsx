@@ -9,7 +9,11 @@ import { ReaderView } from './components/ReaderView';
 import { RecentDocuments, RecentDocumentItem } from './components/RecentDocuments';
 import { ReviewScreen } from './components/ReviewScreen';
 import { TextSizeSelector } from './components/TextSizeSelector';
+import { UpdateNotification } from './components/UpdateNotification';
 import { sidecar } from './api/sidecarClient';
+import { UpdateInfo, checkForUpdates, isUpdateDismissed } from './api/update-checker';
+import { useI18n, Locale } from './i18n/i18n';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import {
   AppTheme,
   ConversionSettings,
@@ -52,9 +56,17 @@ function saveRecentDocs(items: RecentDocumentItem[]) {
 }
 
 export const App: React.FC = () => {
-  // Theme and Direction State
-  const [theme, setTheme] = useState<AppTheme>('light');
-  const [direction, setDirection] = useState<'ltr' | 'rtl'>('ltr');
+  // i18n for translations and direction
+  const { t, locale, direction, setLocale } = useI18n();
+
+  // Theme State (A11Y-004)
+  const [theme, setTheme] = useState<AppTheme>(() => {
+    const saved = localStorage.getItem('openlargeprint_theme');
+    if (saved === 'auto' || saved === 'light' || saved === 'sepia' || saved === 'dark') {
+      return saved;
+    }
+    return 'light';
+  });
 
   // Document Selection & Settings State (UI-001, UI-006)
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -87,15 +99,11 @@ export const App: React.FC = () => {
     setRecentDocs(loadRecentDocs());
   }, []);
 
-  // Synchronize theme to document element
+  // Synchronize theme to document element and persist preference
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('openlargeprint_theme', theme);
   }, [theme]);
-
-  // Synchronize reading direction
-  useEffect(() => {
-    document.documentElement.setAttribute('dir', direction);
-  }, [direction]);
 
   // Fetch native desktop system paths (Downloads, Desktop, Documents)
   useEffect(() => {
@@ -114,6 +122,23 @@ export const App: React.FC = () => {
         setSelectedFile(mockFile);
       }
     });
+  }, []);
+
+  // Background update check (SEC-009: completely separate from document conversion)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const res = await checkForUpdates(false);
+        if (res.available && res.latestVersion && !isUpdateDismissed(res.latestVersion)) {
+          setUpdateInfo(res);
+        }
+      } catch {
+        // Quiet fallback if offline or unreachable
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
   }, []);
 
   const getProposedExportPath = (): string => {
@@ -205,7 +230,7 @@ export const App: React.FC = () => {
         setViewMode('home');
       },
       onCancelled: () => {
-        setErrorMessage('Conversion was cancelled.');
+        setErrorMessage(t('error.conversion_cancelled'));
         setViewMode('home');
       },
       onSuccess: (result) => {
@@ -246,6 +271,19 @@ export const App: React.FC = () => {
   const handleCancelConversion = () => {
     sidecar.cancelConversion();
   };
+
+  useKeyboardShortcuts({
+    onConvert: () => {
+      if (viewMode === 'home' && selectedFile) {
+        handleStartConversion();
+      }
+    },
+    onCancel: () => {
+      if (viewMode === 'progress') {
+        handleCancelConversion();
+      }
+    },
+  });
 
   const handleAcceptReviewItem = (itemId: string, editedText?: string) => {
     setReviewItems((prev) =>
@@ -299,9 +337,9 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="app-container">
+    <div className="app-container" dir={direction} lang={locale}>
       <a href="#main-content" className="skip-link">
-        Skip to main content
+        {t('app.skip_to_content')}
       </a>
 
       {/* Global Application Header */}
@@ -316,14 +354,14 @@ export const App: React.FC = () => {
             style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'contain' }}
           />
           <div>
-            <h1>OpenLargePrint</h1>
-            <p>Accessible document enlargement for low vision</p>
+            <h1>{t('app.title')}</h1>
+            <p>{t('app.subtitle')}</p>
           </div>
         </div>
 
         <div className="header-controls">
           <label htmlFor="global-theme-toggle" style={{ fontSize: '15px', fontWeight: 600 }}>
-            Contrast:
+            {t('theme.label')}
           </label>
           <select
             id="global-theme-toggle"
@@ -337,25 +375,42 @@ export const App: React.FC = () => {
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            <option value="light">Warm Parchment</option>
-            <option value="sepia">Sepia Book</option>
-            <option value="dark">High-Contrast Dark</option>
+            <option value="light">{t('theme.light')}</option>
+            <option value="auto">{t('theme.auto')}</option>
+            <option value="sepia">{t('theme.sepia')}</option>
+            <option value="dark">{t('theme.dark')}</option>
           </select>
 
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => setDirection((prev) => (prev === 'ltr' ? 'rtl' : 'ltr'))}
-            aria-label={`Switch layout reading direction to ${direction === 'ltr' ? 'Right-to-Left' : 'Left-to-Right'}`}
-            style={{ minHeight: '38px', padding: '6px 12px', fontSize: '14px' }}
+          <label htmlFor="global-lang-select" style={{ fontSize: '15px', fontWeight: 600 }}>
+            {t('lang.label')}
+          </label>
+          <select
+            id="global-lang-select"
+            value={locale}
+            onChange={(e) => setLocale(e.target.value as Locale)}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+            }}
           >
-            {direction === 'ltr' ? 'RTL' : 'LTR'}
-          </button>
+            <option value="en">{t('lang.en')}</option>
+            <option value="ar">{t('lang.ar')}</option>
+          </select>
         </div>
       </header>
 
       {/* Main Content Area */}
       <main id="main-content" tabIndex={-1}>
+        {updateInfo && (
+          <UpdateNotification
+            updateInfo={updateInfo}
+            onDismiss={() => setUpdateInfo(null)}
+          />
+        )}
+
         {errorMessage && (
           <div
             className="panel"
@@ -424,11 +479,16 @@ export const App: React.FC = () => {
                 onClick={handleStartConversion}
                 aria-label={
                   selectedFile
-                    ? `Convert ${selectedFile.name} to ${textSize} point large print on ${paperSize} paper as ${outputFormat.toUpperCase()}`
-                    : 'Choose a document first to convert'
+                    ? t('convert.aria_ready', {
+                        fileName: selectedFile.name,
+                        textSize: String(textSize),
+                        paperSize,
+                        format: outputFormat.toUpperCase(),
+                      })
+                    : t('convert.aria_no_file')
                 }
               >
-                Convert to Large Print
+                {t('convert.button')}
               </button>
             </div>
 
@@ -481,6 +541,7 @@ export const App: React.FC = () => {
             documentIR={documentIR}
             initialSize={textSize}
             currentTheme={theme}
+            exportedFilePath={exportedFilePath}
             onThemeChange={setTheme}
             onBack={() => setViewMode('home')}
             onExport={handleExportReader}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple, Union
 
 from openlargeprint.exporters import (
     DocxExporter,
@@ -46,7 +46,7 @@ class ConversionResult:
 class PipelineOrchestrator:
     """Coordinates the document reconstruction pipeline across all input and output formats."""
 
-    def __init__(self, routing_mode: RoutingMode = RoutingMode.MAXIMUM_ACCURACY):
+    def __init__(self, routing_mode: RoutingMode = RoutingMode.AUTOMATIC):
         self.routing_mode = routing_mode
         self.pdf_importer = NativePdfImporter(routing_mode=routing_mode)
         self.docx_importer = DocxImporter()
@@ -97,7 +97,7 @@ class PipelineOrchestrator:
         output_path: Path | str,
         options: Optional[ExportOptions] = None,
         export_format: Optional[ExportFormat] = None,
-        page_range: Optional[Tuple[int, int]] = None,
+        page_range: Optional[Union[Tuple[int, int], List[int]]] = None,
         progress_callback: Optional[ProgressCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
         checkpoint_callback: Optional[CheckpointCallback] = None,
@@ -151,14 +151,19 @@ class PipelineOrchestrator:
 
             # 6. Apply selective page slicing if requested (OUT-010)
             if page_range is not None:
-                start_p, end_p = page_range
-                log_safe_info(f"Applying selective page slicing for pages {start_p} to {end_p}")
-                doc_ir = doc_ir.slice_by_source_pages(start_p, end_p)
+                if isinstance(page_range, (list, set)):
+                    selected = set(int(p) for p in page_range)
+                    log_safe_info(f"Applying selective page slicing for pages {sorted(selected)}")
+                    doc_ir = doc_ir.slice_by_source_pages_set(selected)
+                else:
+                    start_p, end_p = page_range
+                    log_safe_info(f"Applying selective page slicing for pages {start_p} to {end_p}")
+                    doc_ir = doc_ir.slice_by_source_pages(start_p, end_p)
 
             # 7. Export to requested format (DOCX, Large-Print PDF, or Reader HTML)
             if export_format == "pdf":
                 self.pdf_exporter.export(doc_ir, output_file, options)
-            elif export_format == "reader":
+            elif export_format in ("reader", "html", "htm"):
                 self.reader_exporter.export(doc_ir, output_file, options)
             else:
                 self.docx_exporter.export(doc_ir, output_file, options)
@@ -179,5 +184,32 @@ class PipelineOrchestrator:
         format_type = detect_file_type(input_file)
 
         with JobWorkspace() as ws:
-            doc_ir = self._import_by_format(input_file, format_type, ws)
+            clean_file, _stripped = sanitize_document(input_file, ws.path)
+            doc_ir = self._import_by_format(clean_file, format_type, ws)
             return doc_ir
+
+    def retry_page(
+        self,
+        input_path: Path | str,
+        page_number: int,
+        routing_mode: RoutingMode = RoutingMode.MAXIMUM_ACCURACY,
+    ) -> DocumentIR:
+        """Re-process a single flagged page at higher accuracy (UI-004)."""
+        input_file = Path(input_path).resolve()
+        fmt = detect_file_type(input_file)
+        with JobWorkspace() as ws:
+            clean_file, _ = sanitize_document(input_file, ws.path)
+            # Use a fresh importer honouring the requested routing mode so the
+            # retry actually re-runs extraction/OCR rather than returning cached blocks.
+            retry_importer = NativePdfImporter(routing_mode=routing_mode) if fmt == "pdf" else None
+            if retry_importer is not None:
+                full = retry_importer.import_document(clean_file, ws)
+            else:
+                full = self._import_by_format(clean_file, fmt, ws)
+            retried_blocks = [b for b in full.blocks if b.source_page == page_number]
+            return DocumentIR(
+                schema_version=full.schema_version,
+                metadata=full.metadata,
+                pages=[p for p in full.pages if p.page_number == page_number],
+                blocks=retried_blocks,
+            )
