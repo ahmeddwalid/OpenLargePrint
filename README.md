@@ -53,8 +53,8 @@ Pre-compiled packages for Windows 10 and 11 (64-bit) are available on the [GitHu
 ### Checksums (SHA-256)
 
 ```text
-225d0e821d62344d7564016faf820515e6e8a44abf96383a565aa91f47c6eb94  OpenLargePrint_0.1.0_x64-setup.exe
-7a247d3b25bfaaea6d451b376b00ab18a22e3322975cd820f2e1ef591ea702bd  OpenLargePrint_0.1.0_windows_x64_portable.zip
+a2826aacc3e2b81d8e97af9c7b57e997e38254baa378bc4b0545e5012ba1431b  OpenLargePrint_0.1.0_x64-setup.exe
+466acf639e151b050a7a90bacf10e90876677dc3d52de0c717392629abee9156  OpenLargePrint_0.1.0_windows_x64_portable.zip
 ```
 
 To verify the downloaded installer on Windows PowerShell:
