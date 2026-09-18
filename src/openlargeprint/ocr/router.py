@@ -22,17 +22,14 @@ class OcrRouter:
     def __init__(self):
         self._default_engine: Optional[DocumentOcrEngine] = None
 
-    def get_engine(self, mode: RoutingMode = RoutingMode.AUTOMATIC) -> DocumentOcrEngine:
-        """Return the OCR engine corresponding to the selected routing mode."""
-        if mode in (RoutingMode.AUTOMATIC, RoutingMode.FAST):
-            if self._default_engine is None:
-                self._default_engine = PaddleRapidOcrEngine()
+    def get_engine(self, mode: RoutingMode = RoutingMode.MAXIMUM_ACCURACY) -> DocumentOcrEngine:
+        """Return the OCR engine corresponding to the selected routing mode (default: Maximum Accuracy)."""
+        if self._default_engine is None:
+            self._default_engine = PaddleRapidOcrEngine(use_gpu=True)
+
+        if mode == RoutingMode.MAXIMUM_ACCURACY:
+            log_safe_info("Routing to Maximum Accuracy OCR engine with GPU and high-thread acceleration")
             return self._default_engine
-        elif mode == RoutingMode.MAXIMUM_ACCURACY:
-            # For Maximum accuracy, if heavy model pack is not separately downloaded,
-            # fall back gracefully to the default CPU engine
-            log_safe_info("Maximum accuracy requested; using default CPU engine (optional pack not installed)")
-            if self._default_engine is None:
-                self._default_engine = PaddleRapidOcrEngine()
+        elif mode in (RoutingMode.AUTOMATIC, RoutingMode.FAST):
             return self._default_engine
-        return self.get_engine(RoutingMode.AUTOMATIC)
+        return self.get_engine(RoutingMode.MAXIMUM_ACCURACY)

@@ -176,10 +176,16 @@ class SidecarRunner:
             include_page_markers=include_markers,
         )
 
-        try:
-            routing_enum = RoutingMode(routing_mode_str)
-        except ValueError:
-            routing_enum = RoutingMode.AUTOMATIC
+        routing_mode_raw = str(data.get("routing_mode", "maximum_accuracy")).lower().strip()
+        if "fast" in routing_mode_raw:
+            routing_enum = RoutingMode.FAST
+        elif routing_mode_raw in ("automatic", "auto"):
+            routing_enum = RoutingMode.MAXIMUM_ACCURACY
+        else:
+            try:
+                routing_enum = RoutingMode(data.get("routing_mode", "Maximum accuracy"))
+            except ValueError:
+                routing_enum = RoutingMode.MAXIMUM_ACCURACY
 
         orchestrator = PipelineOrchestrator(routing_mode=routing_enum)
 

@@ -46,7 +46,7 @@ class ConversionResult:
 class PipelineOrchestrator:
     """Coordinates the document reconstruction pipeline across all input and output formats."""
 
-    def __init__(self, routing_mode: RoutingMode = RoutingMode.AUTOMATIC):
+    def __init__(self, routing_mode: RoutingMode = RoutingMode.MAXIMUM_ACCURACY):
         self.routing_mode = routing_mode
         self.pdf_importer = NativePdfImporter(routing_mode=routing_mode)
         self.docx_importer = DocxImporter()

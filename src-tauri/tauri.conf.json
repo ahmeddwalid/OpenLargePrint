@@ -27,8 +27,17 @@
   },
   "bundle": {
     "active": true,
+    "targets": ["nsis", "msi", "deb", "appimage"],
     "category": "Accessibility",
     "shortDescription": "Accessible document enlargement for low-vision readers",
-    "longDescription": "OpenLargePrint turns dense PDFs, law books, Word documents, and presentations into genuine large-print publications with preserved reading order and high optical accuracy."
+    "longDescription": "OpenLargePrint turns dense PDFs, law books, Word documents, and presentations into genuine large-print publications with preserved reading order and high optical accuracy.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      },
+      "wix": {
+        "language": "en-US"
+      }
+    }
   }
 }

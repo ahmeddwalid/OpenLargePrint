@@ -31,7 +31,7 @@ export const App: React.FC = () => {
   const [textSize, setTextSize] = useState<TextSize>(20); // 20pt default per OUT-006
   const [paperSize, setPaperSize] = useState<PaperSize>('A4'); // A4 default per UI-006
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('pdf');
-  const [routingMode, setRoutingMode] = useState<RoutingMode>('auto');
+  const [routingMode, setRoutingMode] = useState<RoutingMode>('max_accuracy');
   const [pageRange, setPageRange] = useState<string>('');
 
   // Workflow State

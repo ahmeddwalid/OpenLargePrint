@@ -35,12 +35,18 @@ def verify_packaging() -> bool:
         print(f"Error: unexpected product name: {product_name}")
         return False
 
-    # 4. Check UI build assets exist
+    # 4. Check Windows bundle targets
+    targets = conf.get("bundle", {}).get("targets", [])
+    if "nsis" not in targets or "msi" not in targets:
+        print(f"Error: bundle targets must include 'nsis' and 'msi' for Windows 11 packaging. Got: {targets}")
+        return False
+
+    # 5. Check UI build assets exist
     ui_index = repo_root / "ui" / "dist" / "index.html"
     if not ui_index.exists():
         print(f"Warning: ui/dist/index.html not built yet. Run 'npm run build' in ui/.")
 
-    print("Packaging verification passed: Tauri 2 configuration and security boundaries are valid.")
+    print("Packaging verification passed: Tauri 2 configuration, Windows 11 bundle targets, and security boundaries are valid.")
     return True
 
 

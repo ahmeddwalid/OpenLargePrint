@@ -43,7 +43,7 @@ class OcrPointLine:
 class ScannedPageExtractor:
     """Renders scanned PDF pages, invokes OCR, reconstructs columns, and yields DocumentIR blocks."""
 
-    def __init__(self, ocr_engine: DocumentOcrEngine, dpi: float = 200.0):
+    def __init__(self, ocr_engine: DocumentOcrEngine, dpi: float = 300.0):
         self.ocr_engine = ocr_engine
         self.dpi = dpi
 

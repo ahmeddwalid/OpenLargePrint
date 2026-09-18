@@ -25,6 +25,17 @@ class LibreOfficeBridge:
             bin_path = shutil.which(candidate)
             if bin_path:
                 return bin_path
+
+        # Standard Windows installation paths
+        if os.name == "nt":
+            win_candidates = [
+                r"C:\Program Files\LibreOffice\program\soffice.exe",
+                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+            ]
+            for wc in win_candidates:
+                if Path(wc).exists():
+                    return wc
+
         return None
 
     def convert_to_modern(
@@ -38,7 +49,7 @@ class LibreOfficeBridge:
         Enforces OFF-003 and SEC-008:
         - Argument array (never shell string concatenation)
         - Disposable temporary user profile (-env:UserInstallation)
-        - Strict timeout with process group tree termination (SIGKILL)
+        - Strict timeout with process group tree termination (SIGKILL / taskkill)
         """
         input_file = Path(file_path).resolve()
         if not input_file.exists():
@@ -75,21 +86,30 @@ class LibreOfficeBridge:
         log_safe_info(f"Invoking LibreOffice bridge conversion to {target_format.upper()}")
 
         # 3. Launch subprocess in a dedicated session/process group for full tree termination (SEC-008)
+        popen_kwargs = {}
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            start_new_session=True,
+            **popen_kwargs,
         )
 
         try:
             stdout, stderr = process.communicate(timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired:
-            # Kill entire process group on timeout
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except OSError:
-                pass
+            # Kill entire process group on timeout (SEC-008)
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+            else:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except OSError:
+                    pass
             process.communicate()
             raise TimeoutError(
                 f"LibreOffice conversion process exceeded timeout limit of {self.timeout_seconds}s (SEC-008)."

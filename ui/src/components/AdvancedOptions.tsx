@@ -102,10 +102,10 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
                 borderRadius: 'var(--radius-sm)',
               }}
             >
-              <option value="auto">Automatic (Best accuracy and speed)</option>
+              <option value="max_accuracy">Maximum Accuracy (Default — 300 DPI, GPU/Multi-core accelerated)</option>
+              <option value="auto">Automatic (Balanced)</option>
               <option value="native_only">Fast Digital Extraction Only (skips scanned pages)</option>
               <option value="ocr_scanned_only">Force Scanned Recognition</option>
-              <option value="max_accuracy">Maximum Accuracy (Deep table & layout recognition)</option>
             </select>
           </div>
         </div>
