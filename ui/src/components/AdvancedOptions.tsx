@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
-import { OutputFormat, RoutingMode } from '../types';
+import { RoutingMode } from '../types';
 
 interface AdvancedOptionsProps {
-  format: OutputFormat;
-  onFormatChange: (format: OutputFormat) => void;
   routingMode: RoutingMode;
   onRoutingModeChange: (mode: RoutingMode) => void;
   pageRange: string;
@@ -11,8 +9,6 @@ interface AdvancedOptionsProps {
 }
 
 export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
-  format,
-  onFormatChange,
   routingMode,
   onRoutingModeChange,
   pageRange,
@@ -30,36 +26,11 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
         aria-controls="advanced-options-content"
       >
         <span>{isOpen ? '▾' : '▸'}</span>
-        <span>{isOpen ? 'Hide advanced settings' : 'More options (format, page range, mode)'}</span>
+        <span>{isOpen ? 'Hide advanced settings' : 'More options (page range, recognition mode)'}</span>
       </button>
 
       {isOpen && (
         <div id="advanced-options-content" className="disclosure-body">
-          {/* Format selection */}
-          <div>
-            <label htmlFor="output-format-select" style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>
-              Output format
-            </label>
-            <select
-              id="output-format-select"
-              value={format}
-              onChange={(e) => onFormatChange(e.target.value as OutputFormat)}
-              style={{
-                width: '100%',
-                maxWidth: '320px',
-                padding: '8px 12px',
-                backgroundColor: 'var(--bg-primary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-              }}
-            >
-              <option value="pdf">Printable PDF (Default)</option>
-              <option value="html">Interactive Web Document (HTML)</option>
-              <option value="epub">E-Reader Book (EPUB)</option>
-            </select>
-          </div>
-
           {/* Page Range */}
           <div>
             <label htmlFor="page-range-input" style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>
