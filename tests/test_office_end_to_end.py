@@ -115,7 +115,7 @@ def test_office_cli_commands(tmp_path: Path):
         "--preset",
         "Large",
     ]
-    res_c = subprocess.run(cmd_convert, capture_output=True, text=True)
+    res_c = subprocess.run(cmd_convert, capture_output=True, text=True, encoding="utf-8")
     assert res_c.returncode == 0
     assert out_pdf.exists()
     assert "Successfully converted" in res_c.stdout
@@ -129,6 +129,6 @@ def test_office_cli_commands(tmp_path: Path):
         str(input_docx),
         "--json",
     ]
-    res_i = subprocess.run(cmd_inspect, capture_output=True, text=True)
+    res_i = subprocess.run(cmd_inspect, capture_output=True, text=True, encoding="utf-8")
     assert res_i.returncode == 0
     assert '"schema_version": "1.0.0"' in res_i.stdout

@@ -13,6 +13,18 @@ from openlargeprint.pipeline import PipelineOrchestrator
 
 
 def main() -> int:
+    # Ensure UTF-8 output across Windows and all platforms
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(
         prog="openlargeprint",
         description="OpenLargePrint: Accessible, structure-preserving document reconstruction engine",

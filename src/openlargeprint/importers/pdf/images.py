@@ -21,8 +21,13 @@ def extract_lossless_images_for_page(
     images: List[ImageAsset] = []
 
     try:
-        page_images = pike_page.get_images()
+        page_images = getattr(pike_page, "images", None)
+        if page_images is None and hasattr(pike_page, "get_images"):
+            page_images = pike_page.get_images()
     except Exception:
+        return images
+
+    if not page_images:
         return images
 
     for name, raw_img in page_images.items():

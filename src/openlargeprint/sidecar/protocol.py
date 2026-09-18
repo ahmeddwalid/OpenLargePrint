@@ -145,6 +145,8 @@ class SuccessEvent(BaseModel):
     page_count: int
     flagged_count: int = 0
     warnings: List[str] = Field(default_factory=list)
+    document_ir: Optional[dict[str, Any]] = None
+    review_items: List[FlaggedPageReview] = Field(default_factory=list)
 
 
 class CancelledEvent(BaseModel):

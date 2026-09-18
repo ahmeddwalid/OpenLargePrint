@@ -3,11 +3,43 @@
 from __future__ import annotations
 
 import os
-import resource
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
+
+
+def get_current_ram_mb() -> float:
+    """Cross-platform peak/working-set memory retrieval (PERF-002)."""
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    except ImportError:
+        # Windows API fallback via ctypes
+        try:
+            import ctypes
+            from ctypes import wintypes
+            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+            counters = PROCESS_MEMORY_COUNTERS()
+            counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            if ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+                return counters.WorkingSetSize / (1024.0 * 1024.0)
+        except Exception:
+            pass
+        return 0.0
 
 from openlargeprint.exporters import ExportOptions
 from openlargeprint.pipeline import PipelineOrchestrator
@@ -92,8 +124,7 @@ class BenchmarkRunner:
         total_wer = 0.0
         total_speed = 0.0
         valid_cases_count = 0
-
-        max_rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        max_rss_before = get_current_ram_mb()
 
         for name, file_path in cases.items():
             start_time = time.perf_counter()
@@ -166,8 +197,8 @@ class BenchmarkRunner:
                 speed_per_page = duration / page_count
 
                 # Memory usage
-                max_rss_after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-                peak_ram = round((max_rss_after - max_rss_before) / 1024.0, 2)  # Linux KB to MB
+                max_rss_after = get_current_ram_mb()
+                peak_ram = round(max(0.0, max_rss_after - max_rss_before), 2)
 
                 metrics = EvaluationMetrics(
                     cer=cer,
@@ -231,7 +262,7 @@ class BenchmarkRunner:
             average_cer=avg_cer,
             average_wer=avg_wer,
             average_speed_s_per_page=avg_speed,
-            peak_ram_mb=round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0, 2),
+            peak_ram_mb=round(get_current_ram_mb(), 2),
         )
 
         return report

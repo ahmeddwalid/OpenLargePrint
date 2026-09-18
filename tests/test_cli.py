@@ -3,9 +3,12 @@
 import json
 from pathlib import Path
 import subprocess
+import sys
 import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+
+CLI_CMD = [sys.executable, "-m", "openlargeprint.cli"]
 
 
 def create_minimal_pdf(pdf_path: Path):
@@ -24,8 +27,7 @@ def test_cli_convert(tmp_path: Path):
     output_docx = tmp_path / "memo_large.docx"
     create_minimal_pdf(input_pdf)
 
-    cmd = [
-        ".venv/bin/openlargeprint",
+    cmd = CLI_CMD + [
         "convert",
         str(input_pdf),
         "-o",
@@ -48,7 +50,7 @@ def test_cli_inspect_text(tmp_path: Path):
     input_pdf = tmp_path / "memo.pdf"
     create_minimal_pdf(input_pdf)
 
-    cmd = [".venv/bin/openlargeprint", "inspect", str(input_pdf)]
+    cmd = CLI_CMD + ["inspect", str(input_pdf)]
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0
     assert "Page classifications:" in res.stdout
@@ -62,7 +64,7 @@ def test_cli_inspect_json(tmp_path: Path):
     input_pdf = tmp_path / "memo.pdf"
     create_minimal_pdf(input_pdf)
 
-    cmd = [".venv/bin/openlargeprint", "inspect", str(input_pdf), "--json"]
+    cmd = CLI_CMD + ["inspect", str(input_pdf), "--json"]
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0
     data = json.loads(res.stdout)
@@ -76,7 +78,7 @@ def test_cli_handles_invalid_file(tmp_path: Path):
     fake_file = tmp_path / "not_a_pdf.pdf"
     fake_file.write_text("just text")
 
-    cmd = [".venv/bin/openlargeprint", "convert", str(fake_file), "-o", str(tmp_path / "out.docx")]
+    cmd = CLI_CMD + ["convert", str(fake_file), "-o", str(tmp_path / "out.docx")]
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode != 0
     assert "Error: File format not recognized" in res.stderr

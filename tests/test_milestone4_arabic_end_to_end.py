@@ -22,16 +22,29 @@ from openlargeprint.text.bidi import reorder_bidi_for_display
 
 def create_arabic_legal_pdf(pdf_path: Path):
     """Create a born-digital Arabic legal contract document."""
-    pdfmetrics.registerFont(TTFont("DejaVuSans", "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf"))
+    font_candidates = [
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\tahoma.ttf",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+    ]
+    font_path = next((p for p in font_candidates if Path(p).exists()), None)
+    if font_path:
+        pdfmetrics.registerFont(TTFont("ArabicFont", font_path))
+        font_name = "ArabicFont"
+    else:
+        font_name = "Helvetica"
+
     c = canvas.Canvas(str(pdf_path), pagesize=A4)
 
     # Title
-    c.setFont("DejaVuSans", 18)
+    c.setFont(font_name, 18)
     title = "عقد بيع عقار ابتدائي"
     c.drawString(100, 750, reorder_bidi_for_display(title, TextDirection.RTL))
 
     # Preamble
-    c.setFont("DejaVuSans", 12)
+    c.setFont(font_name, 12)
     p1 = "إنه في يوم الأحد الموافق الأول من شهر المحرم، تم الاتفاق والتراضي بين كل من الطرفين."
     c.drawString(50, 680, reorder_bidi_for_display(p1, TextDirection.RTL))
 

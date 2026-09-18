@@ -254,7 +254,8 @@ def test_sidecar_cancellation(tmp_path: Path):
 def test_sidecar_cli_entrypoint():
     """Verify `openlargeprint sidecar` CLI sub-command executes JSON-Lines loop."""
     import subprocess
-    cmd = [".venv/bin/openlargeprint", "sidecar"]
+    import sys
+    cmd = [sys.executable, "-m", "openlargeprint.cli", "sidecar"]
     res = subprocess.run(
         cmd,
         input='{"command": "health"}\n',

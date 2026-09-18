@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import sys
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
-
-import pypdfium2 as pdfium
 
 from openlargeprint.exporters import ExportOptions, PaperSize, PresetName
 from openlargeprint.ir.models import BlockType
@@ -37,6 +36,13 @@ class SidecarRunner:
         in_stream: Optional[TextIO] = None,
         out_stream: Optional[TextIO] = None,
     ):
+        # Configure unbuffered line output for sub-10ms IPC progress delivery (UI-002)
+        if hasattr(sys.stdout, "reconfigure"):
+            try:
+                sys.stdout.reconfigure(line_buffering=True)
+            except Exception:
+                pass
+
         self.in_stream = in_stream or sys.stdin
         self.out_stream = out_stream or sys.stdout
         self._cancel_flags: Dict[str, bool] = {}
@@ -119,6 +125,7 @@ class SidecarRunner:
 
         if fmt == "pdf":
             try:
+                import pypdfium2 as pdfium
                 pdf = pdfium.PdfDocument(file_path)
                 page_count = len(pdf)
                 pdf.close()
@@ -222,6 +229,8 @@ class SidecarRunner:
                         confidence=0.75,
                     )
                 )
+            # Reclaim uncompressed page raster buffers to bound memory footprint (PERF-001, UI-003)
+            gc.collect()
 
         def cancel_check() -> bool:
             return self._cancel_flags.get(job_id, False)
@@ -250,6 +259,8 @@ class SidecarRunner:
             ]
             fp.converted_text = "\n\n".join(b.text for b in matching_blocks[:3])
 
+        from openlargeprint.ir.serialization import document_to_dict
+
         self.emit_event(
             SuccessEvent(
                 job_id=job_id,
@@ -258,6 +269,8 @@ class SidecarRunner:
                 page_count=len(res.document_ir.pages),
                 flagged_count=len(flagged_list),
                 warnings=res.warnings,
+                document_ir=document_to_dict(res.document_ir),
+                review_items=flagged_list,
             )
         )
 

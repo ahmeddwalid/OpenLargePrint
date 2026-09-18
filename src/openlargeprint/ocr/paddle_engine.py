@@ -73,7 +73,9 @@ class PaddleRapidOcrEngine:
         start_time = time.perf_counter()
 
         log_safe_info(f"Running OCR on rendered page {page_num} ({image.width}x{image.height}px)")
-        raw_result, elapse = engine(image)
+        import numpy as np
+        img_np = np.array(image.convert("RGB"))
+        raw_result, elapse = engine(img_np)
         total_time = time.perf_counter() - start_time
 
         lines: list[OcrDetectedLine] = []

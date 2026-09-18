@@ -22,15 +22,28 @@ def create_two_column_arabic_pdf(pdf_path: Path):
     - Column 2 is on the LEFT (lower X coordinates, e.g. x=50..270)
     Reading order MUST read Right Column before Left Column (LANG-002).
     """
-    pdfmetrics.registerFont(TTFont("DejaVuSans", "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf"))
+    font_candidates = [
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\tahoma.ttf",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+    ]
+    font_path = next((p for p in font_candidates if Path(p).exists()), None)
+    if font_path:
+        pdfmetrics.registerFont(TTFont("ArabicFont", font_path))
+        font_name = "ArabicFont"
+    else:
+        font_name = "Helvetica"
+
     c = canvas.Canvas(str(pdf_path), pagesize=letter)
     
     # Header across full width
-    c.setFont("DejaVuSans", 16)
+    c.setFont(font_name, 16)
     title = "مجلة الأحكام العدلية: الباب التمهيدي"
     c.drawString(100, 720, reorder_bidi_for_display(title, TextDirection.RTL))
 
-    c.setFont("DejaVuSans", 10)
+    c.setFont(font_name, 10)
     # Column 1 (RIGHT COLUMN: x=330..550, y=650..400)
     c.drawString(330, 650, reorder_bidi_for_display("المادة ١: لا مساغ للاجتهاد في مورد النص.", TextDirection.RTL))
     c.drawString(330, 620, reorder_bidi_for_display("المادة ٢: ما ثبت باليقين لا يزول بالشك.", TextDirection.RTL))

@@ -110,8 +110,11 @@ def test_cli_multiformat_and_page_range(tmp_path: Path):
     create_multipage_pdf(input_pdf)
 
     out_reader = tmp_path / "cli_reader.html"
+    import sys
     cmd = [
-        ".venv/bin/openlargeprint",
+        sys.executable,
+        "-m",
+        "openlargeprint.cli",
         "convert",
         str(input_pdf),
         "-o",
@@ -122,7 +125,7 @@ def test_cli_multiformat_and_page_range(tmp_path: Path):
         "2",
         "3",
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 0
     assert "Format: READER" in res.stdout
     assert "Selected range: Pages 2 to 3" in res.stdout

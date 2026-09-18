@@ -37,16 +37,34 @@ def verify_packaging() -> bool:
 
     # 4. Check Windows bundle targets
     targets = conf.get("bundle", {}).get("targets", [])
-    if "nsis" not in targets or "msi" not in targets:
-        print(f"Error: bundle targets must include 'nsis' and 'msi' for Windows 11 packaging. Got: {targets}")
+    if "nsis" not in targets:
+        print(f"Error: bundle targets must include 'nsis' for Windows 11 packaging. Got: {targets}")
         return False
 
-    # 5. Check UI build assets exist
+    # 5. Check externalBin declaration (PKG-001, PKG-002)
+    ext_bin = conf.get("bundle", {}).get("externalBin", [])
+    if "binaries/openlargeprint-sidecar" not in ext_bin:
+        print(f"Error: bundle.externalBin must contain 'binaries/openlargeprint-sidecar'. Got: {ext_bin}")
+        return False
+
+    # 6. Check compiled sidecar binary exists
+    sidecar_bin = repo_root / "src-tauri" / "binaries" / "openlargeprint-sidecar-x86_64-pc-windows-msvc.exe"
+    if not sidecar_bin.exists():
+        print(f"Error: sidecar binary not found at {sidecar_bin}. Run build_sidecar.py first.")
+        return False
+
+    # 7. Check accessible Windows icons exist
+    icons_dir = repo_root / "src-tauri" / "icons"
+    if not (icons_dir / "icon.ico").exists() or not (icons_dir / "icon.png").exists():
+        print(f"Error: required application icons (icon.ico, icon.png) missing in {icons_dir}.")
+        return False
+
+    # 8. Check UI build assets exist
     ui_index = repo_root / "ui" / "dist" / "index.html"
     if not ui_index.exists():
         print(f"Warning: ui/dist/index.html not built yet. Run 'npm run build' in ui/.")
 
-    print("Packaging verification passed: Tauri 2 configuration, Windows 11 bundle targets, and security boundaries are valid.")
+    print("Packaging verification passed: Tauri 2 configuration, sidecar binary, Windows 11 NSIS targets, icons, and security boundaries are valid.")
     return True
 
 
