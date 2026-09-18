@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Set, Tuple, Union
 
 from openlargeprint.exporters import (
     DocxExporter,
@@ -43,6 +43,57 @@ class ConversionResult:
     success: bool = True
 
 
+def parse_page_range(
+    range_spec: Optional[Union[str, Tuple[int, int], List[int], Set[int]]],
+    total_pages: int,
+) -> Optional[Set[int]]:
+    """Parse a page range specification into a 1-indexed set of page numbers (OUT-010).
+
+    Supports:
+    - None -> None (process all pages)
+    - "1-5, 8, 11-13" -> {1, 2, 3, 4, 5, 8, 11, 12, 13}
+    - (1, 5) -> {1, 2, 3, 4, 5}
+    - [1, 2, 8] -> {1, 2, 8}
+    """
+    if range_spec is None:
+        return None
+    if isinstance(range_spec, (set, frozenset)):
+        return {p for p in range_spec if 1 <= p <= total_pages}
+    if isinstance(range_spec, tuple) and len(range_spec) == 2 and isinstance(range_spec[0], int) and isinstance(range_spec[1], int):
+        s, e = range_spec
+        return set(range(max(1, s), min(total_pages, e) + 1))
+    if isinstance(range_spec, list) and all(isinstance(x, int) for x in range_spec):
+        return {p for p in range_spec if 1 <= p <= total_pages}
+    if isinstance(range_spec, str):
+        cleaned = range_spec.strip()
+        if not cleaned:
+            return None
+        pages: Set[int] = set()
+        for part in cleaned.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                tokens = part.split("-")
+                if len(tokens) == 2:
+                    try:
+                        s = int(tokens[0].strip()) if tokens[0].strip() else 1
+                        e = int(tokens[1].strip()) if tokens[1].strip() else total_pages
+                        for p in range(max(1, s), min(total_pages, e) + 1):
+                            pages.add(p)
+                    except ValueError:
+                        continue
+            else:
+                try:
+                    p = int(part)
+                    if 1 <= p <= total_pages:
+                        pages.add(p)
+                except ValueError:
+                    continue
+        return pages if pages else None
+    return None
+
+
 class PipelineOrchestrator:
     """Coordinates the document reconstruction pipeline across all input and output formats."""
 
@@ -64,11 +115,12 @@ class PipelineOrchestrator:
         progress_callback: Optional[ProgressCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
         checkpoint_callback: Optional[CheckpointCallback] = None,
+        selected_pages: Optional[Set[int]] = None,
     ) -> DocumentIR:
         """Route to appropriate format importer or legacy bridge (DOC-001, OFF-001..003)."""
         if format_type == "pdf":
             return self.pdf_importer.import_document(
-                input_file, workspace, progress_callback, cancel_check, checkpoint_callback
+                input_file, workspace, progress_callback, cancel_check, checkpoint_callback, selected_pages=selected_pages
             )
         elif format_type == "docx":
             return self.docx_importer.import_document(
@@ -97,7 +149,7 @@ class PipelineOrchestrator:
         output_path: Path | str,
         options: Optional[ExportOptions] = None,
         export_format: Optional[ExportFormat] = None,
-        page_range: Optional[Union[Tuple[int, int], List[int]]] = None,
+        page_range: Optional[Union[Tuple[int, int], List[int], Set[int], str]] = None,
         progress_callback: Optional[ProgressCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
         checkpoint_callback: Optional[CheckpointCallback] = None,
@@ -135,6 +187,20 @@ class PipelineOrchestrator:
                     f"Active content was removed for security ({len(stripped_items)} items neutralized)."
                 )
 
+            # Resolve page selection if requested (OUT-010)
+            selected_pages: Optional[Set[int]] = None
+            if page_range is not None:
+                max_pages = 100000
+                if format_type == "pdf":
+                    try:
+                        import pypdfium2 as pdfium
+                        temp_pdf = pdfium.PdfDocument(clean_file)
+                        max_pages = len(temp_pdf)
+                        temp_pdf.close()
+                    except Exception:
+                        pass
+                selected_pages = parse_page_range(page_range, max_pages)
+
             # 4. Import document into canonical DocumentIR
             doc_ir = self._import_by_format(
                 clean_file,
@@ -143,22 +209,17 @@ class PipelineOrchestrator:
                 progress_callback=progress_callback,
                 cancel_check=cancel_check,
                 checkpoint_callback=checkpoint_callback,
+                selected_pages=selected_pages,
             )
 
             # 5. Validate canonical DocumentIR (DOC-003, DESIGN.md §3)
             ir_warnings = validate_document_ir(doc_ir)
             all_warnings.extend(ir_warnings)
 
-            # 6. Apply selective page slicing if requested (OUT-010)
-            if page_range is not None:
-                if isinstance(page_range, (list, set)):
-                    selected = set(int(p) for p in page_range)
-                    log_safe_info(f"Applying selective page slicing for pages {sorted(selected)}")
-                    doc_ir = doc_ir.slice_by_source_pages_set(selected)
-                else:
-                    start_p, end_p = page_range
-                    log_safe_info(f"Applying selective page slicing for pages {start_p} to {end_p}")
-                    doc_ir = doc_ir.slice_by_source_pages(start_p, end_p)
+            # 6. Apply selective page slicing if requested and not already sliced (OUT-010)
+            if selected_pages is not None:
+                log_safe_info(f"Applying selective page slicing for pages {sorted(selected_pages)}")
+                doc_ir = doc_ir.slice_by_source_pages_set(selected_pages)
 
             # 7. Export to requested format (DOCX, Large-Print PDF, or Reader HTML)
             if export_format == "pdf":

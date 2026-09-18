@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 import docx
@@ -15,6 +16,15 @@ from openlargeprint.ir.models import Block, BlockType, DocumentIR, TableStructur
 from openlargeprint.layout.table import TableTier, evaluate_table_fit
 from openlargeprint.security.isolation import log_safe_info
 from .base import BaseExporter, ExportOptions, PaperSize, PresetName
+
+_ILLEGAL_XML_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]")
+
+
+def clean_xml_string(text: Optional[str]) -> str:
+    """Strip characters that are illegal in XML 1.0 specifications (OUT-001)."""
+    if not text:
+        return ""
+    return _ILLEGAL_XML_CHARS_RE.sub("", text)
 
 
 class DocxExporter(BaseExporter):
@@ -37,7 +47,7 @@ class DocxExporter(BaseExporter):
 
         # 2. Add print reminder notice (OUT-009)
         core_props = document.core_properties
-        core_props.title = doc.metadata.title or "OpenLargePrint Document"
+        core_props.title = clean_xml_string(doc.metadata.title) or "OpenLargePrint Document"
         core_props.comments = (
             f"OpenLargePrint output: {options.body_pt}pt text, {options.paper_size.value} paper size. "
             "REMINDER: Print at 100% / actual size rather than 'fit to page' to preserve text size."
@@ -81,6 +91,8 @@ class DocxExporter(BaseExporter):
         usable_width: Inches,
     ) -> None:
         """Render an individual semantic block to DOCX according to typography preset."""
+        safe_text = clean_xml_string(block.text)
+
         # Handle page markers (OUT-005)
         if block.type == BlockType.PAGE_MARKER:
             if options.include_page_markers and block.page_marker is not None:
@@ -114,7 +126,7 @@ class DocxExporter(BaseExporter):
                 p.paragraph_format.space_after = Pt(6)
 
             p.paragraph_format.keep_with_next = True
-            run = p.add_run(block.text or "")
+            run = p.add_run(safe_text)
             run.font.name = options.font_family
             run.font.size = Pt(size_pt)
             run.font.bold = True
@@ -128,7 +140,7 @@ class DocxExporter(BaseExporter):
             p.paragraph_format.line_spacing = options.line_spacing
             p.paragraph_format.space_after = Pt(options.body_pt * 0.3)
             # Strip initial bullet if text already has one
-            raw_text = (block.text or "").lstrip("•-* \t")
+            raw_text = safe_text.lstrip("•-* \t")
             run = p.add_run(raw_text)
             run.font.name = options.font_family
             run.font.size = Pt(options.body_pt)
@@ -141,7 +153,7 @@ class DocxExporter(BaseExporter):
             p.paragraph_format.left_indent = Inches(0.4)
             p.paragraph_format.line_spacing = options.line_spacing
             p.paragraph_format.space_after = Pt(options.body_pt * 0.5)
-            run = p.add_run(block.text or "")
+            run = p.add_run(safe_text)
             run.font.name = options.font_family
             run.font.size = Pt(options.body_pt)
             run.font.italic = True
@@ -159,7 +171,7 @@ class DocxExporter(BaseExporter):
             )
             p.paragraph_format.space_before = Pt(6)
             p.paragraph_format.space_after = Pt(10)
-            run = p.add_run(block.text or "")
+            run = p.add_run(safe_text)
             run.font.name = options.font_family
             run.font.size = Pt(min_size)
             run.font.bold = True
@@ -174,7 +186,7 @@ class DocxExporter(BaseExporter):
             p.paragraph_format.line_spacing = 1.3
             p.paragraph_format.space_before = Pt(4)
             p.paragraph_format.space_after = Pt(8)
-            run = p.add_run(block.text or "")
+            run = p.add_run(safe_text)
             run.font.name = options.font_family
             run.font.size = Pt(min_size)
             run.font.italic = True
@@ -205,7 +217,7 @@ class DocxExporter(BaseExporter):
         p = document.add_paragraph()
         p.paragraph_format.line_spacing = options.line_spacing
         p.paragraph_format.space_after = Pt(options.body_pt * 0.55)  # Generous paragraph spacing
-        run = p.add_run(block.text or "")
+        run = p.add_run(safe_text)
         run.font.name = options.font_family
         run.font.size = Pt(options.body_pt)
         run.font.color.rgb = RGBColor(20, 20, 20)
@@ -258,7 +270,7 @@ class DocxExporter(BaseExporter):
                 p_warn = document.add_paragraph()
                 p_warn.paragraph_format.space_before = Pt(8)
                 p_warn.paragraph_format.space_after = Pt(4)
-                r_warn = p_warn.add_run(f"⚠️ [Table Note] {warn}")
+                r_warn = p_warn.add_run(f"⚠️ [Table Note] {clean_xml_string(warn)}")
                 r_warn.font.name = options.font_family
                 r_warn.font.size = Pt(max(13.0, min_readable_size * 0.9))
                 r_warn.font.italic = True
@@ -284,7 +296,7 @@ class DocxExporter(BaseExporter):
                 p = document.add_paragraph()
                 p.paragraph_format.line_spacing = 1.3
                 p.paragraph_format.space_after = Pt(4)
-                run = p.add_run(line)
+                run = p.add_run(clean_xml_string(line))
                 run.font.name = options.font_family
                 run.font.size = Pt(min_readable_size)
                 if line.startswith(("•", "[Table")):
@@ -369,7 +381,7 @@ class DocxExporter(BaseExporter):
                 p.paragraph_format.line_spacing = 1.2
                 p.paragraph_format.space_before = Pt(3)
                 p.paragraph_format.space_after = Pt(3)
-                run = p.add_run(cell_data.text or "")
+                run = p.add_run(clean_xml_string(cell_data.text))
                 run.font.name = options.font_family
                 run.font.size = cell_font_size
                 if r_idx == 0 and table_struct.has_header:

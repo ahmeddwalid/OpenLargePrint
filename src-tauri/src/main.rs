@@ -34,7 +34,26 @@ impl AppSession {
     pub async fn ensure_sidecar_running(&self, app: &AppHandle) -> Result<(), String> {
         let mut stdin_guard = self.stdin.lock().await;
         if stdin_guard.is_some() {
-            return Ok(());
+            let mut child_guard = self.child.lock().await;
+            if let Some(ref mut child) = *child_guard {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        eprintln!("[supervisor] Sidecar child process already exited (status: {}). Resetting handles.", status);
+                        *stdin_guard = None;
+                        *child_guard = None;
+                    }
+                    Ok(None) => {
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("[supervisor] Failed to query sidecar status: {}. Resetting handles.", e);
+                        *stdin_guard = None;
+                        *child_guard = None;
+                    }
+                }
+            } else {
+                *stdin_guard = None;
+            }
         }
 
         let sidecar_exe = resolve_sidecar_binary();
@@ -113,6 +132,12 @@ impl AppSession {
                     }
                 }
             }
+            eprintln!("[supervisor] Sidecar stdout EOF reached.");
+            let _ = app_clone.emit("sidecar-error", serde_json::json!({
+                "type": "error",
+                "message": "The document conversion engine stopped unexpectedly.",
+                "code": "SIDECAR_CRASHED"
+            }));
         });
 
         Ok(())
@@ -123,14 +148,18 @@ impl AppSession {
         if let Some(ref mut stdin) = *stdin_guard {
             let mut data = json_val.to_string();
             data.push('\n');
-            stdin
-                .write_all(data.as_bytes())
-                .await
-                .map_err(|e| format!("Failed to write to sidecar: {}", e))?;
-            stdin
-                .flush()
-                .await
-                .map_err(|e| format!("Failed to flush sidecar: {}", e))?;
+            if let Err(e) = stdin.write_all(data.as_bytes()).await {
+                *stdin_guard = None;
+                let mut child_guard = self.child.lock().await;
+                *child_guard = None;
+                return Err(format!("Failed to write to sidecar: {}", e));
+            }
+            if let Err(e) = stdin.flush().await {
+                *stdin_guard = None;
+                let mut child_guard = self.child.lock().await;
+                *child_guard = None;
+                return Err(format!("Failed to flush sidecar: {}", e));
+            }
             Ok(())
         } else {
             Err("Sidecar process is not running".to_string())

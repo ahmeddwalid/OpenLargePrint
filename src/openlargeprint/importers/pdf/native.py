@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 import pikepdf
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
@@ -90,6 +90,7 @@ class NativePdfImporter(BaseImporter):
         progress_callback: Optional[ProgressCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
         checkpoint_callback: Optional[CheckpointCallback] = None,
+        selected_pages: Optional[Set[int]] = None,
     ) -> DocumentIR:
         """Parse PDF and construct canonical DocumentIR with progress and checkpointing (UI-002, UI-003)."""
         log_safe_info(f"Opening PDF document: {file_path.name}")
@@ -101,13 +102,20 @@ class NativePdfImporter(BaseImporter):
         all_blocks: List[Block] = []
         block_counter = 1
 
+        total_to_process = len(selected_pages) if selected_pages is not None else page_count
+        processed_count = 0
+
         try:
             for page_idx in range(page_count):
+                page_num = page_idx + 1
+                if selected_pages is not None and page_num not in selected_pages:
+                    continue
+
                 if cancel_check and cancel_check():
                     log_safe_info("Cancellation signal received during PDF import (UI-002)")
                     raise InterruptedError("Operation cancelled by user.")
 
-                page_num = page_idx + 1
+                processed_count += 1
                 page = pdf[page_idx]
 
                 # 1. Classify page diagnostics (PDF-001, PDF-007)
@@ -122,7 +130,7 @@ class NativePdfImporter(BaseImporter):
                         if stage == "ocr"
                         else f"Extracting digital text — page {page_num} of {page_count}"
                     )
-                    progress_callback(page_num, page_count, stage, msg)
+                    progress_callback(processed_count, total_to_process, stage, msg)
 
                 # 2. Add source-page transition marker (OUT-005)
                 marker_block = Block(
@@ -234,7 +242,7 @@ class NativePdfImporter(BaseImporter):
         metadata = DocumentMetadata(
             title=file_path.stem.replace("_", " "),
             source_file_name=file_path.name,
-            page_count=page_count,
+            page_count=len(pages_metadata) if selected_pages is not None else page_count,
         )
 
         return DocumentIR(

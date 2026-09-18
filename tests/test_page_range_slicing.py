@@ -70,3 +70,24 @@ def test_orchestrator_accepts_list_page_range(tmp_path):
     res = orch.convert(src, out, export_format="pdf", page_range=[1, 3])
     assert res.success
     assert {b.source_page for b in res.document_ir.blocks} <= {1, 3}
+
+
+def test_orchestrator_accepts_string_page_range(tmp_path):
+    """Orchestrator.convert must accept a string page range (OUT-010)."""
+    from reportlab.pdfgen import canvas
+    from openlargeprint.pipeline import PipelineOrchestrator
+
+    src = tmp_path / "src_str.pdf"
+    c = canvas.Canvas(str(src))
+    for i in range(5):
+        c.drawString(72, 750, f"Page content {i + 1}")
+        c.showPage()
+    c.save()
+
+    out = tmp_path / "out_str.pdf"
+    orch = PipelineOrchestrator()
+    res = orch.convert(src, out, export_format="pdf", page_range="1-2, 4")
+    assert res.success
+    source_pages = {b.source_page for b in res.document_ir.blocks if b.source_page is not None}
+    assert source_pages == {1, 2, 4}
+
