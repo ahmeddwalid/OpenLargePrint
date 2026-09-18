@@ -39,11 +39,11 @@ function detectLocale(): Locale {
  *
  * Example: t('review.banner', { count: '3' }) => "3 pages may need review"
  */
-function translate(locale: Locale, key: string, vars?: Record<string, string>): string {
+function translate(locale: Locale, key: string, vars?: Record<string, string | number>): string {
   let text = stringTables[locale]?.[key] ?? stringTables.en[key] ?? key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
-      text = text.replace(`{${k}}`, v);
+      text = text.replace(`{${k}}`, String(v));
     }
   }
   return text;
@@ -55,7 +55,7 @@ interface I18nContextValue {
   locale: Locale;
   direction: 'ltr' | 'rtl';
   setLocale: (locale: Locale) => void;
-  t: (key: string, vars?: Record<string, string>) => string;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }
 
 const I18nContext = createContext<I18nContextValue>({
@@ -82,7 +82,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [locale, direction]);
 
   const t = useCallback(
-    (key: string, vars?: Record<string, string>) => translate(locale, key, vars),
+    (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars),
     [locale]
   );
 
@@ -99,7 +99,7 @@ export function useI18n(): I18nContextValue {
 }
 
 /** Standalone translate for use outside React components */
-export function tStandalone(key: string, vars?: Record<string, string>): string {
+export function tStandalone(key: string, vars?: Record<string, string | number>): string {
   const saved = localStorage.getItem(LOCALE_KEY);
   const locale: Locale = saved === 'ar' ? 'ar' : 'en';
   return translate(locale, key, vars);

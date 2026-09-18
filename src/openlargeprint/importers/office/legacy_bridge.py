@@ -88,7 +88,7 @@ class LibreOfficeBridge:
         # 3. Launch subprocess in a dedicated session/process group for full tree termination (SEC-008)
         popen_kwargs = {}
         if os.name == "nt":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000
         else:
             popen_kwargs["start_new_session"] = True
 
@@ -104,7 +104,11 @@ class LibreOfficeBridge:
         except subprocess.TimeoutExpired:
             # Kill entire process group on timeout (SEC-008)
             if os.name == "nt":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                    capture_output=True,
+                    creationflags=0x08000000,
+                )
             else:
                 try:
                     os.killpg(os.getpgid(process.pid), signal.SIGKILL)

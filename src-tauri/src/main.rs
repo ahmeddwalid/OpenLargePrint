@@ -11,6 +11,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex as TokioMutex};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConversionSettingsPayload {
     pub text_size: Option<u32>,
@@ -57,11 +60,18 @@ impl AppSession {
         }
 
         let sidecar_exe = resolve_sidecar_binary();
-        let mut child = Command::new(&sidecar_exe)
-            .args(["sidecar"])
+        let mut cmd = Command::new(&sidecar_exe);
+        cmd.args(["sidecar"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        #[cfg(target_os = "windows")]
+        {
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW: prevent empty black console popup
+        }
+
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("Failed to launch sidecar ({}): {}", sidecar_exe.display(), e))?;
 
@@ -407,10 +417,10 @@ async fn open_path_in_system(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(&p)
-            .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
+        let mut cmd = std::process::Command::new("explorer");
+        cmd.arg(&p);
+        cmd.creation_flags(0x08000000);
+        cmd.spawn().map_err(|e| format!("Failed to open file: {}", e))?;
         Ok(())
     }
     #[cfg(not(target_os = "windows"))]
@@ -427,10 +437,10 @@ async fn reveal_in_folder(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .args(["/select,", &p.to_string_lossy()])
-            .spawn()
-            .map_err(|e| format!("Failed to reveal path: {}", e))?;
+        let mut cmd = std::process::Command::new("explorer");
+        cmd.args(["/select,", &p.to_string_lossy()]);
+        cmd.creation_flags(0x08000000);
+        cmd.spawn().map_err(|e| format!("Failed to reveal path: {}", e))?;
         Ok(())
     }
     #[cfg(not(target_os = "windows"))]

@@ -315,6 +315,38 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleAcceptAllReviewItems = (currentId?: string, currentEditedText?: string) => {
+    setReviewItems((prev) =>
+      prev.map((item) => {
+        if (item.id === currentId && currentEditedText !== undefined) {
+          return {
+            ...item,
+            status: 'accepted',
+            converted_text: currentEditedText,
+          };
+        }
+        return {
+          ...item,
+          status: 'accepted',
+        };
+      })
+    );
+
+    if (documentIR && currentId && currentEditedText !== undefined) {
+      const item = reviewItems.find((i) => i.id === currentId);
+      if (item && item.block_id) {
+        setDocumentIR({
+          ...documentIR,
+          blocks: documentIR.blocks.map((b) =>
+            b.id === item.block_id ? { ...b, text: currentEditedText } : b
+          ),
+        });
+      }
+    }
+
+    setViewMode('reader');
+  };
+
   const handleRetryReviewItem = async (item: ReviewItem) => {
     const updated = await sidecar.retryPage(item.source_page, true);
     if (updated.blocks.length > 0) {
@@ -534,6 +566,7 @@ export const App: React.FC = () => {
           <ReviewScreen
             reviewItems={reviewItems}
             onAccept={handleAcceptReviewItem}
+            onAcceptAll={handleAcceptAllReviewItems}
             onRetry={handleRetryReviewItem}
             onFinish={handleFinishReview}
           />
