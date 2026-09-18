@@ -24,16 +24,33 @@ Write-Host "========================================================" -Foregroun
 
 # 1. Locate MSVC BuildTools environment
 $VcvarsCandidates = @(
-    "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+    "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
     "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
-    "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+    "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat",
+    "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
+    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat",
+    "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 )
 
 $VcvarsBat = $null
-foreach ($cand in $VcvarsCandidates) {
-    if (Test-Path $cand) {
-        $VcvarsBat = $cand
-        break
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $vsWhere) {
+    $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if ($vsPath) {
+        $cand = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+        if (Test-Path $cand) {
+            $VcvarsBat = $cand
+        }
+    }
+}
+
+if (-not $VcvarsBat) {
+    foreach ($cand in $VcvarsCandidates) {
+        if (Test-Path $cand) {
+            $VcvarsBat = $cand
+            break
+        }
     }
 }
 
@@ -49,10 +66,16 @@ if ($VcvarsBat) {
     Write-Host "[1/6] Warning: vcvars64.bat not found in default paths; proceeding with system environment." -ForegroundColor Yellow
 }
 
+# Resolve Python interpreter (prioritizing project virtualenv if present)
+$PyExe = "python"
+if (Test-Path "$RepoRoot\.venv\Scripts\python.exe") {
+    $PyExe = "$RepoRoot\.venv\Scripts\python.exe"
+}
+
 # 2. Build Python engine sidecar
 if (-not $SkipSidecarBuild) {
     Write-Host "[2/6] Compiling standalone Python engine sidecar with PyInstaller..." -ForegroundColor Green
-    python "$RepoRoot\packaging\build_sidecar.py"
+    & $PyExe "$RepoRoot\packaging\build_sidecar.py"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to build Python sidecar binary."
     }
@@ -62,7 +85,7 @@ if (-not $SkipSidecarBuild) {
 
 # 3. Generate accessible Windows application icons
 Write-Host "[3/6] Generating accessible high-contrast Windows icons..." -ForegroundColor Green
-python "$RepoRoot\packaging\generate_icons.py"
+& $PyExe "$RepoRoot\packaging\generate_icons.py"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to generate application icons."
 }
@@ -81,7 +104,7 @@ try {
 
 # 5. Verify packaging configuration
 Write-Host "[5/6] Validating packaging contract and security boundaries..." -ForegroundColor Green
-python "$RepoRoot\packaging\verify_packaging.py"
+& $PyExe "$RepoRoot\packaging\verify_packaging.py"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Packaging verification gate failed."
 }
@@ -90,7 +113,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[6/6] Building Windows desktop bundle (NSIS installer)..." -ForegroundColor Green
 Push-Location "$RepoRoot\src-tauri"
 try {
-    npx @tauri-apps/cli build
+    npx -y @tauri-apps/cli build
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Notice: If cargo build script is blocked by Smart App Control, ensure Developer Mode is enabled in Windows Settings." -ForegroundColor Yellow
     }
