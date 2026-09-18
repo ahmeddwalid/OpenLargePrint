@@ -90,6 +90,32 @@ export class SidecarClient {
     return { path: filePath, name, size: 0 };
   }
 
+  public async openPathInSystem(filePath: string): Promise<boolean> {
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        await win.__TAURI__.core.invoke('open_path_in_system', { path: filePath });
+        return true;
+      } catch (err) {
+        console.error('Tauri open_path_in_system failed:', err);
+      }
+    }
+    return false;
+  }
+
+  public async revealInFolder(filePath: string): Promise<boolean> {
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
+    if (win?.__TAURI__?.core?.invoke) {
+      try {
+        await win.__TAURI__.core.invoke('reveal_in_folder', { path: filePath });
+        return true;
+      } catch (err) {
+        console.error('Tauri reveal_in_folder failed:', err);
+      }
+    }
+    return false;
+  }
+
   public async inspectFile(filePath: string): Promise<InspectResult> {
     // If Tauri is available, invoke Rust IPC bridge
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;

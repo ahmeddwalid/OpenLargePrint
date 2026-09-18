@@ -363,6 +363,46 @@ async fn inspect_file_path(file_path: String) -> Result<serde_json::Value, Strin
 }
 
 #[tauri::command]
+async fn open_path_in_system(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("File does not exist".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn reveal_in_folder(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Path does not exist".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .args(["/select,", &p.to_string_lossy()])
+            .spawn()
+            .map_err(|e| format!("Failed to reveal path: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(())
+    }
+}
+
+#[tauri::command]
 async fn health_check(
     app: AppHandle,
     session: State<'_, AppSession>,
@@ -586,6 +626,8 @@ fn main() {
             choose_save_dialog,
             get_system_paths,
             inspect_file_path,
+            open_path_in_system,
+            reveal_in_folder,
             health_check,
             inspect_file,
             start_conversion,

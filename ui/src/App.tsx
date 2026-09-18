@@ -6,6 +6,7 @@ import { FilePicker } from './components/FilePicker';
 import { PaperSizeSelector } from './components/PaperSizeSelector';
 import { ProgressScreen } from './components/ProgressScreen';
 import { ReaderView } from './components/ReaderView';
+import { RecentDocuments, RecentDocumentItem } from './components/RecentDocuments';
 import { ReviewScreen } from './components/ReviewScreen';
 import { TextSizeSelector } from './components/TextSizeSelector';
 import { sidecar } from './api/sidecarClient';
@@ -22,6 +23,33 @@ import {
 } from './types';
 
 type ViewMode = 'home' | 'progress' | 'review' | 'reader';
+
+const RECENT_DOCS_KEY = 'openlargeprint_recent_docs';
+
+function loadRecentDocs(): RecentDocumentItem[] {
+  try {
+    const raw = localStorage.getItem(RECENT_DOCS_KEY);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error('Failed to parse recent docs:', e);
+  }
+  return [];
+}
+
+function saveRecentDocs(items: RecentDocumentItem[]) {
+  try {
+    localStorage.setItem(RECENT_DOCS_KEY, JSON.stringify(items));
+  } catch (e) {
+    try {
+      const trimmed = items.map((it, idx) => (idx === 0 ? it : { ...it, documentIR: undefined }));
+      localStorage.setItem(RECENT_DOCS_KEY, JSON.stringify(trimmed));
+    } catch (e2) {
+      console.error('Failed to save recent docs:', e2);
+    }
+  }
+}
 
 export const App: React.FC = () => {
   // Theme and Direction State
@@ -52,6 +80,12 @@ export const App: React.FC = () => {
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [documentIR, setDocumentIR] = useState<DocumentIR | null>(null);
   const [exportedFilePath, setExportedFilePath] = useState<string | null>(null);
+  const [recentDocs, setRecentDocs] = useState<RecentDocumentItem[]>([]);
+
+  // Load recent documents on startup
+  useEffect(() => {
+    setRecentDocs(loadRecentDocs());
+  }, []);
 
   // Synchronize theme to document element
   useEffect(() => {
@@ -165,6 +199,28 @@ export const App: React.FC = () => {
       onSuccess: (result) => {
         setDocumentIR(result.documentIR);
         setExportedFilePath(result.outputPath);
+
+        // Record in recent documents shelf (UI-001)
+        const newItem: RecentDocumentItem = {
+          id: `rec-${Date.now()}`,
+          timestamp: Date.now(),
+          dateFormatted: new Date().toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          sourceName: selectedFile ? selectedFile.name : 'document',
+          sourcePath: (selectedFile as any)?.nativePath,
+          outputPath: result.outputPath,
+          format: outputFormat,
+          textSize,
+          documentIR: result.documentIR,
+        };
+        const updated = [newItem, ...recentDocs.filter((d) => d.outputPath !== result.outputPath)].slice(0, 5);
+        setRecentDocs(updated);
+        saveRecentDocs(updated);
+
         if (result.reviewItems && result.reviewItems.length > 0) {
           setReviewItems(result.reviewItems);
           setViewMode('review');
@@ -370,6 +426,20 @@ export const App: React.FC = () => {
               onRoutingModeChange={setRoutingMode}
               pageRange={pageRange}
               onPageRangeChange={setPageRange}
+            />
+
+            {/* Recent Documents Shelf (UI-001) */}
+            <RecentDocuments
+              items={recentDocs}
+              onOpenInReader={(ir, path) => {
+                setDocumentIR(ir);
+                setExportedFilePath(path);
+                setViewMode('reader');
+              }}
+              onClearHistory={() => {
+                setRecentDocs([]);
+                localStorage.removeItem(RECENT_DOCS_KEY);
+              }}
             />
           </div>
         )}
