@@ -83,6 +83,23 @@ class DocxExporter(BaseExporter):
             section.left_margin = Mm(20)
             section.right_margin = Mm(20)
 
+    def _get_or_create_monochrome_image(self, file_path: str) -> str:
+        """Convert image to high-contrast grayscale for laser printing."""
+        try:
+            from PIL import Image, ImageEnhance
+            src_p = Path(file_path)
+            mono_path = src_p.parent / f"{src_p.stem}_mono.png"
+            if mono_path.exists():
+                return str(mono_path)
+            with Image.open(src_p) as im:
+                gray = im.convert("L")
+                enhancer = ImageEnhance.Contrast(gray)
+                enhanced = enhancer.enhance(1.15)
+                enhanced.save(mono_path, format="PNG")
+                return str(mono_path)
+        except Exception:
+            return file_path
+
     def _render_block(
         self,
         document: docx.Document,
@@ -92,6 +109,7 @@ class DocxExporter(BaseExporter):
     ) -> None:
         """Render an individual semantic block to DOCX according to typography preset."""
         safe_text = clean_xml_string(block.text)
+        is_mono = options.monochrome
 
         # Handle page markers (OUT-005)
         if block.type == BlockType.PAGE_MARKER:
@@ -104,7 +122,7 @@ class DocxExporter(BaseExporter):
                 run.font.name = options.font_family
                 run.font.size = Pt(max(12.0, options.body_pt * 0.7))
                 run.font.bold = True
-                run.font.color.rgb = RGBColor(90, 90, 90)
+                run.font.color.rgb = RGBColor(0, 0, 0) if is_mono else RGBColor(90, 90, 90)
             return
 
         # Handle headings
@@ -130,7 +148,7 @@ class DocxExporter(BaseExporter):
             run.font.name = options.font_family
             run.font.size = Pt(size_pt)
             run.font.bold = True
-            run.font.color.rgb = RGBColor(20, 20, 20)
+            run.font.color.rgb = RGBColor(0, 0, 0) if is_mono else RGBColor(20, 20, 20)
             self._apply_text_direction(p, run, block, options)
             return
 
@@ -144,6 +162,8 @@ class DocxExporter(BaseExporter):
             run = p.add_run(raw_text)
             run.font.name = options.font_family
             run.font.size = Pt(options.body_pt)
+            if is_mono:
+                run.font.color.rgb = RGBColor(0, 0, 0)
             self._apply_text_direction(p, run, block, options)
             return
 
@@ -157,6 +177,8 @@ class DocxExporter(BaseExporter):
             run.font.name = options.font_family
             run.font.size = Pt(options.body_pt)
             run.font.italic = True
+            if is_mono:
+                run.font.color.rgb = RGBColor(0, 0, 0)
             self._apply_text_direction(p, run, block, options)
             return
 
@@ -175,7 +197,7 @@ class DocxExporter(BaseExporter):
             run.font.name = options.font_family
             run.font.size = Pt(min_size)
             run.font.bold = True
-            run.font.color.rgb = RGBColor(60, 60, 60)
+            run.font.color.rgb = RGBColor(0, 0, 0) if is_mono else RGBColor(60, 60, 60)
             self._apply_text_direction(p, run, block, options)
             return
 
@@ -190,7 +212,7 @@ class DocxExporter(BaseExporter):
             run.font.name = options.font_family
             run.font.size = Pt(min_size)
             run.font.italic = True
-            run.font.color.rgb = RGBColor(70, 70, 70)
+            run.font.color.rgb = RGBColor(0, 0, 0) if is_mono else RGBColor(70, 70, 70)
             self._apply_text_direction(p, run, block, options)
             return
 
@@ -210,7 +232,12 @@ class DocxExporter(BaseExporter):
 
                 native_width = Inches(asset.width / 96.0)
                 display_width = min(usable_width, native_width)
-                p.add_run().add_picture(asset.file_path, width=display_width)
+
+                img_path = asset.file_path
+                if options.monochrome:
+                    img_path = self._get_or_create_monochrome_image(asset.file_path)
+
+                p.add_run().add_picture(img_path, width=display_width)
             return
 
         # Default: Regular body paragraph
@@ -220,7 +247,7 @@ class DocxExporter(BaseExporter):
         run = p.add_run(safe_text)
         run.font.name = options.font_family
         run.font.size = Pt(options.body_pt)
-        run.font.color.rgb = RGBColor(20, 20, 20)
+        run.font.color.rgb = RGBColor(0, 0, 0) if is_mono else RGBColor(20, 20, 20)
         self._apply_text_direction(p, run, block, options)
 
     def _apply_text_direction(self, p, run, block: Block, options: ExportOptions) -> None:

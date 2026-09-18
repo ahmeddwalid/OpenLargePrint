@@ -191,22 +191,27 @@ class SidecarRunner:
         except ValueError:
             paper_size_enum = PaperSize.A4
 
+        monochrome = bool(data.get("monochrome", False))
+
         options = ExportOptions(
             preset=preset_enum,
             paper_size=paper_size_enum,
             include_page_markers=include_markers,
+            monochrome=monochrome,
         )
 
-        routing_mode_raw = str(data.get("routing_mode", "automatic")).lower().strip()
-        if "fast" in routing_mode_raw:
+        routing_mode_raw = str(data.get("routing_mode", "maximum_accuracy")).lower().strip()
+        if "fast" in routing_mode_raw or "native_only" in routing_mode_raw:
             routing_enum = RoutingMode.FAST
+        elif "max" in routing_mode_raw or "acc" in routing_mode_raw:
+            routing_enum = RoutingMode.MAXIMUM_ACCURACY
         elif routing_mode_raw in ("automatic", "auto"):
-            routing_enum = RoutingMode.AUTOMATIC
+            routing_enum = RoutingMode.MAXIMUM_ACCURACY
         else:
             try:
-                routing_enum = RoutingMode(data.get("routing_mode", "Automatic"))
+                routing_enum = RoutingMode(data.get("routing_mode", "Maximum accuracy"))
             except ValueError:
-                routing_enum = RoutingMode.AUTOMATIC
+                routing_enum = RoutingMode.MAXIMUM_ACCURACY
 
         orchestrator = PipelineOrchestrator(routing_mode=routing_enum)
 

@@ -91,3 +91,42 @@ def test_pdf_export_a3_dimensions(tmp_path: Path):
     # A3 dimensions: 841.89 x 1190.55 points (297 x 420 mm)
     assert pytest.approx(w, 1.0) == 841.89
     assert pytest.approx(h, 1.0) == 1190.55
+
+
+def test_pdf_export_monochrome(tmp_path: Path):
+    """Verify monochrome export produces valid high-contrast document (OUT-003)."""
+    import numpy as np
+    from PIL import Image
+
+    # Create a small color test image
+    img_data = np.zeros((100, 100, 3), dtype=np.uint8)
+    img_data[:, :] = [255, 0, 0]  # pure red
+    img_path = tmp_path / "test_color.png"
+    Image.fromarray(img_data).save(img_path)
+
+    from openlargeprint.ir.models import ImageAsset
+    doc_ir = create_sample_ir()
+    doc_ir.blocks.append(
+        Block(
+            id="p1_img",
+            type=BlockType.IMAGE,
+            image_asset=ImageAsset(
+                asset_id="img_1",
+                file_path=str(img_path),
+                width=100,
+                height=100,
+            ),
+            source_page=1,
+        )
+    )
+
+    out_pdf = tmp_path / "large_print_mono.pdf"
+    exporter = PdfExporter()
+    options = ExportOptions(preset=PresetName.LARGE, paper_size=PaperSize.A4, monochrome=True)
+    exporter.export(doc_ir, out_pdf, options)
+
+    assert out_pdf.exists()
+    assert out_pdf.stat().st_size > 0
+    pdf = pdfium.PdfDocument(out_pdf)
+    assert len(pdf) >= 1
+

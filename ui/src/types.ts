@@ -49,6 +49,7 @@ export interface ConversionSettings {
   routingMode: RoutingMode;
   pageRange: string;
   outputPath?: string;
+  monochrome?: boolean;
 }
 
 export interface ProgressInfo {

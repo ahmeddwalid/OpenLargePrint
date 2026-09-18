@@ -361,6 +361,37 @@ class ScannedPageExtractor:
         if not lines:
             return []
 
+        # Pre-pass: Normalize standalone bullet lines with subsequent text
+        normalized_lines: List[OcrPointLine] = []
+        i = 0
+        while i < len(lines):
+            l = lines[i]
+            txt = l.text.strip()
+            is_lone_bullet = len(txt) <= 2 and txt in ("o", "O", "•", "\u2022", "*", "-", "–", "—", "▪", "▫", "◆", "◇", "·")
+            if is_lone_bullet and (i + 1 < len(lines)):
+                next_l = lines[i + 1]
+                gap_y = abs(l.y1 - next_l.y1)
+                if gap_y <= 12.0 or (0.0 <= l.y0 - next_l.y1 <= 16.0):
+                    new_text = f"• {next_l.text.strip()}"
+                    normalized_lines.append(
+                        OcrPointLine(
+                            text=new_text,
+                            x0=min(l.x0, next_l.x0),
+                            y0=min(l.y0, next_l.y0),
+                            x1=max(l.x1, next_l.x1),
+                            y1=max(l.y1, next_l.y1),
+                            confidence=(l.confidence + next_l.confidence) / 2.0,
+                        )
+                    )
+                    i += 2
+                    continue
+            normalized_lines.append(l)
+            i += 1
+        lines = normalized_lines
+
+        if not lines:
+            return []
+
         sorted_heights = sorted(l.height for l in lines)
         body_height = sorted_heights[len(sorted_heights) // 2]
 
@@ -375,7 +406,27 @@ class ScannedPageExtractor:
             if not current_lines:
                 return
 
-            text_content = " ".join(l.text for l in current_lines)
+            parts: List[str] = []
+            for j, l in enumerate(current_lines):
+                t = l.text.strip()
+                if not t:
+                    continue
+                if j == 0:
+                    parts.append(t)
+                else:
+                    prev_t = parts[-1]
+                    if prev_t.endswith("-") and len(prev_t) > 1 and prev_t[-2].isalpha() and t[0].isalpha():
+                        parts[-1] = prev_t[:-1] + t
+                    else:
+                        parts.append(" " + t)
+
+            text_content = "".join(parts).strip()
+            if not text_content:
+                current_lines = []
+                current_type = BlockType.PARAGRAPH
+                current_level = None
+                return
+
             avg_confidence = sum(l.confidence for l in current_lines) / len(current_lines)
             blk_lang = detect_language(text_content)
             blk_dir = detect_text_direction(text_content)
@@ -415,10 +466,12 @@ class ScannedPageExtractor:
             current_level = None
 
         for line in lines:
+            txt = line.text.strip()
+
             # 1. Footnote detection (FN-001, FN-002)
             is_at_bottom = line.y1 <= 0.28 * page_h
             starts_with_fn_marker = bool(
-                re.match(r"^(?:\[\d+\]|\d+[\.\)]|\*|¹|²|³|†|‡|\d+\s+)", line.text)
+                re.match(r"^(?:\[\d+\]|\d+[\.\)]|\*|¹|²|³|†|‡|\d+\s+)", txt)
             )
             is_smaller = line.height <= 0.90 * body_height
             is_footnote = is_at_bottom and (
@@ -429,24 +482,24 @@ class ScannedPageExtractor:
             is_caption = bool(
                 re.match(
                     r"^(?:Figure|Fig\.|Table|Exhibit|Illustration|جدول|شكل)\s+(?:\d+|[A-ZIVX]+)(?::|\.|\s-|\s—)",
-                    line.text,
+                    txt,
                     re.IGNORECASE,
                 )
             )
 
+            is_list = txt.startswith(("- ", "* ", "• ", "\u2022 ", "\u25e6 ", "o ", "O ")) or (
+                len(txt) > 3 and txt[0].isdigit() and txt[1:3] in (". ", ") ")
+            )
+
             is_heading = False
             heading_level = None
-            if not is_footnote and not is_caption:
+            if not is_footnote and not is_caption and not is_list and len(txt) >= 3:
                 if line.height >= 1.5 * body_height:
                     is_heading = True
                     heading_level = 1
                 elif line.height >= 1.25 * body_height:
                     is_heading = True
                     heading_level = 2
-
-            is_list = line.text.startswith(("- ", "* ", "• ", "\u2022 ", "\u25e6 ")) or (
-                len(line.text) > 3 and line.text[0].isdigit() and line.text[1:3] in (". ", ") ")
-            )
 
             if is_footnote:
                 if current_type != BlockType.FOOTNOTE or starts_with_fn_marker:
@@ -473,8 +526,11 @@ class ScannedPageExtractor:
                 if current_lines:
                     prev = current_lines[-1]
                     gap = prev.y0 - line.y1
-                    same_col = abs(prev.x0 - line.x0) < 60
-                    if gap > 2.0 * prev.height or not same_col:
+                    horiz_overlap = min(prev.x1, line.x1) - max(prev.x0, line.x0)
+                    min_w = min(prev.x1 - prev.x0, line.x1 - line.x0)
+                    same_col = (horiz_overlap > 0.25 * min_w) or (abs(prev.x0 - line.x0) < 40.0)
+                    max_h = max(prev.height, line.height, 10.0)
+                    if gap > 1.75 * max_h or not same_col:
                         flush_block()
                 current_lines.append(line)
 

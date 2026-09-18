@@ -142,11 +142,37 @@ class PdfExporter(BaseExporter):
         log_safe_info(f"Large-Print PDF generated successfully: {output_path.name}")
         return output_path
 
+    def _get_or_create_monochrome_image(self, file_path: str) -> str:
+        """Convert image to high-contrast grayscale for laser printing."""
+        try:
+            from PIL import Image, ImageEnhance
+            src_p = Path(file_path)
+            mono_path = src_p.parent / f"{src_p.stem}_mono.png"
+            if mono_path.exists():
+                return str(mono_path)
+            with Image.open(src_p) as im:
+                gray = im.convert("L")
+                enhancer = ImageEnhance.Contrast(gray)
+                enhanced = enhancer.enhance(1.15)
+                enhanced.save(mono_path, format="PNG")
+                return str(mono_path)
+        except Exception:
+            return file_path
+
     def _create_typography_styles(self, options: ExportOptions) -> dict[str, ParagraphStyle]:
         """Create paragraph styles calibrated to the chosen preset (OUT-006, FN-002)."""
         body_pt = options.body_pt
         leading_pt = body_pt * options.line_spacing
         arabic_font = _ensure_arabic_font()
+        is_mono = options.monochrome
+
+        c_title = HexColor("#000000") if is_mono else HexColor("#111111")
+        c_h2 = HexColor("#000000") if is_mono else HexColor("#222222")
+        c_body = HexColor("#000000") if is_mono else HexColor("#111111")
+        c_fn = HexColor("#000000") if is_mono else HexColor("#444444")
+        c_cap = HexColor("#000000") if is_mono else HexColor("#333333")
+        c_warn = HexColor("#000000") if is_mono else HexColor("#994400")
+        c_marker = HexColor("#000000") if is_mono else HexColor("#555555")
 
         return {
             "title": ParagraphStyle(
@@ -154,7 +180,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Bold",
                 fontSize=max(28.0, body_pt * 1.5),
                 leading=max(36.0, body_pt * 1.5 * 1.25),
-                textColor=HexColor("#111111"),
+                textColor=c_title,
                 spaceBefore=16,
                 spaceAfter=14,
                 keepWithNext=True,
@@ -164,7 +190,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=max(28.0, body_pt * 1.5),
                 leading=max(36.0, body_pt * 1.5 * 1.25),
-                textColor=HexColor("#111111"),
+                textColor=c_title,
                 alignment=TA_RIGHT,
                 spaceBefore=16,
                 spaceAfter=14,
@@ -175,7 +201,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Bold",
                 fontSize=max(26.0, body_pt * 1.4),
                 leading=max(34.0, body_pt * 1.4 * 1.25),
-                textColor=HexColor("#111111"),
+                textColor=c_title,
                 spaceBefore=18,
                 spaceAfter=10,
                 keepWithNext=True,
@@ -185,7 +211,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=max(26.0, body_pt * 1.4),
                 leading=max(34.0, body_pt * 1.4 * 1.25),
-                textColor=HexColor("#111111"),
+                textColor=c_title,
                 alignment=TA_RIGHT,
                 spaceBefore=18,
                 spaceAfter=10,
@@ -196,7 +222,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Bold",
                 fontSize=max(23.0, body_pt * 1.25),
                 leading=max(30.0, body_pt * 1.25 * 1.25),
-                textColor=HexColor("#222222"),
+                textColor=c_h2,
                 spaceBefore=14,
                 spaceAfter=8,
                 keepWithNext=True,
@@ -206,7 +232,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=max(23.0, body_pt * 1.25),
                 leading=max(30.0, body_pt * 1.25 * 1.25),
-                textColor=HexColor("#222222"),
+                textColor=c_h2,
                 alignment=TA_RIGHT,
                 spaceBefore=14,
                 spaceAfter=8,
@@ -217,7 +243,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Bold",
                 fontSize=max(21.0, body_pt * 1.15),
                 leading=max(28.0, body_pt * 1.15 * 1.25),
-                textColor=HexColor("#222222"),
+                textColor=c_h2,
                 spaceBefore=12,
                 spaceAfter=6,
                 keepWithNext=True,
@@ -227,7 +253,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=max(21.0, body_pt * 1.15),
                 leading=max(28.0, body_pt * 1.15 * 1.25),
-                textColor=HexColor("#222222"),
+                textColor=c_h2,
                 alignment=TA_RIGHT,
                 spaceBefore=12,
                 spaceAfter=6,
@@ -238,7 +264,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica",
                 fontSize=body_pt,
                 leading=leading_pt,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
                 spaceAfter=body_pt * 0.55,
             ),
             "body_rtl": ParagraphStyle(
@@ -246,7 +272,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=body_pt,
                 leading=leading_pt,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
                 alignment=TA_RIGHT,
                 spaceAfter=body_pt * 0.55,
             ),
@@ -255,7 +281,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica",
                 fontSize=body_pt,
                 leading=leading_pt,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
                 leftIndent=24,
                 spaceAfter=body_pt * 0.35,
             ),
@@ -264,7 +290,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=body_pt,
                 leading=leading_pt,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
                 alignment=TA_RIGHT,
                 rightIndent=24,
                 spaceAfter=body_pt * 0.35,
@@ -274,7 +300,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Oblique",
                 fontSize=body_pt,
                 leading=leading_pt,
-                textColor=HexColor("#222222"),
+                textColor=c_h2,
                 leftIndent=30,
                 spaceBefore=8,
                 spaceAfter=body_pt * 0.5,
@@ -284,7 +310,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=body_pt,
                 leading=leading_pt,
-                textColor=HexColor("#222222"),
+                textColor=c_h2,
                 alignment=TA_RIGHT,
                 rightIndent=30,
                 spaceBefore=8,
@@ -295,7 +321,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Oblique",
                 fontSize=max(14.0, body_pt * 0.8),
                 leading=max(14.0, body_pt * 0.8) * 1.3,
-                textColor=HexColor("#444444"),
+                textColor=c_fn,
                 spaceAfter=8,
             ),
             "footnote_rtl": ParagraphStyle(
@@ -303,7 +329,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=max(14.0, body_pt * 0.8),
                 leading=max(14.0, body_pt * 0.8) * 1.3,
-                textColor=HexColor("#444444"),
+                textColor=c_fn,
                 alignment=TA_RIGHT,
                 spaceAfter=8,
             ),
@@ -312,7 +338,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Bold",
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.3,
-                textColor=HexColor("#333333"),
+                textColor=c_cap,
                 alignment=TA_CENTER,
                 spaceBefore=6,
                 spaceAfter=10,
@@ -322,7 +348,7 @@ class PdfExporter(BaseExporter):
                 fontName=arabic_font,
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.3,
-                textColor=HexColor("#333333"),
+                textColor=c_cap,
                 alignment=TA_RIGHT,
                 spaceBefore=6,
                 spaceAfter=10,
@@ -332,14 +358,14 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica",
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.25,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
             ),
             "table_cell_rtl": ParagraphStyle(
                 "TableCellRtl",
                 fontName=arabic_font,
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.25,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
                 alignment=TA_RIGHT,
             ),
             "table_header": ParagraphStyle(
@@ -347,14 +373,14 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Bold",
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.25,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
             ),
             "table_header_rtl": ParagraphStyle(
                 "TableHeaderRtl",
                 fontName=arabic_font,
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.25,
-                textColor=HexColor("#111111"),
+                textColor=c_body,
                 alignment=TA_RIGHT,
             ),
             "table_warning": ParagraphStyle(
@@ -362,7 +388,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Oblique",
                 fontSize=max(12.0, body_pt * 0.75),
                 leading=max(12.0, body_pt * 0.75) * 1.25,
-                textColor=HexColor("#994400"),
+                textColor=c_warn,
                 spaceBefore=6,
                 spaceAfter=4,
             ),
@@ -371,7 +397,7 @@ class PdfExporter(BaseExporter):
                 fontName="Helvetica-Bold",
                 fontSize=max(12.0, body_pt * 0.7),
                 leading=max(12.0, body_pt * 0.7) * 1.3,
-                textColor=HexColor("#555555"),
+                textColor=c_marker,
                 alignment=1,  # Center
                 spaceBefore=body_pt * 0.8,
                 spaceAfter=body_pt * 0.5,
@@ -471,8 +497,13 @@ class PdfExporter(BaseExporter):
                 # Fit image to width without distortion (IMG-003)
                 display_w = min(usable_width, float(asset.width * 72.0 / 96.0))
                 display_h = display_w / aspect
+
+                img_path = asset.file_path
+                if options.monochrome:
+                    img_path = self._get_or_create_monochrome_image(asset.file_path)
+
                 flowables.append(Spacer(1, 10))
-                flowables.append(PlatypusImage(asset.file_path, width=display_w, height=display_h))
+                flowables.append(PlatypusImage(img_path, width=display_w, height=display_h))
                 flowables.append(Spacer(1, 10))
             return flowables
 
@@ -608,9 +639,12 @@ class PdfExporter(BaseExporter):
         if is_rtl:
             calculated_widths.reverse()
 
+        grid_color = HexColor("#000000") if options.monochrome else HexColor("#D0D0D0")
+        header_bg = HexColor("#E5E5E5") if options.monochrome else HexColor("#F2F2F2")
+
         t = PlatypusTable(data, colWidths=calculated_widths, repeatRows=1 if table_struct.has_header else 0)
         t_style = [
-            ("GRID", (0, 0), (-1, -1), 0.75, HexColor("#D0D0D0")),
+            ("GRID", (0, 0), (-1, -1), 1.0 if options.monochrome else 0.75, grid_color),
             ("TOPPADDING", (0, 0), (-1, -1), 6),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
@@ -618,7 +652,7 @@ class PdfExporter(BaseExporter):
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ]
         if table_struct.has_header:
-            t_style.append(("BACKGROUND", (0, 0), (-1, 0), HexColor("#F2F2F2")))
+            t_style.append(("BACKGROUND", (0, 0), (-1, 0), header_bg))
 
         t.setStyle(TableStyle(t_style))
         return t

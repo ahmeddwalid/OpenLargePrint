@@ -6,14 +6,14 @@
 const ar: Record<string, string> = {
   // App header
   'app.title': 'طباعة كبيرة مفتوحة',
-  'app.subtitle': 'تكبير المستندات لضعاف البصر',
+  'app.subtitle': 'تكبير المستندات بشكل ميسر',
   'app.skip_to_content': 'تخطي إلى المحتوى الرئيسي',
 
   // Theme selector
   'theme.label': 'المظهر:',
-  'theme.light': 'فاتح (افتراضي)',
+  'theme.sepia': 'بني داكن (افتراضي)',
+  'theme.light': 'فاتح',
   'theme.auto': 'تلقائي (حسب النظام)',
-  'theme.sepia': 'بني داكن',
   'theme.dark': 'داكن',
 
   // Direction toggle
@@ -140,6 +140,10 @@ const ar: Record<string, string> = {
   'file.open_file': 'فتح الملف',
   'file.show_in_folder': 'عرض في المجلد',
   'file.saved_file': 'الملف المحفوظ:',
+
+  // Export & Print options
+  'export.monochrome_label': 'تصدير أحادي اللون (لطابعات الليزر الأبيض والأسود)',
+  'export.monochrome_desc': 'تحويل كافة الصور والعناصر لتباين أبيض وأسود نقي للطباعة بالليزر دون تدرجات ضبابية.',
 };
 
 export default ar;

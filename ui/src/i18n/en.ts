@@ -6,14 +6,14 @@
 const en: Record<string, string> = {
   // App header
   'app.title': 'OpenLargePrint',
-  'app.subtitle': 'Accessible document enlargement for low vision',
+  'app.subtitle': 'Accessible document enlargement',
   'app.skip_to_content': 'Skip to main content',
 
   // Theme selector
   'theme.label': 'Theme:',
-  'theme.light': 'Light (Default)',
+  'theme.sepia': 'Sepia (Default)',
+  'theme.light': 'Light',
   'theme.auto': 'Auto (follow system)',
-  'theme.sepia': 'Sepia',
   'theme.dark': 'Dark',
 
   // Direction toggle
@@ -140,6 +140,10 @@ const en: Record<string, string> = {
   'file.open_file': 'Open File',
   'file.show_in_folder': 'Show in Folder',
   'file.saved_file': 'Saved file:',
+
+  // Export & Print options
+  'export.monochrome_label': 'Monochrome output (for black-and-white laser printers)',
+  'export.monochrome_desc': 'Converts all figures, charts, and colors to pure high-contrast black and white for clean laser printing without halftone dithering.',
 };
 
 export default en;

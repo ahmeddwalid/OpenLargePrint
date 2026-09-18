@@ -91,3 +91,42 @@ def test_provenance_and_bounding_boxes(tmp_path: Path):
             bbox = block.source_bounding_box
             assert bbox.width > 0
             assert bbox.height > 0
+
+
+def test_line_aggregation_and_bullet_normalization(tmp_path: Path):
+    """Verify that fragmented words on the same line are unified and lone bullets normalize (PDF-002)."""
+    pdf_path = tmp_path / "fragments_and_bullets.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=letter)
+    
+    # Draw disjoint words across a single horizontal baseline (y=700)
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 700, "The")
+    c.drawString(75, 700, "quick")
+    c.drawString(108, 700, "brown")
+    c.drawString(145, 700, "fox")
+    c.drawString(170, 700, "jumps.")
+
+    # Draw a lone bullet on line y=660 followed by text
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, 660, "•")
+    c.setFont("Helvetica", 12)
+    c.drawString(65, 660, "Itemized point about document structure.")
+
+    c.showPage()
+    c.save()
+
+    importer = NativePdfImporter()
+    with JobWorkspace() as ws:
+        doc = importer.import_document(pdf_path, ws)
+
+    content_blocks = [b for b in doc.blocks if b.type != BlockType.PAGE_MARKER]
+    
+    # The words on y=700 should be aggregated into one cohesive line/paragraph
+    fox_blocks = [b for b in content_blocks if "quick brown fox jumps" in (b.text or "")]
+    assert len(fox_blocks) == 1, "Disjoint horizontal words should be aggregated into a single block"
+
+    # The bullet character should normalize into a LIST item, not a standalone HEADING
+    bullet_blocks = [b for b in content_blocks if "Itemized point" in (b.text or "")]
+    assert len(bullet_blocks) == 1
+    assert bullet_blocks[0].type == BlockType.LIST
+

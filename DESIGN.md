@@ -222,6 +222,7 @@ Text-size presets (`OUT-006`):
 - Both PDF and DOCX exports embed the true physical page dimensions for the chosen size. The export screen carries a short, plain-language reminder to print at 100%/actual size rather than "fit to page" — printer-side scaling would otherwise silently defeat the chosen text size.
 - From the Reader, the user can select one or more pages or a contiguous range and export just that selection as its own print-ready file, at either paper size, independent of exporting the whole book. Because every export is a pure function of `DocumentIR` plus parameters (§2), this "export just this chapter, bigger" path re-renders from the already-built `DocumentIR` — it never re-extracts or re-runs OCR, which is what makes it fast and reliable rather than a special one-off feature.
 - The paper-size choice lives on the primary export/conversion screen (`UI-006`), not behind "More options" — unlike OCR-engine internals, it directly determines whether the printed page is actually usable to the reader.
+- **Color fidelity & Monochrome print toggle (`OUT-001`, `OUT-003`)**: By default, documents retain their source color attributes across both PDF and DOCX exporters. For users outputting to black-and-white laser printers, an optional `monochrome: true` setting forces all typography to pure black (`#000000`), table borders to solid black, and raster image assets to contrast-enhanced grayscale, eliminating muddy halftone dithering on monochrome toner printers.
 
 ## 9. IPC and job model
 

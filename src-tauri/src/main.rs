@@ -600,8 +600,10 @@ async fn start_conversion(
 
     let paper_size = settings.get("paperSize").and_then(|p| p.as_str()).unwrap_or("A4");
     let routing_mode = settings.get("routingMode").and_then(|m| m.as_str()).unwrap_or("maximum_accuracy");
+    let monochrome = settings.get("monochrome").and_then(|m| m.as_bool()).unwrap_or(false);
+    let page_range = settings.get("pageRange").and_then(|r| r.as_str());
 
-    let convert_cmd = serde_json::json!({
+    let mut convert_cmd = serde_json::json!({
         "id": job_id,
         "command": "convert",
         "file_path": file_path,
@@ -610,8 +612,15 @@ async fn start_conversion(
         "paper_size": paper_size,
         "export_format": out_fmt,
         "routing_mode": routing_mode,
-        "include_page_markers": true
+        "include_page_markers": true,
+        "monochrome": monochrome,
     });
+
+    if let Some(r) = page_range {
+        if !r.trim().is_empty() {
+            convert_cmd["page_range"] = serde_json::json!(r.trim());
+        }
+    }
 
     session.send_command(&convert_cmd).await?;
 

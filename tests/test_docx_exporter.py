@@ -162,3 +162,41 @@ def test_docx_export_omit_page_markers(tmp_path: Path):
     doc = docx.Document(str(out_file))
     marker_paras = [p for p in doc.paragraphs if "Original Page" in p.text]
     assert len(marker_paras) == 0
+
+
+def test_docx_export_monochrome(tmp_path: Path):
+    """Verify that monochrome export processes images and text without errors (OUT-001)."""
+    import numpy as np
+    from PIL import Image
+
+    img_data = np.zeros((100, 100, 3), dtype=np.uint8)
+    img_data[:, :] = [0, 255, 0]  # green
+    img_path = tmp_path / "test_color_docx.png"
+    Image.fromarray(img_data).save(img_path)
+
+    from openlargeprint.ir.models import ImageAsset
+    doc_ir = create_sample_ir()
+    doc_ir.blocks.append(
+        Block(
+            id="p1_img",
+            type=BlockType.IMAGE,
+            image_asset=ImageAsset(
+                asset_id="img_1",
+                file_path=str(img_path),
+                width=100,
+                height=100,
+            ),
+            source_page=1,
+        )
+    )
+
+    out_file = tmp_path / "output_mono.docx"
+    exporter = DocxExporter()
+    options = ExportOptions(monochrome=True)
+    exporter.export(doc_ir, out_file, options)
+
+    assert out_file.exists()
+    assert out_file.stat().st_size > 0
+    doc = docx.Document(str(out_file))
+    assert len(doc.paragraphs) > 0
+

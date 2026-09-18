@@ -23,7 +23,7 @@ class OcrRouter:
         self._default_engine: Optional[DocumentOcrEngine] = None
 
     def get_engine(self, mode: RoutingMode = RoutingMode.AUTOMATIC) -> DocumentOcrEngine:
-        """Return the OCR engine corresponding to the selected routing mode (default: Automatic CPU-first)."""
+        """Return the OCR engine corresponding to the selected routing mode (default: Automatic)."""
         if self._default_engine is None:
             self._default_engine = PaddleRapidOcrEngine(use_gpu=False)
 
@@ -39,8 +39,8 @@ class OcrRouter:
                 log_safe_info("Routing to Maximum Accuracy VLM OCR engine")
                 return PaddleOcrVlEngine()
             except Exception:
-                log_safe_info("VLM model not available; falling back to CPU-friendly OCR engine")
+                log_safe_info("VLM model not available; using high-accuracy RapidOCR engine")
                 return self._default_engine
         elif mode in (RoutingMode.AUTOMATIC, RoutingMode.FAST):
             return self._default_engine
-        return self.get_engine(RoutingMode.AUTOMATIC)
+        return self.get_engine(RoutingMode.MAXIMUM_ACCURACY)

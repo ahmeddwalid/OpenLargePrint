@@ -2,19 +2,19 @@
 /* Adheres strictly to SPEC.md A11Y-001..005, VIS-001..004, and AGENTS.md §7 */
 
 :root {
-  /* Warm Parchment Light Theme (default) */
-  --bg-primary: #faf8f5;
-  --bg-surface: #f1ede4;
-  --bg-surface-raised: #e8e3d8;
-  --text-primary: #1c1b18;
-  --text-secondary: #4a473f;
-  --text-muted: #736f66;
-  --border-color: #d6d0c2;
-  --border-focus: #9c4a1a;
-  --focus-ring: #9c4a1a;
-  --accent-primary: #9c4a1a;
-  --accent-hover: #803912;
-  --accent-text: #faf8f5;
+  /* Warm Sepia Theme (default) */
+  --bg-primary: #f4ecd8;
+  --bg-surface: #e9dfc6;
+  --bg-surface-raised: #ded3b7;
+  --text-primary: #2d261e;
+  --text-secondary: #594d3f;
+  --text-muted: #7d705f;
+  --border-color: #cbbe9f;
+  --border-focus: #824317;
+  --focus-ring: #824317;
+  --accent-primary: #824317;
+  --accent-hover: #69320e;
+  --accent-text: #f4ecd8;
   --warning-bg: #fdf3e7;
   --warning-border: #d97724;
   --warning-text: #7a3a00;

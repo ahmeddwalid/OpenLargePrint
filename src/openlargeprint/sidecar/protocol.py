@@ -52,8 +52,9 @@ class ConvertCommand(BaseModel):
     paper_size: str = "A4"
     export_format: str = "docx"
     routing_mode: str = "automatic"
-    page_range: Optional[List[int]] = None
+    page_range: Optional[Any] = None
     include_page_markers: bool = True
+    monochrome: bool = False
 
 
 class CancelCommand(BaseModel):

@@ -65,7 +65,7 @@ export const App: React.FC = () => {
     if (saved === 'auto' || saved === 'light' || saved === 'sepia' || saved === 'dark') {
       return saved;
     }
-    return 'light';
+    return 'sepia';
   });
 
   // Document Selection & Settings State (UI-001, UI-006)
@@ -78,6 +78,7 @@ export const App: React.FC = () => {
   const [systemPaths, setSystemPaths] = useState<{ downloads: string; desktop: string; documents: string } | null>(null);
   const [routingMode, setRoutingMode] = useState<RoutingMode>('max_accuracy');
   const [pageRange, setPageRange] = useState<string>('');
+  const [monochrome, setMonochrome] = useState<boolean>(false);
 
   // Workflow State
   const [viewMode, setViewMode] = useState<ViewMode>('home');
@@ -214,6 +215,7 @@ export const App: React.FC = () => {
       outputFormat,
       routingMode,
       pageRange,
+      monochrome,
       outputPath: targetOutputPath,
     };
 
@@ -498,6 +500,8 @@ export const App: React.FC = () => {
               onRoutingModeChange={setRoutingMode}
               pageRange={pageRange}
               onPageRangeChange={setPageRange}
+              monochrome={monochrome}
+              onMonochromeChange={setMonochrome}
             />
 
             {/* Recent Documents Shelf (UI-001) */}

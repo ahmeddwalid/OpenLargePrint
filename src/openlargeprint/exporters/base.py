@@ -50,6 +50,7 @@ class ExportOptions:
     fallback_font: str = "Arial"
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
+    monochrome: bool = False
 
     @property
     def body_pt(self) -> float:

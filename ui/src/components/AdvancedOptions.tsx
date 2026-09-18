@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { RoutingMode } from '../types';
+import { useI18n } from '../i18n/i18n';
 import {
   checkForUpdates,
   isAutoUpdateEnabled,
@@ -12,6 +13,8 @@ interface AdvancedOptionsProps {
   onRoutingModeChange: (mode: RoutingMode) => void;
   pageRange: string;
   onPageRangeChange: (range: string) => void;
+  monochrome: boolean;
+  onMonochromeChange: (val: boolean) => void;
 }
 
 export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
@@ -19,7 +22,10 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
   onRoutingModeChange,
   pageRange,
   onPageRangeChange,
+  monochrome,
+  onMonochromeChange,
 }) => {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState<boolean>(() => isAutoUpdateEnabled());
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -104,6 +110,26 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
               <option value="native_only">Fast Digital Extraction Only (skips scanned pages)</option>
               <option value="ocr_scanned_only">Force Scanned Recognition</option>
             </select>
+          </div>
+
+          {/* Laser Printer Monochrome Export */}
+          <div style={{ marginTop: '6px', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', minHeight: '48px', padding: '6px 0' }}>
+              <input
+                type="checkbox"
+                checked={monochrome}
+                onChange={(e) => onMonochromeChange(e.target.checked)}
+                style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer' }}
+              />
+              <div>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {t('export.monochrome_label')}
+                </div>
+                <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  {t('export.monochrome_desc')}
+                </div>
+              </div>
+            </label>
           </div>
 
           {/* Software updates */}
