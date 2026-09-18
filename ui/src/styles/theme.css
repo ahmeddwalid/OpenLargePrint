@@ -489,3 +489,62 @@ button.secondary-btn {
   left: auto;
   right: 12px;
 }
+
+/* Reading Ruler Guide for Low-Vision Focus (A11Y-001, A11Y-003) */
+.reading-ruler {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: var(--accent-primary);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  z-index: 9999;
+  transition: top 0.05s ease-out;
+}
+
+/* Print Reflow Stylesheet (OUT-007..011) */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 20pt !important;
+  }
+
+  .app-header,
+  .reader-toolbar,
+  .reader-sidebar,
+  .skip-link,
+  .reading-ruler,
+  .secondary-btn,
+  .primary-btn {
+    display: none !important;
+  }
+
+  .app-container,
+  .reader-container,
+  .panel {
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .reader-body {
+    border: none !important;
+    padding: 0 !important;
+    background: transparent !important;
+    color: #000000 !important;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  p, table, blockquote {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
