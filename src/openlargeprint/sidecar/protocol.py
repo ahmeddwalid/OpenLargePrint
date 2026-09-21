@@ -13,6 +13,7 @@ class CommandType(str, Enum):
     HEALTH = "health"
     INSPECT = "inspect"
     CONVERT = "convert"
+    EXPORT = "export"
     CANCEL = "cancel"
     GET_REVIEW_DATA = "get_review_data"
     RETRY_PAGE = "retry_page"
@@ -55,6 +56,25 @@ class ConvertCommand(BaseModel):
     page_range: Optional[Any] = None
     include_page_markers: bool = True
     monochrome: bool = False
+    custom_body_pt: Optional[float] = None
+    custom_line_spacing: Optional[float] = None
+
+
+class ExportCommand(BaseModel):
+    """Re-render an already-built DocumentIR without re-extraction or OCR (OUT-002, OUT-010)."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    command: Literal[CommandType.EXPORT] = CommandType.EXPORT
+    job_id: str
+    output_path: str
+    export_format: str = "pdf"
+    preset: str = "Large"
+    paper_size: str = "A4"
+    page_range: Optional[Any] = None
+    include_page_markers: bool = True
+    monochrome: bool = False
+    custom_body_pt: Optional[float] = None
+    custom_line_spacing: Optional[float] = None
 
 
 class CancelCommand(BaseModel):

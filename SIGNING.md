@@ -93,7 +93,7 @@ Import-Certificate -FilePath "$env:TEMP\OpenLargePrintDev.cer" -CertStoreLocatio
 
 ## 5. Applying the Certificate
 
-The Windows packaging script ([`packaging/build_windows_app.ps1`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/packaging/build_windows_app.ps1)) automatically detects and applies a code signing certificate when the `OLP_CODESIGN_THUMBPRINT` environment variable is defined.
+The Windows packaging script ([`packaging/build_windows_app.ps1`](packaging/build_windows_app.ps1)) automatically detects and applies a code signing certificate when the `OLP_CODESIGN_THUMBPRINT` environment variable is defined.
 
 ### Using the Automated Packaging Script
 

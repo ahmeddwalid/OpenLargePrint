@@ -617,7 +617,7 @@ button.secondary-btn {
   body {
     background: #ffffff !important;
     color: #000000 !important;
-    font-size: 20pt !important;
+    font-size: var(--print-font-size, 20pt) !important;
   }
 
   .app-header,

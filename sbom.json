@@ -144,74 +144,53 @@
       "version": "v4.0.0",
       "code_license": "Apache-2.0",
       "weight_license": "Apache-2.0",
-      "sha256": "05a968a3e78e6f111812903b0d402325ce03531b7829283f5c94285aa16262fe",
-      "download_source": "https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_PP-OCRv4_det_infer.onnx",
+      "sha256": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
+      "download_source": "https://pypi.org/project/rapidocr-onnxruntime/1.4.4/",
       "native_code": false,
       "network_behavior": "none",
       "parses_untrusted_content": true,
-      "purpose": "Ultra-lightweight text detection on CPU"
+      "purpose": "Ultra-lightweight text detection on CPU",
+      "distribution": "Bundled in rapidocr-onnxruntime 1.4.4; hash verified before inference"
     },
     {
       "model_key": "ch_ppocr_mobile_v2.0_cls",
       "version": "v2.0.0",
       "code_license": "Apache-2.0",
       "weight_license": "Apache-2.0",
-      "sha256": "5261d7bfa5d38a536da49fa5eb803e498c8f0003fb7c6d66e746522c069eb814",
-      "download_source": "https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+      "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
+      "download_source": "https://pypi.org/project/rapidocr-onnxruntime/1.4.4/",
       "native_code": false,
       "network_behavior": "none",
       "parses_untrusted_content": true,
-      "purpose": "Text direction and orientation classification"
+      "purpose": "Text direction and orientation classification",
+      "distribution": "Bundled in rapidocr-onnxruntime 1.4.4; hash verified before inference"
     },
     {
       "model_key": "ch_PP-OCRv4_rec",
       "version": "v4.0.0",
       "code_license": "Apache-2.0",
       "weight_license": "Apache-2.0",
-      "sha256": "eb0c2a8c3d3a4658e3703c7e7b686d0614138e6ea47d4e339d2fead31e21b714",
-      "download_source": "https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_PP-OCRv4_rec_infer.onnx",
+      "sha256": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
+      "download_source": "https://pypi.org/project/rapidocr-onnxruntime/1.4.4/",
       "native_code": false,
       "network_behavior": "none",
       "parses_untrusted_content": true,
-      "purpose": "Multilingual character recognition on CPU"
-    },
-    {
-      "model_key": "picodet_lcnet_layout",
-      "version": "v3.0.0",
-      "code_license": "Apache-2.0",
-      "weight_license": "Apache-2.0",
-      "sha256": "b4e18d6bc9f0cf192534a6ef29bc7886470875e5339c02ffc457d7cfb3952f1e",
-      "download_source": "https://github.com/PaddlePaddle/PaddleOCR/releases/download/PP-StructureV3/picodet_lcnet_layout.onnx",
-      "native_code": false,
-      "network_behavior": "none",
-      "parses_untrusted_content": true,
-      "purpose": "Document layout segmentation and reading order detection"
-    },
-    {
-      "model_key": "ch_ppstructure_table_slanet",
-      "version": "v2.0.0",
-      "code_license": "Apache-2.0",
-      "weight_license": "Apache-2.0",
-      "sha256": "a7d23910c6fe34beea23fef617d12108740c062c31e9c56fa769742eb518290f",
-      "download_source": "https://github.com/PaddlePaddle/PaddleOCR/releases/download/PP-StructureV2/ch_ppstructure_mobile_v2.0_SLANet_infer.onnx",
-      "native_code": false,
-      "network_behavior": "none",
-      "parses_untrusted_content": true,
-      "purpose": "Table structure recognition and cell grid reconstruction"
+      "purpose": "Chinese/English text recognition on CPU",
+      "distribution": "Bundled in rapidocr-onnxruntime 1.4.4; hash verified before inference"
     }
   ],
   "excluded_candidates": [
     {
       "name": "olmOCR",
-      "reason": "Excluded from default distribution due to high VRAM footprint and non-permissive/commercial thresholds (DESIGN.md §4.1, LIC-002)"
+      "reason": "Excluded from default distribution due to high VRAM footprint and non-permissive/commercial thresholds (DESIGN.md \u00a74.1, LIC-002)"
     },
     {
       "name": "Surya",
-      "reason": "Excluded from default distribution due to commercial license terms and MAU thresholds (DESIGN.md §4.1, LIC-002)"
+      "reason": "Excluded from default distribution due to commercial license terms and MAU thresholds (DESIGN.md \u00a74.1, LIC-002)"
     },
     {
       "name": "MinerU",
-      "reason": "Excluded from default distribution due to AGPL license and heavyweight deployment requirements (DESIGN.md §4.1, LIC-002)"
+      "reason": "Excluded from default distribution due to AGPL license and heavyweight deployment requirements (DESIGN.md \u00a74.1, LIC-002)"
     }
   ]
 }

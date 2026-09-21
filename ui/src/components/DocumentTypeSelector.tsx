@@ -30,6 +30,11 @@ const FORMAT_OPTIONS: FormatOption[] = [
     title: 'Interactive Reader (.html)',
     description: 'Self-contained accessible web reader with zoom controls',
   },
+  {
+    id: 'searchable_pdf',
+    title: 'Searchable original PDF',
+    description: 'Keeps the original page layout and adds a text layer for searching',
+  },
 ];
 
 export const DocumentTypeSelector: React.FC<DocumentTypeSelectorProps> = ({

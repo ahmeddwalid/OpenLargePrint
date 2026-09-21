@@ -58,6 +58,11 @@ class BenchmarkCorpusBuilder:
         c.drawString(72, 700, "Performance may be excused only upon impossibility, impracticability, or frustration.")
         c.showPage()
         c.save()
+        self._write_ground_truth(out_path, "\n".join([
+            "Contract Law Restatement",
+            "An agreement requires mutual assent and valid consideration to be legally binding.",
+            "Performance may be excused only upon impossibility, impracticability, or frustration.",
+        ]))
         return out_path
 
     def build_two_column_law(self) -> Path:

@@ -21,12 +21,8 @@ def test_model_catalog_defaults():
     assert "ch_PP-OCRv4_det" in defaults
     assert "ch_PP-OCRv4_rec" in defaults
     assert "ch_ppocr_mobile_v2.0_cls" in defaults
-    assert "picodet_lcnet_layout" in defaults
-    assert "ch_ppstructure_table_slanet" in defaults
-
-    # High-accuracy VLM is optional, not default
-    assert "paddleocr_vl_1.6" in PINNED_MODELS.models
-    assert not PINNED_MODELS.models["paddleocr_vl_1.6"].is_default
+    assert len(defaults) == 3
+    assert "paddleocr_vl_1.6" not in PINNED_MODELS.models
 
 
 def test_model_cache_dir_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

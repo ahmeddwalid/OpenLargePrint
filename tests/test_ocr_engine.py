@@ -120,3 +120,15 @@ def test_ocr_cancellation_token():
     result = engine.analyze_page(img, page_num=1, cancellation=token)
     assert result.cancelled is True
     assert result.lines == []
+
+
+def test_cpu_thread_limits_reach_runtime():
+    from openlargeprint.ocr.paddle_engine import MAX_CPU_THREADS, INTER_OP_THREADS
+
+    engine = PaddleRapidOcrEngine(use_gpu=False)._get_engine()
+    for adapter in (engine.text_det.infer, engine.text_cls.infer, engine.text_rec.session):
+        session = adapter.session
+        options = session.get_session_options()
+        assert 1 <= options.intra_op_num_threads <= MAX_CPU_THREADS
+        assert options.inter_op_num_threads == INTER_OP_THREADS
+        assert session.get_providers() == ["CPUExecutionProvider"]

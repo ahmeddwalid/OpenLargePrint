@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-import os
+import math
+import shutil
+import zipfile
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +14,20 @@ MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024
 # Maximum allowed image dimension in pixels (SEC-003)
 MAX_IMAGE_DIMENSION = 10000
 MAX_IMAGE_PIXELS = 50_000_000  # 50 MP limit (allows 10000x5000 banners, but caps total raster size)
+MAX_RENDER_PIXELS = 16_000_000
+
+
+def bounded_pdf_scale(width: float, height: float, dpi: float = 300.0) -> float:
+    if any(not math.isfinite(v) or v <= 0 for v in (width, height, dpi)):
+        raise SecurityValidationError("The page dimensions or resolution are invalid.")
+    scale = min(
+        dpi / 72.0,
+        (MAX_IMAGE_DIMENSION - 1) / width,
+        (MAX_IMAGE_DIMENSION - 1) / height,
+        math.sqrt(MAX_RENDER_PIXELS / width / height) * 0.99,
+    )
+    validate_image_dimensions(math.ceil(width * scale), math.ceil(height * scale))
+    return scale
 
 
 class SecurityValidationError(ValueError):
@@ -19,7 +35,6 @@ class SecurityValidationError(ValueError):
     pass
 
 
-import zipfile
 
 SupportedFormat = Literal["pdf", "docx", "pptx", "doc", "ppt"]
 
@@ -111,7 +126,6 @@ def validate_image_dimensions(width: int, height: int) -> None:
         )
 
 
-import shutil
 
 
 def safe_extract_zip(
@@ -119,11 +133,11 @@ def safe_extract_zip(
     dest_dir: str | Path,
     max_uncompressed_bytes: int = MAX_FILE_SIZE_BYTES,
     max_ratio: float = 100.0,
-) -> List[Path]:
+) -> list[Path]:
     """Safely extract ZIP archive members with zip-slip and zip-bomb prevention (SEC-003)."""
     dest = Path(dest_dir).resolve()
     dest.mkdir(parents=True, exist_ok=True)
-    extracted_paths: List[Path] = []
+    extracted_paths: list[Path] = []
 
     total_uncompressed = 0
     total_compressed = 0
@@ -164,4 +178,3 @@ def safe_extract_zip(
                 extracted_paths.append(member_path)
 
     return extracted_paths
-

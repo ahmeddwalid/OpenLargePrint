@@ -11,6 +11,7 @@ from .base import (
 from .docx import DocxExporter
 from .pdf import PdfExporter
 from .reader import ReaderExporter
+from .searchable_pdf import SearchablePdfExporter, build_searchable_pdf
 
 __all__ = [
     "BaseExporter",
@@ -22,4 +23,6 @@ __all__ = [
     "PresetConfig",
     "PresetName",
     "ReaderExporter",
+    "SearchablePdfExporter",
+    "build_searchable_pdf",
 ]

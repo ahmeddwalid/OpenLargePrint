@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from openlargeprint.security.validator import bounded_pdf_scale
 import re
 import tempfile
 from typing import List, Optional, Tuple
@@ -52,92 +53,97 @@ class ScannedPageExtractor:
         page: pdfium.PdfPage,
         page_num: int,
         start_block_idx: int,
+        assets_dir: Optional[Path] = None,
     ) -> List[Block]:
         """Render page, perform OCR recognition, reconstruct columns, and form semantic blocks."""
         page_w_pt, page_h_pt = page.get_size()
-        scale = self.dpi / 72.0
+        scale = bounded_pdf_scale(page_w_pt, page_h_pt, self.dpi)
 
         # 1. Render page bitmap at OCR resolution (PDF-003)
         bitmap = page.render(scale=scale)
         pil_img = bitmap.to_pil()
 
-        # 2. Run OCR recognition (OCR-001, OCR-002, OCR-006)
-        ocr_res = self.ocr_engine.analyze_page(pil_img, page_num=page_num)
-        log_safe_info(
-            f"Page {page_num} OCR recognized {len(ocr_res.lines)} lines in {ocr_res.elapse_seconds:.2f}s"
-        )
-
-        if not ocr_res.lines:
-            # Handle empty page detection (OCR-005)
-            return [
-                Block(
-                    id=f"p{page_num}_b{start_block_idx}",
-                    type=BlockType.PARAGRAPH,
-                    text=f"[Page {page_num}: No text recognized on scanned page]",
-                    source_page=page_num,
-                    extraction_method=ExtractionMethod.OCR_FAST,
-                    confidence=0.0,
-                    warnings=["OCR produced no text for scanned page"],
-                )
-            ]
-
-        # 3. Transform pixel coordinates to PDF point coordinates (PDF-006)
-        point_lines: List[OcrPointLine] = []
-        for line in ocr_res.lines:
-            x0_pt = line.x0 / scale
-            x1_pt = line.x1 / scale
-            # Invert Y: pixel 0 is at top, PDF 0 is at bottom
-            y1_pt = page_h_pt - (line.y0 / scale)
-            y0_pt = page_h_pt - (line.y1 / scale)
-            point_lines.append(
-                OcrPointLine(
-                    text=line.text,
-                    x0=x0_pt,
-                    y0=y0_pt,
-                    x1=x1_pt,
-                    y1=y1_pt,
-                    confidence=line.confidence,
-                )
+        try:
+            # 2. Run OCR recognition (OCR-001, OCR-002, OCR-006)
+            ocr_res = self.ocr_engine.analyze_page(pil_img, page_num=page_num)
+            log_safe_info(
+                f"Page {page_num} OCR recognized {len(ocr_res.lines)} lines in {ocr_res.elapse_seconds:.2f}s"
             )
 
-        # 4. Detect and extract tables before column ordering (TBL-001)
-        non_table_lines, table_blocks = self._extract_tables(
-            point_lines, page_num, start_block_idx, page_w_pt, page_h_pt, pil_img, scale
-        )
-        idx_after_tables = start_block_idx + len(table_blocks)
+            if not ocr_res.lines:
+                # Handle empty page detection (OCR-005)
+                return [
+                    Block(
+                        id=f"p{page_num}_b{start_block_idx}",
+                        type=BlockType.PARAGRAPH,
+                        text=f"[Page {page_num}: No text recognized on scanned page]",
+                        source_page=page_num,
+                        extraction_method=ExtractionMethod.OCR_FAST,
+                        confidence=0.0,
+                        warnings=["OCR produced no text for scanned page"],
+                    )
+                ]
 
-        # 5. Reconstruct multi-column reading order (PDF-003)
-        ordered_lines = self._order_lines_by_columns(non_table_lines, page_w_pt, page_h_pt)
+            # 3. Transform pixel coordinates to PDF point coordinates (PDF-006)
+            point_lines: List[OcrPointLine] = []
+            for line in ocr_res.lines:
+                x0_pt = line.x0 / scale
+                x1_pt = line.x1 / scale
+                # Invert Y: pixel 0 is at top, PDF 0 is at bottom
+                y1_pt = page_h_pt - (line.y0 / scale)
+                y0_pt = page_h_pt - (line.y1 / scale)
+                point_lines.append(
+                    OcrPointLine(
+                        text=line.text,
+                        x0=x0_pt,
+                        y0=y0_pt,
+                        x1=x1_pt,
+                        y1=y1_pt,
+                        confidence=line.confidence,
+                    )
+                )
 
-        # 6. Form semantic blocks with confidence and warnings (OCR-004, OCR-005, FN-001)
-        text_blocks = self._cluster_semantic_blocks(
-            ordered_lines, page_num, idx_after_tables, ocr_res.warnings, page_h_pt
-        )
+            # 4. Detect and extract tables before column ordering (TBL-001)
+            non_table_lines, table_blocks = self._extract_tables(
+                point_lines, page_num, start_block_idx, page_w_pt, page_h_pt, pil_img, scale, assets_dir
+            )
+            idx_after_tables = start_block_idx + len(table_blocks)
 
-        if not table_blocks:
-            return text_blocks
+            # 5. Reconstruct multi-column reading order (PDF-003)
+            ordered_lines = self._order_lines_by_columns(non_table_lines, page_w_pt, page_h_pt)
 
-        all_blocks: List[Block] = []
-        tbl_idx = 0
-        sorted_tables = sorted(
-            table_blocks,
-            key=lambda b: -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
-        )
-        for tb in text_blocks:
-            tb_y = tb.source_bounding_box.y1 if tb.source_bounding_box else 0.0
+            # 6. Form semantic blocks with confidence and warnings (OCR-004, OCR-005, FN-001)
+            text_blocks = self._cluster_semantic_blocks(
+                ordered_lines, page_num, idx_after_tables, ocr_res.warnings, page_h_pt
+            )
+
+            if not table_blocks:
+                return text_blocks
+
+            all_blocks: List[Block] = []
+            tbl_idx = 0
+            sorted_tables = sorted(
+                table_blocks,
+                key=lambda b: -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
+            )
+            for tb in text_blocks:
+                tb_y = tb.source_bounding_box.y1 if tb.source_bounding_box else 0.0
+                while tbl_idx < len(sorted_tables):
+                    curr_tbl = sorted_tables[tbl_idx]
+                    tbl_y = curr_tbl.source_bounding_box.y1 if curr_tbl.source_bounding_box else 0.0
+                    if tbl_y >= tb_y:
+                        all_blocks.append(curr_tbl)
+                        tbl_idx += 1
+                    else:
+                        break
+                all_blocks.append(tb)
             while tbl_idx < len(sorted_tables):
-                curr_tbl = sorted_tables[tbl_idx]
-                tbl_y = curr_tbl.source_bounding_box.y1 if curr_tbl.source_bounding_box else 0.0
-                if tbl_y >= tb_y:
-                    all_blocks.append(curr_tbl)
-                    tbl_idx += 1
-                else:
-                    break
-            all_blocks.append(tb)
-        while tbl_idx < len(sorted_tables):
-            all_blocks.append(sorted_tables[tbl_idx])
-            tbl_idx += 1
-        return all_blocks
+                all_blocks.append(sorted_tables[tbl_idx])
+                tbl_idx += 1
+            return all_blocks
+        finally:
+            pil_img.close()
+            bitmap.close()
 
     def _order_lines_by_columns(
         self, lines: List[OcrPointLine], page_w: float, page_h: float
@@ -200,6 +206,7 @@ class ScannedPageExtractor:
         page_h: float,
         pil_img,
         scale: float,
+        assets_dir: Optional[Path] = None,
     ) -> Tuple[List[OcrPointLine], List[Block]]:
         """Identify multi-column aligned grids from OCR lines and construct TableStructure with crop (TBL-001)."""
         if len(lines) < 4:
@@ -312,7 +319,10 @@ class ScannedPageExtractor:
                 if px_x1 > px_x0 and px_y1 > px_y0:
                     table_crop = pil_img.crop((px_x0, px_y0, px_x1, px_y1))
                     crop_id = str(uuid.uuid4())[:8]
-                    crop_path = Path(tempfile.gettempdir()) / f"table_{page_num}_{crop_id}.png"
+                    # Keep the retained crop inside the job's asset directory (SEC-004),
+                    # never the shared system temp directory.
+                    crop_dir = assets_dir if assets_dir is not None else Path(tempfile.gettempdir())
+                    crop_path = crop_dir / f"table_{page_num}_{crop_id}.png"
                     table_crop.save(crop_path, format="PNG")
                     image_asset = ImageAsset(
                         asset_id=f"asset_tbl_{crop_id}",

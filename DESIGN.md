@@ -150,30 +150,15 @@ Routing modes exposed to the user (`UI-001` keeps this out of the primary screen
 
 The default installer ships only the lightweight, CPU-friendly engine pack. The maximum-accuracy pack is an optional, separately downloaded model, verified against a hash manifest before load (`SEC-006`, `OCR-003`). Platform support for the maximum-accuracy pack is only claimed after it is packaged and validated per-platform (`PKG-001`) — do not assume "the framework is cross-platform" implies the model stack is.
 
-### 4.1 Concrete FOSS stack (v1 default choices)
+### 4.1 Implemented recognition stack and remaining work
 
-`OCR-001`'s engine-agnostic interface is what makes this table safe to revise later — but a v1 build needs a real starting stack, not just an abstraction. As of this project's planning, the recommended stack is:
+The current baseline is `rapidocr-onnxruntime==1.4.4`, using the three ONNX models bundled in its wheel: PP-OCRv4 detection, mobile-v2 orientation classification, and PP-OCRv4 Chinese/English recognition. `models/manifest.py` and `sbom.json` pin the observed bytes; the adapter verifies all three SHA-256 values before initialization. Python release environments are constrained to 3.11–3.12, matching the runtime's published compatibility range: https://pypi.org/project/rapidocr-onnxruntime/1.4.4/.
 
-| Role | Chosen technology | Why |
-|---|---|---|
-| Fast/default OCR text recognition | PaddleOCR — PP-OCRv6 | Apache-2.0, CPU-friendly, multiple model sizes, broad multilingual coverage including Arabic |
-| Fast/default layout & structure | PaddleOCR — PP-StructureV3 | Converts complex pages into structured output with per-element coordinates, which the provenance/page-anchor feature (`PDF-006`) depends on |
-| Optional maximum-accuracy engine | PaddleOCR-VL-1.6 | Apache-2.0 document-parsing model; strong reported results on difficult/complex scanned pages; heavier than the default pack, so it stays an optional download (`OCR-003`) |
-| Native multi-format structural import | Docling | MIT-licensed; unifies PDF/DOCX/PPTX/XLSX/image/HTML/EPUB import behind one document representation; supports local/air-gapped execution, which matters for `SEC-009` |
-| PDF rendering & native text/object inspection | pypdfium2 | Provides the text-extraction and page-object APIs the classifier in §3 needs to tell native pages from scanned ones |
-| Lossless embedded image extraction | pikepdf | Extracts/replaces embedded PDF images and low-level PDF objects without forcing a re-render, supporting `IMG-001` |
-| Optional "make original searchable" utility | OCRmyPDF | Adds a text layer to a scanned PDF without touching layout; this is what powers `OUT-004`, not the main reflow path |
-| Legacy DOC/PPT bridge | LibreOffice, headless (`--convert-to`) | Converts old binary Office formats into a modern intermediate rather than reimplementing them (`OFF-002`) |
+Layout, column ordering, and table reconstruction currently use application heuristics, not PP-StructureV3 inference. The recognizer does not advertise Arabic or full document-layout support. CPU inference uses at most eight intra-operation threads and one inter-operation thread via the runtime's actual flat configuration keys. No GPU dependency is required by the base distribution; packaged RTX acceleration remains unverified.
 
-Candidates that were evaluated and are intentionally **excluded from the default distribution** — do not reintroduce them without a fresh, recorded `LIC-002` decision:
+Maximum accuracy currently delegates to the standard adapter and attaches an explicit warning. It must not be described as VLM inference or automatically mark a page verified. The earlier layout/table/VLM catalog entries did not correspond to integrated, verified runtime artifacts and have been removed. A genuine optional higher-accuracy pack and verified Arabic recognition remain required work (`OCR-002..003`, `LANG-002`), subject to code/weight license review and corpus validation.
 
-- **olmOCR** — capable, but its recommended path is a large (7B-parameter class) vision-language model expecting a GPU with a meaningful VRAM floor. Not viable as a default on an ordinary laptop (`PERF-001`); keep only as a benchmark-only comparison engine.
-- **Surya** — Apache-2.0 code, but its model weights ship under a separate, more restrictive license with a commercial-use revenue threshold. Do not bundle the weights in the default distribution.
-- **MinerU** — Apache-2.0 base license with additional commercial terms (usage/revenue thresholds, attribution requirements for hosted use). Do not bundle by default.
-
-The maximum-accuracy pack (PaddleOCR-VL-1.6) currently has an officially recommended Docker-based setup path on macOS specifically; treat macOS support for *that pack* as unproven until it is packaged and validated against the benchmark corpus on macOS (`PKG-001`). This constraint does not apply to the default lightweight pack.
-
-This table is a snapshot, not a permanent commitment. Revisit it periodically — the FOSS OCR/document-parsing landscape moves quickly — but any change still goes through `LIC-001`/`LIC-002` and a full benchmark-corpus run (`QA-003`) before becoming the new default.
+PaddleOCR structure models, Docling, and optional VLM adapters are candidates, not shipped features. Existing exclusions of olmOCR, Surya, and MinerU from the default distribution remain in effect until a fresh `LIC-002` review. Any future model choice must have a real artifact, verified license and digest, Windows/Linux execution evidence, and quality results on the project corpus.
 
 ## 5. Image handling (`IMG-001..003`)
 
@@ -224,6 +209,14 @@ Text-size presets (`OUT-006`):
 - The paper-size choice lives on the primary export/conversion screen (`UI-006`), not behind "More options" — unlike OCR-engine internals, it directly determines whether the printed page is actually usable to the reader.
 - **Color fidelity & Monochrome print toggle (`OUT-001`, `OUT-003`)**: By default, documents retain their source color attributes across both PDF and DOCX exporters. For users outputting to black-and-white laser printers, an optional `monochrome: true` setting forces all typography to pure black (`#000000`), table borders to solid black, and raster image assets to contrast-enhanced grayscale, eliminating muddy halftone dithering on monochrome toner printers.
 
+### 8.2 Export transactions and searchable originals
+
+Pipeline exports write to a sibling temporary file and atomically replace the destination only after successful completion and a final cancellation check. Selecting the original input as the destination is rejected. Source-page selections are validated against real page counts; malformed, empty-list, reversed, and out-of-range selections fail explicitly.
+
+The optional searchable-original operation (`OUT-004`) is distinct from the three reflow exporters: it preserves the sanitized source PDF objects and adds invisible OCR overlays only to text-free pages. Its `DocumentIR` is a page inventory, not a reconstructed document. It preserves selected-page dimensions and native content without rasterizing the original. Mixed/broken existing text-layer repair remains open; this operation must not claim that capability.
+
+PDF table body rows may split within a row across pages while headers repeat. Source-page rasterization is bounded before allocation to 16 million pixels and the existing dimension safety limits; resolution decreases for oversized pages. When extraction fails or yields no usable content, a bounded original-page image is retained. If even rendering fails, the output explicitly flags the missing page and directs the reader to the original.
+
 ## 9. IPC and job model
 
 Rust/Tauri bridge ↔ Python sidecar communicate over JSON-Lines. The bridge exposes only narrow, typed commands to the webview — never a general shell or filesystem API (`SEC-005`).
@@ -250,7 +243,7 @@ Python processing sidecar
         └── exporters
 ```
 
-Jobs checkpoint per page or in small chunks (`UI-003`): a failed page is marked for review and preserved in its original form; the rest of the document is not discarded.
+The sidecar reads cancellation and health commands while a single worker processes a document, keeping PDFium work serialized. Other commands during active processing receive a busy response. Output events are serialized with a lock. Durable crash-resume checkpoints remain unimplemented; current checkpoints are progress/review events. Jobs checkpoint per page or in small chunks (`UI-003`): a failed page is marked for review and preserved in its original form; the rest of the document is not discarded.
 
 ## 10. Threat model and security boundaries
 
@@ -291,6 +284,12 @@ Quality is judged against a project-owned, rights-safe benchmark corpus rather t
 | Legacy DOC/PPT | legacy-format bridge |
 
 Track separately: character error rate, word error rate, reading-order correctness, table-structure correctness, image retention, page-anchor fidelity, speed, and peak RAM/VRAM. Do not compress these into one accuracy number.
+
+### 11.1 Measurement limitations
+
+CER and WER are calculated only when a reference transcript exists; otherwise they are null/N/A. WER uses token-level Levenshtein distance and may exceed 1 when insertions dominate. Reported reading-order/table scores remain plausibility heuristics, not ground-truth correctness. RAM is the process lifetime peak, excludes child processes, and is not an isolated per-case measurement. VRAM is unmeasured. A completed conversion is reported separately from fidelity acceptance.
+
+The generated corpus is a smoke-test corpus, not release-quality coverage: the mixed-bidi, mixed-digital/scan, Arabic font rendering, rotated-content, and image-reference fixtures need stronger real-content ground truth. Real rights-safe books, annotated structures, long-document stress tests, and target-machine measurements remain release blockers.
 
 ## 12. Licensing enforcement as code (`LIC-001..002`)
 

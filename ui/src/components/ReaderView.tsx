@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppTheme, DocumentBlock, DocumentIR } from '../types';
 import { sidecar } from '../api/sidecarClient';
 import { useI18n } from '../i18n/i18n';
@@ -10,7 +10,7 @@ interface ReaderViewProps {
   exportedFilePath?: string | null;
   onThemeChange: (theme: AppTheme) => void;
   onBack: () => void;
-  onExport: (selectedPagesOnly?: number[]) => void;
+  onExport: (selection: { pages?: number[]; fontPt: number; lineSpacing: number }) => void;
 }
 
 const HeadingBlock: React.FC<{
@@ -63,10 +63,16 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const { t } = useI18n();
   const [fontSize, setFontSize] = useState<number>(initialSize);
   const [lineHeight, setLineHeight] = useState<number>(1.6);
+  const [readingWidth, setReadingWidth] = useState<number>(85);
   const [readerFont, setReaderFont] = useState<ReaderFont>('system');
   const [showRuler, setShowRuler] = useState<boolean>(false);
   const [rulerTop, setRulerTop] = useState<number>(180);
   const [selectedPageFilter, setSelectedPageFilter] = useState<number | 'all'>('all');
+
+  // Keep the print stylesheet's base size in sync with the chosen size (OUT-009).
+  useEffect(() => {
+    document.documentElement.style.setProperty('--print-font-size', `${fontSize}pt`);
+  }, [fontSize]);
 
   const handleZoomIn = () => {
     setFontSize((prev) => Math.min(36, prev + 2));
@@ -245,6 +251,30 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label htmlFor="reading-width-select" style={{ fontWeight: 600, fontSize: '15px' }}>
+            Width:
+          </label>
+          <select
+            id="reading-width-select"
+            aria-label="Reading width"
+            value={readingWidth}
+            onChange={(e) => setReadingWidth(parseInt(e.target.value, 10))}
+            style={{
+              padding: '6px 10px',
+              backgroundColor: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            <option value="55">Narrow (55 characters)</option>
+            <option value="70">Comfortable (70 characters)</option>
+            <option value="85">Wide (85 characters)</option>
+            <option value="110">Full width (110 characters)</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="theme-select" style={{ fontWeight: 600, fontSize: '15px' }}>
             Theme:
           </label>
@@ -342,11 +372,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           type="button"
           className="primary-btn"
           onClick={() => {
-            if (selectedPageFilter === 'all') {
-              onExport();
-            } else {
-              onExport([selectedPageFilter]);
-            }
+            onExport({
+              pages: selectedPageFilter === 'all' ? undefined : [selectedPageFilter],
+              fontPt: fontSize,
+              lineSpacing: lineHeight,
+            });
           }}
           aria-label="Export this view"
         >
@@ -358,8 +388,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       <main
         className="reader-body"
         style={{
-          fontSize: `${fontSize}px`,
+          fontSize: `${fontSize}pt`,
           lineHeight: lineHeight,
+          maxWidth: `${readingWidth}ch`,
           fontFamily: FONT_FAMILIES[readerFont],
         }}
         tabIndex={0}
@@ -441,6 +472,137 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
+            );
+          }
+
+          // Source page transition marker (OUT-005)
+          if (block.block_type === 'page_marker') {
+            return (
+              <div
+                key={block.id}
+                role="separator"
+                aria-label={block.text || `Original page ${block.source_page}`}
+                style={{
+                  margin: '2em 0 1.2em 0',
+                  padding: '8px 16px',
+                  border: '1px dashed var(--border-color)',
+                  borderRadius: 'var(--radius-sm)',
+                  textAlign: 'center',
+                  fontSize: '0.8em',
+                  fontWeight: 700,
+                  color: 'var(--text-muted)',
+                }}
+              >
+                {block.text || `— Original Page ${block.source_page} —`}
+              </div>
+            );
+          }
+
+          // Figures / images (IMG-001)
+          if (block.block_type === 'figure') {
+            const src = block.image_asset?.data_url;
+            if (!src) {
+              return null;
+            }
+            return (
+              <figure key={block.id} style={{ margin: '1.5em 0', textAlign: 'center' }}>
+                <img
+                  src={src}
+                  alt={block.image_asset?.alt_text || `Figure from page ${block.source_page}`}
+                  style={{
+                    maxWidth: '100%',
+                    height: 'auto',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                />
+                {block.caption && (
+                  <figcaption
+                    style={{
+                      fontSize: '0.85em',
+                      fontStyle: 'italic',
+                      color: 'var(--text-muted)',
+                      marginTop: '6px',
+                    }}
+                  >
+                    {block.caption}
+                  </figcaption>
+                )}
+              </figure>
+            );
+          }
+
+          // Footnotes (FN-001)
+          if (block.block_type === 'footnote') {
+            return (
+              <aside
+                key={block.id}
+                role="doc-footnote"
+                style={{
+                  fontSize: '0.85em',
+                  fontStyle: 'italic',
+                  color: 'var(--text-muted)',
+                  borderTop: '1px solid var(--border-color)',
+                  paddingTop: '8px',
+                  marginTop: '1.5em',
+                  marginBottom: '1em',
+                }}
+              >
+                {block.text}
+              </aside>
+            );
+          }
+
+          // Captions
+          if (block.block_type === 'caption') {
+            return (
+              <div
+                key={block.id}
+                style={{
+                  fontWeight: 700,
+                  fontSize: '0.9em',
+                  textAlign: 'center',
+                  margin: '12px 0 6px 0',
+                }}
+              >
+                {block.text}
+              </div>
+            );
+          }
+
+          // Quotes
+          if (block.block_type === 'quote') {
+            return (
+              <blockquote
+                key={block.id}
+                style={{
+                  borderLeft: '4px solid var(--border-color)',
+                  paddingLeft: '16px',
+                  margin: '1em 0',
+                  fontStyle: 'italic',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                {block.text}
+              </blockquote>
+            );
+          }
+
+          // List items — rendered individually with a visible bullet
+          if (block.block_type === 'list_item') {
+            return (
+              <div
+                key={block.id}
+                style={{
+                  display: 'flex',
+                  gap: '0.6em',
+                  marginBottom: '0.4em',
+                  paddingLeft: '0.5em',
+                }}
+              >
+                <span aria-hidden="true">•</span>
+                <span>{block.text}</span>
               </div>
             );
           }

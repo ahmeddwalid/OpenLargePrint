@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
+from openlargeprint.security.isolation import atomic_output
 from typing import List, Literal, Optional, Set, Tuple, Union
 
 from openlargeprint.exporters import (
@@ -11,6 +13,7 @@ from openlargeprint.exporters import (
     ExportOptions,
     PdfExporter,
     ReaderExporter,
+    SearchablePdfExporter,
 )
 from openlargeprint.importers.base import CancelCheck, CheckpointCallback, ProgressCallback
 from openlargeprint.importers.office import (
@@ -19,17 +22,23 @@ from openlargeprint.importers.office import (
     PptxImporter,
 )
 from openlargeprint.importers.pdf.native import NativePdfImporter
-from openlargeprint.ir.models import DocumentIR
+from openlargeprint.ir.models import (
+    DocumentIR,
+    DocumentMetadata,
+    PageClassification,
+    PageMetadata,
+)
 from openlargeprint.ir.validator import validate_document_ir
 from openlargeprint.ocr.router import RoutingMode
 from openlargeprint.security import (
+    JobAssetStore,
     JobWorkspace,
     detect_file_type,
     log_safe_info,
     sanitize_document,
 )
 
-ExportFormat = Literal["docx", "pdf", "reader"]
+ExportFormat = Literal["docx", "pdf", "reader", "searchable_pdf"]
 
 
 @dataclass
@@ -41,6 +50,7 @@ class ConversionResult:
     format: ExportFormat
     warnings: List[str] = field(default_factory=list)
     success: bool = True
+    asset_root: Optional[Path] = None
 
 
 def parse_page_range(
@@ -57,41 +67,42 @@ def parse_page_range(
     """
     if range_spec is None:
         return None
-    if isinstance(range_spec, (set, frozenset)):
-        return {p for p in range_spec if 1 <= p <= total_pages}
-    if isinstance(range_spec, tuple) and len(range_spec) == 2 and isinstance(range_spec[0], int) and isinstance(range_spec[1], int):
-        s, e = range_spec
-        return set(range(max(1, s), min(total_pages, e) + 1))
-    if isinstance(range_spec, list) and all(isinstance(x, int) for x in range_spec):
-        return {p for p in range_spec if 1 <= p <= total_pages}
+    message = f"Invalid page selection. Choose pages between 1 and {total_pages}."
+    if type(total_pages) is not int or total_pages < 1:
+        raise ValueError("The document has no selectable pages.")
+    pages: Set[int] = set()
     if isinstance(range_spec, str):
         cleaned = range_spec.strip()
         if not cleaned:
             return None
-        pages: Set[int] = set()
         for part in cleaned.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            if "-" in part:
-                tokens = part.split("-")
-                if len(tokens) == 2:
-                    try:
-                        s = int(tokens[0].strip()) if tokens[0].strip() else 1
-                        e = int(tokens[1].strip()) if tokens[1].strip() else total_pages
-                        for p in range(max(1, s), min(total_pages, e) + 1):
-                            pages.add(p)
-                    except ValueError:
-                        continue
+            match = re.fullmatch(r"\s*([0-9]*)\s*-\s*([0-9]*)\s*", part)
+            if match and any(match.groups()):
+                start = int(match[1]) if match[1] else 1
+                end = int(match[2]) if match[2] else total_pages
+                if not 1 <= start <= end <= total_pages:
+                    raise ValueError(message)
+                pages.update(range(start, end + 1))
+            elif re.fullmatch(r"\s*[0-9]+\s*", part):
+                pages.add(int(part))
             else:
-                try:
-                    p = int(part)
-                    if 1 <= p <= total_pages:
-                        pages.add(p)
-                except ValueError:
-                    continue
-        return pages if pages else None
-    return None
+                raise ValueError(message)
+    elif isinstance(range_spec, tuple):
+        if len(range_spec) != 2 or any(type(p) is not int for p in range_spec):
+            raise ValueError(message)
+        start, end = range_spec
+        if not 1 <= start <= end <= total_pages:
+            raise ValueError(message)
+        pages.update(range(start, end + 1))
+    elif isinstance(range_spec, (list, set, frozenset)):
+        if any(type(p) is not int for p in range_spec):
+            raise ValueError(message)
+        pages.update(range_spec)
+    else:
+        raise ValueError(message)
+    if not pages or any(p < 1 or p > total_pages for p in pages):
+        raise ValueError(message)
+    return pages
 
 
 class PipelineOrchestrator:
@@ -106,6 +117,7 @@ class PipelineOrchestrator:
         self.docx_exporter = DocxExporter()
         self.pdf_exporter = PdfExporter()
         self.reader_exporter = ReaderExporter()
+        self.searchable_exporter = SearchablePdfExporter()
 
     def _import_by_format(
         self,
@@ -153,13 +165,24 @@ class PipelineOrchestrator:
         progress_callback: Optional[ProgressCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
         checkpoint_callback: Optional[CheckpointCallback] = None,
+        asset_store: Optional[JobAssetStore] = None,
     ) -> ConversionResult:
-        """Execute full conversion pipeline into target format (DOCX, Large PDF, or HTML Reader)."""
+        """Execute full conversion pipeline into target format (DOCX, Large PDF, or HTML Reader).
+
+        When ``asset_store`` is provided, extracted media is persisted outside the
+        disposable workspace so the UI and re-export paths can still read it (IMG-001).
+        """
         input_file = Path(input_path).resolve()
         output_file = Path(output_path).resolve()
+        if input_file == output_file or (output_file.exists() and input_file.samefile(output_file)):
+            raise ValueError("Choose an output file different from the original document.")
+        if export_format is not None and export_format not in ("docx", "pdf", "reader", "searchable_pdf"):
+            raise ValueError("Choose DOCX, PDF, Reader, or searchable PDF output.")
 
         if options is None:
             options = ExportOptions()
+        if asset_store is None:
+            asset_store = JobAssetStore()
 
         # 1. Deduce output format from extension or argument
         if export_format is None:
@@ -176,8 +199,8 @@ class PipelineOrchestrator:
 
         all_warnings: List[str] = []
 
-        # 3. Run in isolated disposable workspace (SEC-004)
-        with JobWorkspace() as ws:
+        # 3. Run in isolated disposable workspace (SEC-004); media persists in asset_store
+        with JobWorkspace(asset_store=asset_store) as ws:
             log_safe_info(f"Starting conversion in isolated workspace: {ws.path.name}")
 
             # 3.1 Sanitize input document to neutralize active content (SEC-002)
@@ -190,16 +213,37 @@ class PipelineOrchestrator:
             # Resolve page selection if requested (OUT-010)
             selected_pages: Optional[Set[int]] = None
             if page_range is not None:
-                max_pages = 100000
                 if format_type == "pdf":
-                    try:
-                        import pypdfium2 as pdfium
-                        temp_pdf = pdfium.PdfDocument(clean_file)
-                        max_pages = len(temp_pdf)
-                        temp_pdf.close()
-                    except Exception:
-                        pass
-                selected_pages = parse_page_range(page_range, max_pages)
+                    import pypdfium2 as pdfium
+                    with pdfium.PdfDocument(clean_file) as temp_pdf:
+                        selected_pages = parse_page_range(page_range, len(temp_pdf))
+
+            # 3.2 Searchable original-layout PDF (OUT-004): preserve appearance, add
+            # a text layer only. This path never reflows and never re-extracts layout.
+            if export_format == "searchable_pdf":
+                if format_type != "pdf":
+                    raise ValueError("Searchable PDF export is only available for PDF input.")
+                doc_ir = self._build_page_inventory(clean_file)
+                with atomic_output(output_file) as temporary:
+                    self.searchable_exporter.export(
+                        clean_file,
+                        temporary,
+                        ocr_engine=self.pdf_importer.ocr_engine,
+                        selected_pages=selected_pages,
+                        cancel_check=cancel_check,
+                    )
+                if selected_pages is not None:
+                    doc_ir = doc_ir.slice_by_source_pages_set(selected_pages)
+                log_safe_info(f"Searchable PDF generated: {output_file.name}")
+                return ConversionResult(
+                    input_path=input_file,
+                    output_path=output_file,
+                    document_ir=doc_ir,
+                    format="searchable_pdf",
+                    warnings=all_warnings,
+                    success=True,
+                    asset_root=asset_store.assets_dir if asset_store is not None else None,
+                )
 
             # 4. Import document into canonical DocumentIR
             doc_ir = self._import_by_format(
@@ -213,8 +257,11 @@ class PipelineOrchestrator:
             )
 
             # 5. Validate canonical DocumentIR (DOC-003, DESIGN.md §3)
+            if format_type != "pdf" and page_range is not None:
+                selected_pages = parse_page_range(page_range, doc_ir.metadata.page_count)
             ir_warnings = validate_document_ir(doc_ir)
             all_warnings.extend(ir_warnings)
+            all_warnings.extend(w for b in doc_ir.blocks for w in b.warnings if w not in all_warnings)
 
             # 6. Apply selective page slicing if requested and not already sliced (OUT-010)
             if selected_pages is not None:
@@ -222,12 +269,17 @@ class PipelineOrchestrator:
                 doc_ir = doc_ir.slice_by_source_pages_set(selected_pages)
 
             # 7. Export to requested format (DOCX, Large-Print PDF, or Reader HTML)
-            if export_format == "pdf":
-                self.pdf_exporter.export(doc_ir, output_file, options)
-            elif export_format in ("reader", "html", "htm"):
-                self.reader_exporter.export(doc_ir, output_file, options)
-            else:
-                self.docx_exporter.export(doc_ir, output_file, options)
+            if cancel_check and cancel_check():
+                raise InterruptedError("Conversion cancelled.")
+            with atomic_output(output_file) as temporary:
+                if export_format == "pdf":
+                    self.pdf_exporter.export(doc_ir, temporary, options)
+                elif export_format == "reader":
+                    self.reader_exporter.export(doc_ir, temporary, options)
+                else:
+                    self.docx_exporter.export(doc_ir, temporary, options)
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Conversion cancelled.")
 
         log_safe_info(f"Conversion to {export_format.upper()} finished successfully: {output_file.name}")
         return ConversionResult(
@@ -237,6 +289,39 @@ class PipelineOrchestrator:
             format=export_format,
             warnings=all_warnings,
             success=True,
+            asset_root=asset_store.assets_dir if asset_store is not None else None,
+        )
+
+    def _build_page_inventory(self, file_path: Path) -> DocumentIR:
+        """Build a page/classification-only DocumentIR without extraction or OCR (OUT-004)."""
+        import pypdfium2 as pdfium
+
+        from openlargeprint.importers.pdf.classifier import classify_pdf_page
+
+        pages: List[PageMetadata] = []
+        with pdfium.PdfDocument(file_path) as pdf:
+            for idx in range(len(pdf)):
+                try:
+                    pages.append(classify_pdf_page(pdf[idx], idx + 1))
+                except Exception:
+                    pages.append(
+                        PageMetadata(
+                            page_number=idx + 1,
+                            width=595.0,
+                            height=842.0,
+                            classification=PageClassification.SCANNED,
+                        )
+                    )
+
+        return DocumentIR(
+            schema_version="1.0.0",
+            metadata=DocumentMetadata(
+                title=file_path.stem.replace("_", " "),
+                source_file_name=file_path.name,
+                page_count=len(pages),
+            ),
+            pages=pages,
+            blocks=[],
         )
 
     def inspect(self, input_path: Path | str) -> DocumentIR:
@@ -244,7 +329,7 @@ class PipelineOrchestrator:
         input_file = Path(input_path).resolve()
         format_type = detect_file_type(input_file)
 
-        with JobWorkspace() as ws:
+        with JobWorkspace(asset_store=JobAssetStore()) as ws:
             clean_file, _stripped = sanitize_document(input_file, ws.path)
             doc_ir = self._import_by_format(clean_file, format_type, ws)
             return doc_ir
@@ -258,13 +343,16 @@ class PipelineOrchestrator:
         """Re-process a single flagged page at higher accuracy (UI-004)."""
         input_file = Path(input_path).resolve()
         fmt = detect_file_type(input_file)
-        with JobWorkspace() as ws:
+        with JobWorkspace(asset_store=JobAssetStore()) as ws:
             clean_file, _ = sanitize_document(input_file, ws.path)
             # Use a fresh importer honouring the requested routing mode so the
             # retry actually re-runs extraction/OCR rather than returning cached blocks.
             retry_importer = NativePdfImporter(routing_mode=routing_mode) if fmt == "pdf" else None
             if retry_importer is not None:
-                full = retry_importer.import_document(clean_file, ws)
+                import pypdfium2 as pdfium
+                with pdfium.PdfDocument(clean_file) as pdf:
+                    selected = parse_page_range([page_number], len(pdf))
+                full = retry_importer.import_document(clean_file, ws, selected_pages=selected)
             else:
                 full = self._import_by_format(clean_file, fmt, ws)
             retried_blocks = [b for b in full.blocks if b.source_page == page_number]

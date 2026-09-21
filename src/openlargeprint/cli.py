@@ -45,9 +45,21 @@ def main() -> int:
     )
     convert_parser.add_argument(
         "--preset",
-        choices=[p.value for p in PresetName if p != PresetName.CUSTOM],
+        choices=[p.value for p in PresetName],
         default=PresetName.LARGE.value,
         help="Text-size preset (default: Large 20pt/1.5)",
+    )
+    convert_parser.add_argument(
+        "--body-pt",
+        type=float,
+        default=None,
+        help="Custom body text size in points (used with --preset Custom)",
+    )
+    convert_parser.add_argument(
+        "--line-spacing",
+        type=float,
+        default=None,
+        help="Custom line-spacing multiplier (used with --preset Custom)",
     )
     convert_parser.add_argument(
         "--paper-size",
@@ -101,6 +113,8 @@ def main() -> int:
                 preset=preset_enum,
                 paper_size=paper_size_enum,
                 include_page_markers=not args.no_page_markers,
+                custom_body_pt=args.body_pt,
+                custom_line_spacing=args.line_spacing,
             )
 
             page_range = tuple(args.page_range) if args.page_range else None

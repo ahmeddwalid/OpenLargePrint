@@ -71,5 +71,8 @@ packaging/certs/
 # Workspace caches
 .hermes/
 
+# Local agent tooling state
+.commandcode/
+
 
 

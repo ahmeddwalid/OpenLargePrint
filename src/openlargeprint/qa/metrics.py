@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import difflib
-from typing import Any, Dict, List, Optional
+from typing import List, Sequence, TypeVar
 from pydantic import BaseModel, Field
 
 
-def _levenshtein_distance(s1: str, s2: str) -> int:
+T = TypeVar("T")
+
+
+def _levenshtein_distance(s1: Sequence[T], s2: Sequence[T]) -> int:
     """Compute standard Levenshtein edit distance between two sequences."""
     if len(s1) < len(s2):
         return _levenshtein_distance(s2, s1)
@@ -15,7 +18,7 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
     if len(s2) == 0:
         return len(s1)
 
-    previous_row = range(len(s2) + 1)
+    previous_row = list(range(len(s2) + 1))
     for i, c1 in enumerate(s1):
         current_row = [i + 1]
         for j, c2 in enumerate(s2):
@@ -39,7 +42,7 @@ def calculate_cer(reference: str, hypothesis: str) -> float:
         return 1.0
 
     dist = _levenshtein_distance(ref_clean, hyp_clean)
-    return min(1.0, dist / len(ref_clean))
+    return dist / len(ref_clean)
 
 
 def calculate_wer(reference: str, hypothesis: str) -> float:
@@ -52,18 +55,7 @@ def calculate_wer(reference: str, hypothesis: str) -> float:
     if not ref_words:
         return 1.0
 
-    matcher = difflib.SequenceMatcher(None, ref_words, hyp_words)
-    # WER can be computed from operations
-    dist = 0
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "replace":
-            dist += max(i2 - i1, j2 - j1)
-        elif tag == "delete":
-            dist += i2 - i1
-        elif tag == "insert":
-            dist += j2 - j1
-
-    return min(1.0, dist / len(ref_words))
+    return _levenshtein_distance(ref_words, hyp_words) / len(ref_words)
 
 
 def calculate_reading_order_accuracy(ref_order: List[str], hyp_order: List[str]) -> float:
@@ -129,8 +121,8 @@ def calculate_page_anchor_fidelity(ref_pages: List[int], hyp_pages: List[int]) -
 class EvaluationMetrics(BaseModel):
     """Container for multi-dimensional quality metrics (QA-002, PERF-002)."""
 
-    cer: float = Field(..., ge=0.0, le=1.0, description="Character Error Rate")
-    wer: float = Field(..., ge=0.0, le=1.0, description="Word Error Rate")
+    cer: float | None = Field(..., ge=0.0, description="Character Error Rate")
+    wer: float | None = Field(..., ge=0.0, description="Word Error Rate")
     reading_order_score: float = Field(..., ge=0.0, le=1.0, description="Reading order correctness")
     table_score: float = Field(..., ge=0.0, le=1.0, description="Table structure fidelity")
     image_retention: float = Field(..., ge=0.0, le=1.0, description="Asset retention rate")

@@ -126,6 +126,76 @@ def test_sidecar_convert_with_progress_and_checkpoint(tmp_path: Path):
     assert out_pdf.exists()
 
 
+def test_sidecar_export_reuses_built_document(tmp_path: Path):
+    """Export must re-render the retained DocumentIR without re-importing (OUT-002, OUT-010)."""
+    docx_file = tmp_path / "export_sample.docx"
+    create_sample_docx(docx_file)
+    first_pdf = tmp_path / "first.pdf"
+    second_pdf = tmp_path / "second.pdf"
+
+    runner = SidecarRunner(in_stream=io.StringIO(), out_stream=io.StringIO())
+    job_id = "job_export"
+
+    out_buf = io.StringIO()
+    runner.out_stream = out_buf
+    runner.execute_command_str(json.dumps({
+        "command": "convert",
+        "id": job_id,
+        "file_path": str(docx_file),
+        "output_path": str(first_pdf),
+        "export_format": "pdf",
+        "preset": "Large",
+    }))
+    assert first_pdf.exists()
+    assert job_id in runner._ir_stores
+
+    # Re-importing on export would be a regression; make it explode if attempted.
+    def explode(*args, **kwargs):
+        raise AssertionError("export must not re-import the document")
+
+    runner._orchestrator.docx_importer.import_document = explode
+
+    export_buf = io.StringIO()
+    runner.out_stream = export_buf
+    runner.execute_command_str(json.dumps({
+        "command": "export",
+        "id": job_id,
+        "job_id": job_id,
+        "output_path": str(second_pdf),
+        "export_format": "pdf",
+        "preset": "Extra Large",
+        "paper_size": "A3",
+    }))
+
+    lines = [json.loads(l) for l in export_buf.getvalue().strip().split("\n") if l.strip()]
+    success = [l for l in lines if l.get("type") == EventType.SUCCESS.value]
+    assert success, "export must emit a success event"
+    assert success[0]["format"] == "pdf"
+    assert second_pdf.exists()
+
+    # A3 requested on the re-export must be honored (OUT-007/008).
+    w, h = pdfium.PdfDocument(second_pdf)[0].get_size()
+    assert round(w) == 842 and round(h) == 1191
+
+
+def test_sidecar_export_without_document_reports_no_ir(tmp_path: Path):
+    """Exporting before any conversion must fail with a clear, recoverable code."""
+    runner = SidecarRunner(in_stream=io.StringIO(), out_stream=io.StringIO())
+    out_buf = io.StringIO()
+    runner.out_stream = out_buf
+
+    runner.execute_command_str(json.dumps({
+        "command": "export",
+        "job_id": "never-converted",
+        "output_path": str(tmp_path / "nope.pdf"),
+    }))
+
+    lines = [json.loads(l) for l in out_buf.getvalue().strip().split("\n") if l.strip()]
+    assert len(lines) == 1
+    assert lines[0]["type"] == EventType.ERROR.value
+    assert lines[0]["code"] == "NO_IR"
+
+
 def test_sidecar_review_data_and_retry(tmp_path: Path):
     """Verify review data query and per-page retry flow (UI-004, UI-005)."""
     runner = SidecarRunner(in_stream=io.StringIO(), out_stream=io.StringIO())
@@ -168,8 +238,8 @@ def test_sidecar_review_data_and_retry(tmp_path: Path):
     retry_lines = [json.loads(l) for l in out_buf_retry.getvalue().strip().split("\n") if l.strip()]
     assert len(retry_lines) == 1
     retry_ev = retry_lines[0]
-    assert retry_ev["flagged_pages"][0]["confidence"] >= 0.95
-    assert "verified" in retry_ev["flagged_pages"][0]["reason"].lower()
+    assert retry_ev["code"] == "FILE_NOT_FOUND"
+    assert runner._review_stores[job_id][0].confidence == 0.72
 
 
 def test_sidecar_plain_language_error_handling():

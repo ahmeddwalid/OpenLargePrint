@@ -57,6 +57,7 @@ class DocxImporter(BaseImporter):
         blocks: List[Block] = []
         current_page = 1
         img_counter = 0
+        document_warnings: List[str] = []
 
         if progress_callback:
             progress_callback(1, 1, "extracting", f"Importing Word document — {path.name}")
@@ -78,7 +79,7 @@ class DocxImporter(BaseImporter):
             if isinstance(child, CT_P):
                 p = Paragraph(child, doc)
                 page_break_occurred, p_blocks, img_counter = self._process_paragraph(
-                    p, doc, workspace, current_page, elem_idx, img_counter
+                    p, doc, workspace, current_page, elem_idx, img_counter, document_warnings
                 )
                 if page_break_occurred:
                     current_page += 1
@@ -100,8 +101,14 @@ class DocxImporter(BaseImporter):
                     blocks.append(tbl_block)
 
         # Process any separate footnotes part if present
-        footnote_blocks = self._extract_separate_footnotes(doc, current_page)
+        footnote_blocks = self._extract_separate_footnotes(doc, current_page, document_warnings)
         blocks.extend(footnote_blocks)
+
+        # Surface anything that could not be imported (never drop silently).
+        if document_warnings:
+            target = next((b for b in blocks if b.type != BlockType.PAGE_MARKER), None)
+            if target is not None:
+                target.warnings.extend(document_warnings)
 
         # Build PageMetadata array
         pages: List[PageMetadata] = []
@@ -143,15 +150,26 @@ class DocxImporter(BaseImporter):
         current_page: int,
         elem_idx: int,
         img_counter: int,
+        document_warnings: Optional[List[str]] = None,
     ) -> tuple[bool, List[Block], int]:
         """Process a paragraph, extracting images, headings, lists, quotes, or body text."""
         blocks: List[Block] = []
         page_break_occurred = False
 
-        # 1. Check for hard page breaks (<w:br w:type="page"/>)
+        # 1. Check for hard page breaks (<w:br w:type="page"/>) and section breaks.
         page_breaks = p._p.xpath('.//w:br[@w:type="page"]')
         if page_breaks:
             page_break_occurred = True
+
+        # A paragraph-level section break of any non-continuous type starts a new page
+        # (OFF-001, PDF-006): without this, most Word documents report a single page and
+        # page markers / page ranges become meaningless.
+        for sect_pr in p._p.xpath("./w:pPr/w:sectPr"):
+            type_el = sect_pr.find(qn("w:type"))
+            break_type = type_el.get(qn("w:val")) if type_el is not None else "nextPage"
+            if break_type != "continuous":
+                page_break_occurred = True
+                break
 
         # 2. Extract embedded relationship images in paragraph runs
         blip_nodes = p._p.xpath(".//a:blip")
@@ -186,9 +204,13 @@ class DocxImporter(BaseImporter):
                             extraction_method=ExtractionMethod.OFFICE_IMPORT,
                         )
                     )
-                except Exception:
-                    # Ignore unreadable or corrupt image blobs gracefully
-                    pass
+                except Exception as exc:
+                    # Never drop a figure silently; record it for the document warnings.
+                    if document_warnings is not None:
+                        document_warnings.append(
+                            f"An embedded image could not be imported ({type(exc).__name__}); "
+                            "it may be missing from the output"
+                        )
 
         # 3. Process paragraph text
         text = p.text.strip()
@@ -385,7 +407,12 @@ class DocxImporter(BaseImporter):
             extraction_method=ExtractionMethod.NATIVE,
         )
 
-    def _extract_separate_footnotes(self, doc: docx.Document, current_page: int) -> List[Block]:
+    def _extract_separate_footnotes(
+        self,
+        doc: docx.Document,
+        current_page: int,
+        warnings: Optional[List[str]] = None,
+    ) -> List[Block]:
         """Extract footnotes from related footnotes.xml part if present."""
         blocks: List[Block] = []
         try:
@@ -413,7 +440,12 @@ class DocxImporter(BaseImporter):
                                     extraction_method=ExtractionMethod.NATIVE,
                                 )
                             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Never drop footnotes silently (FN-001, SPEC §2.3).
+            if warnings is not None:
+                warnings.append(
+                    f"Footnotes could not be imported ({type(exc).__name__}); "
+                    "they may be missing from the output"
+                )
 
         return blocks

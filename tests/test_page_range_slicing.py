@@ -91,3 +91,15 @@ def test_orchestrator_accepts_string_page_range(tmp_path):
     source_pages = {b.source_page for b in res.document_ir.blocks if b.source_page is not None}
     assert source_pages == {1, 2, 4}
 
+
+
+def test_invalid_selection_never_means_all_pages():
+    import pytest
+    from openlargeprint.pipeline.orchestrator import parse_page_range
+
+    for value in ("nonsense", "8", "3-1", "1,invalid", "1,", "-", [], [True], [0], [1, 4], (1, 4)):
+        with pytest.raises(ValueError, match="Invalid page selection"):
+            parse_page_range(value, 3)
+    assert parse_page_range("2-", 3) == {2, 3}
+    assert parse_page_range("-2", 3) == {1, 2}
+    assert parse_page_range(None, 3) is None

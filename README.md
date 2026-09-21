@@ -12,6 +12,14 @@ OpenLargePrint parses and reconstructs the underlying structure of a document in
 
 All processing occurs locally on the computer. No document content, text, or images leave the device.
 
+## Development status
+
+Windows x86_64 is the primary release target; Fedora/Linux x86_64 is the secondary target. This checkout is undergoing reliability hardening. A successful build or synthetic test run does not establish full platform support (`PKG-001`). Final packaged Windows CPU/GPU tests, Linux desktop tests, screen-reader checks, and physical printing remain release gates.
+
+The installed OCR baseline is RapidOCR 1.4.4 with bundled PP-OCRv4 Chinese/English recognition. Arabic native-text rendering and Arabic scan recognition are separate capabilities: the bundled recognizer does **not** provide verified Arabic OCR. Maximum accuracy currently uses standard recognition with an explicit review warning; a real higher-accuracy pack remains open. The three shipped model hashes are verified before inference. Unimplemented model catalog entries have been removed.
+
+Quality reports distinguish measured text error from missing reference transcripts. Reading-order/table heuristics are diagnostics, not claims of accuracy. See [DESIGN.md](DESIGN.md) for the completion gates and latest validation limits.
+
 ## Core Capabilities
 
 - **Local-first and offline execution**: Document analysis, OCR, and rendering run on the local machine with zero external network calls during conversion ([`SEC-009`](SPEC.md)).
@@ -84,14 +92,14 @@ OpenLargePrint includes an update checker that communicates with GitHub Releases
 
 - **Operating System**: Windows 10 or Windows 11 (64-bit). Linux and macOS support is in development.
 - **Processor**: Standard x64 processor (Intel or AMD). A dedicated GPU is not required; default layout analysis and OCR run on CPU.
-- **Memory**: 4 GB RAM minimum; 8 GB RAM recommended for documents over 200 pages.
+- **Memory**: Development target: 16 GB RAM, 8+ CPU cores, optional NVIDIA RTX GPU with 8 GB VRAM. Long-book RAM/VRAM acceptance limits still require measurement on target hardware.
 - **Disk Space**: Approximately 500 MB for the installed application and OCR model runtime.
 
 ## Building from Source
 
 ### Prerequisites
 
-- **Python**: Version 3.11 or later with the `uv` package manager ([https://astral.sh/uv](https://astral.sh/uv))
+- **Python**: Version 3.11 or 3.12 (3.12 recommended for release builds) with the `uv` package manager ([https://astral.sh/uv](https://astral.sh/uv))
 - **Node.js**: Version 20 or later with `npm`
 - **Rust**: Current stable toolchain via `rustup` ([https://rustup.rs](https://rustup.rs))
 - **Visual Studio Build Tools**: C++ x64 workload for compiling native dependencies on Windows
@@ -106,13 +114,13 @@ OpenLargePrint includes an update checker that communicates with GitHub Releases
 
 2. Set up the Python environment and dependencies:
    ```bash
-   uv sync --dev
+   uv sync --locked --dev --extra dev --python 3.12
    ```
 
 3. Install frontend dependencies:
    ```bash
    cd ui
-   npm install
+   npm ci
    cd ..
    ```
 
@@ -122,6 +130,27 @@ OpenLargePrint includes an update checker that communicates with GitHub Releases
    ```
 
 The packaging pipeline produces the standalone installer executable in `src-tauri/target/release/bundle/nsis/` and release assets in `packaging/dist/`.
+
+### Fedora/Linux build
+
+Install the native desktop build prerequisites, then use the same locked Python and frontend setup above:
+
+```bash
+sudo dnf install gcc gcc-c++ make pkgconf-pkg-config openssl-devel webkit2gtk4.1-devel libsoup3-devel librsvg2-devel patchelf rpm-build
+uv run python packaging/build_sidecar.py
+npm --prefix ui run build
+uv run python packaging/verify_packaging.py
+cd src-tauri
+npx -y @tauri-apps/cli@2 build --bundles rpm,appimage
+```
+
+Build Linux release artifacts on Linux and Windows release artifacts on Windows. Development sidecar wrappers are not valid release artifacts. The verifier launches the packaged engine and checks its health response; full corpus conversion and installed-app acceptance are additional gates.
+
+### Export safety and limits
+
+Invalid or out-of-range page selections are rejected. Failed exports preserve an existing destination file; the original input cannot be overwritten. Oversized source pages use bounded raster resolution rather than unbounded allocations. Pages that cannot be extracted retain a rendered original when possible and remain flagged for review. If rendering also fails, the output explicitly directs the reader to the original document.
+
+Searchable PDF preserves native PDF objects and adds invisible text on text-free pages. It does not repair mixed or broken existing text layers. If recognition produces no text, the export fails without replacing an existing destination.
 
 ## Running Tests
 

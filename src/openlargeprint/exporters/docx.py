@@ -10,7 +10,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Mm, Pt, RGBColor
+from docx.shared import Emu, Inches, Mm, Pt, RGBColor
 
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, TableStructure, TextDirection
 from openlargeprint.layout.table import TableTier, evaluate_table_fit
@@ -55,9 +55,10 @@ class DocxExporter(BaseExporter):
 
         # 3. Render blocks sequentially in single-column reflow
         usable_width = section.page_width - section.left_margin - section.right_margin
+        usable_height = section.page_height - section.top_margin - section.bottom_margin
 
         for block in doc.blocks:
-            self._render_block(document, block, options, usable_width)
+            self._render_block(document, block, options, usable_width, usable_height)
 
         # Ensure parent directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,6 +107,7 @@ class DocxExporter(BaseExporter):
         block: Block,
         options: ExportOptions,
         usable_width: Inches,
+        usable_height: Optional[Inches] = None,
     ) -> None:
         """Render an individual semantic block to DOCX according to typography preset."""
         safe_text = clean_xml_string(block.text)
@@ -218,7 +220,7 @@ class DocxExporter(BaseExporter):
 
         # Handle tables (TBL-001, TBL-002, FN-002)
         if block.type == BlockType.TABLE and block.table_structure:
-            self._render_table(document, block, options, usable_width)
+            self._render_table(document, block, options, usable_width, usable_height)
             return
 
         # Handle images (IMG-001, IMG-003)
@@ -230,14 +232,20 @@ class DocxExporter(BaseExporter):
                 p.paragraph_format.space_before = Pt(12)
                 p.paragraph_format.space_after = Pt(12)
 
-                native_width = Inches(asset.width / 96.0)
-                display_width = min(usable_width, native_width)
+                # Fit within usable width AND height without distortion (IMG-003)
+                native_w_emu = int(asset.width / 96.0 * 914400)
+                native_h_emu = int(asset.height / 96.0 * 914400)
+                disp_w = min(int(usable_width), native_w_emu)
+                disp_h = int(disp_w * (native_h_emu / max(1, native_w_emu)))
+                if usable_height is not None and int(usable_height) > 0 and disp_h > int(usable_height):
+                    disp_h = int(usable_height)
+                    disp_w = int(disp_h * (native_w_emu / max(1, native_h_emu)))
 
                 img_path = asset.file_path
                 if options.monochrome:
                     img_path = self._get_or_create_monochrome_image(asset.file_path)
 
-                p.add_run().add_picture(img_path, width=display_width)
+                p.add_run().add_picture(img_path, width=Emu(disp_w), height=Emu(disp_h))
             return
 
         # Default: Regular body paragraph
@@ -272,7 +280,12 @@ class DocxExporter(BaseExporter):
             rFonts.set(qn("w:hAnsi"), options.font_family)
 
     def _render_table(
-        self, document: docx.Document, block: Block, options: ExportOptions, usable_width
+        self,
+        document: docx.Document,
+        block: Block,
+        options: ExportOptions,
+        usable_width,
+        usable_height=None,
     ) -> None:
         """Render table with large-print scaling, fallback cascade, and RTL support (TBL-001, TBL-002, FN-002)."""
         table_struct = block.table_structure
@@ -301,7 +314,9 @@ class DocxExporter(BaseExporter):
                 r_warn.font.name = options.font_family
                 r_warn.font.size = Pt(max(13.0, min_readable_size * 0.9))
                 r_warn.font.italic = True
-                r_warn.font.color.rgb = RGBColor(160, 80, 0)
+                r_warn.font.color.rgb = (
+                    RGBColor(0, 0, 0) if options.monochrome else RGBColor(160, 80, 0)
+                )
                 self._apply_text_direction(p_warn, r_warn, block, options)
 
         # Tier 3: Linearized accessible cards (TBL-001)
@@ -312,9 +327,17 @@ class DocxExporter(BaseExporter):
                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p_img.paragraph_format.space_before = Pt(8)
                 p_img.paragraph_format.space_after = Pt(8)
-                native_w = Inches(block.image_asset.width / 96.0)
-                disp_w = min(usable_width, native_w)
-                p_img.add_run().add_picture(block.image_asset.file_path, width=disp_w)
+                retained_path = block.image_asset.file_path
+                if options.monochrome:
+                    retained_path = self._get_or_create_monochrome_image(retained_path)
+                native_w_emu = int(block.image_asset.width / 96.0 * 914400)
+                native_h_emu = int(block.image_asset.height / 96.0 * 914400)
+                disp_w = min(int(usable_width), native_w_emu)
+                disp_h = int(disp_w * (native_h_emu / max(1, native_w_emu)))
+                if usable_height is not None and int(usable_height) > 0 and disp_h > int(usable_height):
+                    disp_h = int(usable_height)
+                    disp_w = int(disp_h * (native_w_emu / max(1, native_h_emu)))
+                p_img.add_run().add_picture(retained_path, width=Emu(disp_w), height=Emu(disp_h))
 
             lines = (fit.linearized_text or table_struct.to_linearized_text()).split("\n")
             for line in lines:
@@ -366,6 +389,19 @@ class DocxExporter(BaseExporter):
         tbl = document.add_table(rows=len(table_struct.rows), cols=cols)
         tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
 
+        # Solid black borders for monochrome laser printing (DESIGN.md §8.1)
+        if options.monochrome:
+            tblPr = tbl._tbl.tblPr
+            borders = OxmlElement("w:tblBorders")
+            for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                el = OxmlElement(f"w:{edge}")
+                el.set(qn("w:val"), "single")
+                el.set(qn("w:sz"), "8")
+                el.set(qn("w:space"), "0")
+                el.set(qn("w:color"), "000000")
+                borders.append(el)
+            tblPr.append(borders)
+
         # RTL visual ordering (LANG-001)
         if text_direction == TextDirection.RTL:
             tblPr = tbl._tbl.tblPr
@@ -383,8 +419,10 @@ class DocxExporter(BaseExporter):
                 if trPr.find(qn("w:tblHeader")) is None:
                     trPr.append(OxmlElement("w:tblHeader"))
 
-            # Prevent splitting across page break
-            if trPr.find(qn("w:cantSplit")) is None:
+            # Prevent the header row from splitting, but let body rows break across
+            # pages so tall rows reflow instead of clipping (TBL-001, large-print).
+            is_header_row = r_idx == 0 and table_struct.has_header
+            if is_header_row and trPr.find(qn("w:cantSplit")) is None:
                 trPr.append(OxmlElement("w:cantSplit"))
 
             for c_idx, cell_data in enumerate(row):
@@ -395,13 +433,14 @@ class DocxExporter(BaseExporter):
                 if col_widths_pt and c_idx < len(col_widths_pt):
                     cell.width = Pt(col_widths_pt[c_idx])
 
-                # Light subtle gray header shading
+                # Header shading: white in monochrome (black text stays readable),
+                # light gray otherwise (DESIGN.md §8.1).
                 if r_idx == 0 and table_struct.has_header:
                     tcPr = cell._tc.get_or_add_tcPr()
                     shd = OxmlElement("w:shd")
                     shd.set(qn("w:val"), "clear")
                     shd.set(qn("w:color"), "auto")
-                    shd.set(qn("w:fill"), "F2F2F2")
+                    shd.set(qn("w:fill"), "FFFFFF" if options.monochrome else "F2F2F2")
                     tcPr.append(shd)
 
                 p = cell.paragraphs[0]

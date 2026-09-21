@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+import math
 from typing import Optional
 from openlargeprint.ir.models import DocumentIR
 
@@ -39,6 +40,11 @@ PRESET_CONFIGS = {
     PresetName.VERY_LARGE: PresetConfig(28.0, 1.55, "Very Large (28pt, 1.55 spacing)"),
 }
 
+MIN_BODY_PT = 12.0
+MAX_BODY_PT = 72.0
+MIN_LINE_SPACING = 1.0
+MAX_LINE_SPACING = 3.0
+
 
 @dataclass
 class ExportOptions:
@@ -51,6 +57,26 @@ class ExportOptions:
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
     monochrome: bool = False
+
+    def __post_init__(self) -> None:
+        self.preset = PresetName(self.preset)
+        self.paper_size = PaperSize(self.paper_size)
+        if self.preset == PresetName.CUSTOM:
+            if self.custom_body_pt is None:
+                self.custom_body_pt = PRESET_CONFIGS[PresetName.LARGE].body_pt
+            if self.custom_line_spacing is None:
+                self.custom_line_spacing = PRESET_CONFIGS[PresetName.LARGE].line_spacing
+        for value, lower, upper, label in (
+            (self.custom_body_pt, MIN_BODY_PT, MAX_BODY_PT, "Text size"),
+            (self.custom_line_spacing, MIN_LINE_SPACING, MAX_LINE_SPACING, "Line spacing"),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not lower <= value <= upper
+            ):
+                raise ValueError(f"{label} must be between {lower:g} and {upper:g}.")
 
     @property
     def body_pt(self) -> float:

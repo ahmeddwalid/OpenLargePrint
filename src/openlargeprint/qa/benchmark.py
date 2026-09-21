@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
+
+
+import tempfile
+
+from openlargeprint.ir.models import BlockType, DocumentIR
+from openlargeprint.pipeline import PipelineOrchestrator
+from openlargeprint.qa.corpus_builder import BenchmarkCorpusBuilder
+from openlargeprint.qa.metrics import (
+    EvaluationMetrics,
+    calculate_cer,
+    calculate_image_retention,
+    calculate_wer,
+)
 
 
 def get_current_ram_mb() -> float:
@@ -36,24 +48,75 @@ def get_current_ram_mb() -> float:
             counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
             handle = ctypes.windll.kernel32.GetCurrentProcess()
             if ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
-                return counters.WorkingSetSize / (1024.0 * 1024.0)
+                return counters.PeakWorkingSetSize / (1024.0 * 1024.0)
         except Exception:
             pass
         return 0.0
 
-from openlargeprint.exporters import ExportOptions
-from openlargeprint.pipeline import PipelineOrchestrator
-from openlargeprint.qa.corpus_builder import BenchmarkCorpusBuilder
-from openlargeprint.qa.metrics import (
-    EvaluationMetrics,
-    calculate_cer,
-    calculate_image_retention,
-    calculate_page_anchor_fidelity,
-    calculate_reading_order_accuracy,
-    calculate_table_structural_score,
-    calculate_wer,
-)
-from openlargeprint.security.isolation import log_safe_info
+
+def _reading_order_plausibility(doc: DocumentIR) -> float:
+    """Score how well block order follows page order and top-to-bottom geometry.
+
+    Unlike comparing a sequence to itself, this actually detects scrambled
+    reading order: every consecutive content-block pair must not move backwards
+    in page number or vertically within a page.
+    """
+    content = [b for b in doc.blocks if b.type != BlockType.PAGE_MARKER]
+    if len(content) < 2:
+        return 1.0
+
+    good = 0
+    total = 0
+    for a, b in zip(content, content[1:]):
+        total += 1
+        if b.source_page < a.source_page:
+            continue
+        if b.source_page > a.source_page:
+            good += 1
+            continue
+        ay = a.source_bounding_box.y1 if a.source_bounding_box else None
+        by = b.source_bounding_box.y1 if b.source_bounding_box else None
+        if ay is None or by is None or by <= ay + 1.0:
+            good += 1
+
+    return round(good / total, 3) if total else 1.0
+
+
+def _table_structure_quality(table_struct) -> float:
+    """Score an extracted table's structural soundness (TBL-001).
+
+    Rewards rectangular row lengths, populated cells, and a detected header —
+    a real property of the table rather than a comparison against itself.
+    """
+    rows = table_struct.rows
+    if not rows:
+        return 0.0
+
+    col_count = table_struct.column_count or 1
+    consistent = sum(1 for row in rows if len(row) == col_count)
+
+    total_cells = 0
+    populated = 0
+    for row in rows:
+        for cell in row:
+            total_cells += 1
+            if (cell.text or "").strip():
+                populated += 1
+
+    consistency = consistent / len(rows)
+    fill = populated / total_cells if total_cells else 0.0
+    header = 1.0 if table_struct.has_header else 0.5
+    return round(0.4 * consistency + 0.4 * fill + 0.2 * header, 3)
+
+
+def _page_anchor_fidelity(doc: DocumentIR) -> float:
+    """Score whether every source page carries a page-anchor marker (PDF-006, OUT-005)."""
+    pages = [p.page_number for p in doc.pages]
+    if not pages:
+        return 1.0
+    markers = {b.page_marker for b in doc.blocks if b.type == BlockType.PAGE_MARKER}
+    present = sum(1 for p in pages if p in markers)
+    return round(present / len(pages), 3)
 
 
 class BenchmarkCase(BaseModel):
@@ -75,6 +138,8 @@ class BenchmarkResult(BaseModel):
     success: bool
     warning_count: int
     error_message: Optional[str] = None
+    measurement_notes: List[str] = Field(default_factory=list)
+    peak_vram_mb: float | None = None
 
 
 class BenchmarkReport(BaseModel):
@@ -85,23 +150,26 @@ class BenchmarkReport(BaseModel):
     passed_cases: int
     failed_cases: int
     results: Dict[str, BenchmarkResult] = Field(default_factory=dict)
-    average_cer: float = 0.0
-    average_wer: float = 0.0
+    average_cer: float | None = None
+    average_wer: float | None = None
     average_speed_s_per_page: float = 0.0
     peak_ram_mb: float = 0.0
 
     def to_markdown_table(self) -> str:
         """Format benchmark results as a clean Markdown table (anti-slop, subject-grounded)."""
         lines = [
-            "| Case Name | Format | Pages | CER | WER | Reading Order | Table Score | Speed (s/p) | Status |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| Case Name | Format | Pages | CER | WER | Order heuristic | Table heuristic | Images | Anchors | Speed (s/p) | Process peak RAM (MB) | VRAM (MB) | Execution |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
         for name, r in self.results.items():
             status = "PASS" if r.success else "FAIL"
             m = r.metrics
+            cer_label = f"{m.cer:.3f}" if m.cer is not None else "N/A"
+            wer_label = f"{m.wer:.3f}" if m.wer is not None else "N/A"
             lines.append(
-                f"| {name} | {r.format} | {r.page_count} | {m.cer:.3f} | {m.wer:.3f} | {m.reading_order_score:.2f} | {m.table_score:.2f} | {m.speed_sec_per_page:.2f} | {status} |"
+                f"| {name} | {r.format} | {r.page_count} | {cer_label} | {wer_label} | {m.reading_order_score:.2f} | {m.table_score:.2f} | {m.image_retention:.2f} | {m.page_anchor_fidelity:.2f} | {m.speed_sec_per_page:.2f} | {m.peak_ram_mb:.1f} | N/A | {status} |"
             )
+        lines.append("\nPASS means conversion completed or malformed input was rejected safely. It is not a fidelity acceptance result. N/A means unmeasured. Order/table columns are heuristics; RAM excludes child processes and records the lifetime process peak.")
         return "\n".join(lines)
 
 
@@ -109,7 +177,11 @@ class BenchmarkRunner:
     """Orchestrates benchmark evaluation against the rights-safe corpus."""
 
     def __init__(self, corpus_dir: Optional[Path | str] = None):
-        self.corpus_dir = Path(corpus_dir) if corpus_dir else Path("/tmp/olp_benchmark_corpus")
+        self.corpus_dir = (
+            Path(corpus_dir)
+            if corpus_dir
+            else Path(tempfile.gettempdir()) / "olp_benchmark_corpus"
+        )
         self.builder = BenchmarkCorpusBuilder(self.corpus_dir)
         self.orchestrator = PipelineOrchestrator()
 
@@ -124,7 +196,7 @@ class BenchmarkRunner:
         total_wer = 0.0
         total_speed = 0.0
         valid_cases_count = 0
-        max_rss_before = get_current_ram_mb()
+        measured_text_cases = 0
 
         for name, file_path in cases.items():
             start_time = time.perf_counter()
@@ -132,32 +204,28 @@ class BenchmarkRunner:
 
             # Check if this is the intentionally malformed case (14_malformed_pdf)
             if "malformed" in name:
+                failure = None
                 try:
-                    res = self.orchestrator.convert(file_path, out_file)
-                    success = True
-                except Exception as e:
-                    # Intentionally malformed files should fail safely without crashing
-                    duration = time.perf_counter() - start_time
-                    results[name] = BenchmarkResult(
-                        case_name=name,
-                        format="pdf",
-                        page_count=1,
-                        duration_seconds=round(duration, 3),
-                        metrics=EvaluationMetrics(
-                            cer=0.0,
-                            wer=0.0,
-                            reading_order_score=1.0,
-                            table_score=1.0,
-                            image_retention=1.0,
-                            page_anchor_fidelity=1.0,
-                            speed_sec_per_page=round(duration, 3),
-                            peak_ram_mb=0.0,
-                        ),
-                        success=True,  # Safe handling is a pass
-                        warning_count=1,
-                        error_message=f"Safely caught: {type(e).__name__}",
-                    )
-                    continue
+                    self.orchestrator.convert(file_path, out_file)
+                except Exception as error:
+                    failure = type(error).__name__
+                duration = time.perf_counter() - start_time
+                results[name] = BenchmarkResult(
+                    case_name=name,
+                    format="pdf",
+                    page_count=1,
+                    duration_seconds=round(duration, 3),
+                    metrics=EvaluationMetrics(
+                        cer=None, wer=None, reading_order_score=0.0, table_score=0.0,
+                        image_retention=0.0, page_anchor_fidelity=0.0,
+                        speed_sec_per_page=round(duration, 3), peak_ram_mb=get_current_ram_mb(),
+                    ),
+                    success=failure is not None,
+                    warning_count=1,
+                    error_message=f"Safely caught: {failure}" if failure else "Malformed fixture was unexpectedly accepted.",
+                    measurement_notes=["Rejection test; content fidelity metrics do not apply."],
+                )
+                continue
 
             try:
                 res = self.orchestrator.convert(file_path, out_file)
@@ -166,10 +234,8 @@ class BenchmarkRunner:
                 page_count = max(1, len(doc_ir.pages))
 
                 # Extract reconstructed text
-                hyp_text = "\n".join(b.text for b in doc_ir.blocks if b.text)
+                hyp_text = " ".join(" ".join(b.text.split()) for b in doc_ir.blocks if b.text and b.type != BlockType.PAGE_MARKER)
 
-                # Real ground-truth comparison when a .txt sidecar exists (QA-002);
-                # otherwise native exact extraction scores 0.0.
                 gt_candidates = [
                     Path(str(file_path)).with_suffix(".txt"),
                     self.corpus_dir / "ocr_ground_truth" / f"{Path(str(file_path)).stem}.txt",
@@ -183,37 +249,38 @@ class BenchmarkRunner:
                     except Exception:
                         continue
                 if ref_text is not None:
+                    ref_text = " ".join(ref_text.split())
                     cer = calculate_cer(ref_text, hyp_text)
                     wer = calculate_wer(ref_text, hyp_text)
-                elif "scanned" in name or "low_res" in name or "skewed" in name:
-                    # Scanned case without ground truth: verify non-empty recognition
-                    cer = 0.02 if len(hyp_text) > 10 else 0.5
-                    wer = 0.04 if len(hyp_text) > 10 else 0.5
                 else:
-                    cer = 0.0
-                    wer = 0.0
+                    cer = None
+                    wer = None
 
-                # Reading order score
-                reading_order = [b.id for b in doc_ir.blocks]
-                reading_order_score = calculate_reading_order_accuracy(reading_order, reading_order)
+                # Reading order plausibility (detects scrambled order, not a self-comparison)
+                reading_order_score = _reading_order_plausibility(doc_ir)
 
-                # Table score
+                # Table score: structural quality of any extracted table
                 tables = [b for b in doc_ir.blocks if b.table_structure is not None]
-                table_score = 1.0 if not ("table" in name) or tables else 0.5
+                if "table" in name:
+                    table_score = _table_structure_quality(tables[0].table_structure) if tables else 0.0
+                else:
+                    table_score = 1.0
 
-                # Images
+                # Image retention: a case that should carry figures must retain them
                 images = [b for b in doc_ir.blocks if b.image_asset is not None]
-                image_retention = 1.0 if not ("images" in name) or images else 0.8
+                if "images" in name or "mixed_digital_scan" in name:
+                    image_retention = calculate_image_retention(1, len(images))
+                else:
+                    image_retention = 1.0
 
-                # Page anchors
-                page_anchors = [p.page_number for p in doc_ir.pages]
-                anchor_fidelity = calculate_page_anchor_fidelity(page_anchors, page_anchors)
+                # Page anchors: every source page must be traceable (PDF-006)
+                anchor_fidelity = _page_anchor_fidelity(doc_ir)
 
                 speed_per_page = duration / page_count
 
                 # Memory usage
                 max_rss_after = get_current_ram_mb()
-                peak_ram = round(max(0.0, max_rss_after - max_rss_before), 2)
+                peak_ram = round(max_rss_after, 2)
 
                 metrics = EvaluationMetrics(
                     cer=cer,
@@ -234,10 +301,17 @@ class BenchmarkRunner:
                     metrics=metrics,
                     success=True,
                     warning_count=len(res.warnings),
+                    measurement_notes=[
+                        "Reading order and table scores are heuristics, not ground-truth accuracy.",
+                        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+                        "Conversion success is not a document-fidelity pass.",
+                    ] + (["No reference transcript: CER and WER unavailable."] if ref_text is None else []),
                 )
 
-                total_cer += cer
-                total_wer += wer
+                if cer is not None and wer is not None:
+                    total_cer += cer
+                    total_wer += wer
+                    measured_text_cases += 1
                 total_speed += speed_per_page
                 valid_cases_count += 1
 
@@ -264,8 +338,8 @@ class BenchmarkRunner:
                 )
 
         passed = sum(1 for r in results.values() if r.success)
-        avg_cer = round(total_cer / max(1, valid_cases_count), 4)
-        avg_wer = round(total_wer / max(1, valid_cases_count), 4)
+        avg_cer = round(total_cer / measured_text_cases, 4) if measured_text_cases else None
+        avg_wer = round(total_wer / measured_text_cases, 4) if measured_text_cases else None
         avg_speed = round(total_speed / max(1, valid_cases_count), 3)
 
         report = BenchmarkReport(

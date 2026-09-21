@@ -28,6 +28,7 @@ import re
 from openlargeprint.ocr.base import DocumentOcrEngine
 from openlargeprint.ocr.router import OcrRouter, RoutingMode
 from openlargeprint.security.isolation import JobWorkspace, log_safe_info
+from openlargeprint.security.validator import bounded_pdf_scale
 from openlargeprint.text.direction import (
     detect_language,
     detect_text_direction,
@@ -36,6 +37,7 @@ from openlargeprint.text.direction import (
 from .classifier import classify_pdf_page
 from .images import extract_lossless_images_for_page
 from .scanned import ScannedPageExtractor
+from .vector_figures import extract_vector_figure_region
 
 
 @dataclass
@@ -144,50 +146,84 @@ class NativePdfImporter(BaseImporter):
                 all_blocks.append(marker_block)
 
                 image_blocks: List[Block] = []
+                page_image_warnings: List[str] = []
                 try:
                     # 3. Extract lossless embedded images (IMG-001) & query image bounds (PDF-006)
+                    pike_page = pike_doc.pages[page_idx]
+                    images = extract_lossless_images_for_page(
+                        pike_page, page_num, workspace.assets_dir,
+                        on_warning=page_image_warnings.append,
+                    )
+
+                    # Candidate figure bounds: IMAGE and FORM objects. Figures are often
+                    # wrapped in a form XObject, which a raw IMAGE filter misses.
                     try:
-                        pike_page = pike_doc.pages[page_idx]
-                        images = extract_lossless_images_for_page(
-                            pike_page, page_num, workspace.assets_dir
+                        fig_objs = list(
+                            page.get_objects(
+                                filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE, pdfium_c.FPDF_PAGEOBJ_FORM]
+                            )
                         )
-                        image_objs = list(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]))
+                    except Exception:
+                        fig_objs = list(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]))
 
-                        for idx, img in enumerate(images):
-                            bbox = None
-                            if idx < len(image_objs):
-                                try:
-                                    l, b, r, t = image_objs[idx].get_bounds()
-                                    bbox = BoundingBox(x0=float(l), y0=float(b), x1=float(r), y1=float(t))
-                                except Exception:
-                                    pass
+                    candidate_bboxes: List[Optional[BoundingBox]] = []
+                    for obj in fig_objs:
+                        try:
+                            l, b, r, t = obj.get_bounds()
+                            candidate_bboxes.append(
+                                BoundingBox(x0=float(l), y0=float(b), x1=float(r), y1=float(t))
+                            )
+                        except Exception:
+                            candidate_bboxes.append(None)
 
-                            # Filter out full-page background rasters / canvas wallpapers
-                            page_area = max(1.0, page_meta.width * page_meta.height)
-                            img_area = (bbox.width * bbox.height) if bbox else 0.0
-                            is_background_canvas = (
-                                bbox is not None
-                                and (
-                                    (img_area / page_area > 0.70)
-                                    or (bbox.width > 0.85 * page_meta.width and bbox.height > 0.85 * page_meta.height)
-                                )
+                    if images and candidate_bboxes and len(images) != len(candidate_bboxes):
+                        page_image_warnings.append(
+                            f"Page {page_num}: {len(images)} image(s) found but {len(candidate_bboxes)} "
+                            "figure region(s) located; positions may be approximate"
+                        )
+
+                    page_area = max(1.0, page_meta.width * page_meta.height)
+
+                    for idx, img in enumerate(images):
+                        bbox = candidate_bboxes[idx] if idx < len(candidate_bboxes) else None
+                        if bbox is None and candidate_bboxes:
+                            page_image_warnings.append(
+                                f"Page {page_num}: a figure's position could not be determined and may be misplaced"
                             )
 
-                            if not is_background_canvas:
-                                img_block = Block(
-                                    id=f"p{page_num}_img{block_counter}",
-                                    type=BlockType.IMAGE,
-                                    source_page=page_num,
-                                    source_bounding_box=bbox,
-                                    extraction_method=ExtractionMethod.NATIVE,
-                                    image_asset=img,
-                                    confidence=1.0,
-                                )
-                                block_counter += 1
-                                image_blocks.append(img_block)
-                    except Exception as e:
-                        log_safe_info(f"Image extraction skipped on page {page_num}: {type(e).__name__}")
+                        # Suppress only page-filling rasters (the scanned page itself or a
+                        # canvas wallpaper) — never silently, and with a high threshold so a
+                        # large real figure on a text page is preserved.
+                        img_area = (bbox.width * bbox.height) if bbox else 0.0
+                        is_background_canvas = bbox is not None and (
+                            (img_area / page_area > 0.90)
+                            or (
+                                bbox.width > 0.95 * page_meta.width
+                                and bbox.height > 0.95 * page_meta.height
+                            )
+                        )
 
+                        if is_background_canvas:
+                            page_image_warnings.append(
+                                f"Page {page_num}: a full-page background image was omitted from the reflowed output"
+                            )
+                            continue
+
+                        img_block = Block(
+                            id=f"p{page_num}_img{block_counter}",
+                            type=BlockType.IMAGE,
+                            source_page=page_num,
+                            source_bounding_box=bbox,
+                            extraction_method=ExtractionMethod.NATIVE,
+                            image_asset=img,
+                            confidence=1.0,
+                        )
+                        block_counter += 1
+                        image_blocks.append(img_block)
+                except Exception as e:
+                    log_safe_info(f"Image extraction skipped on page {page_num}: {type(e).__name__}")
+
+                try:
                     # 4. Route page processing according to classification (PDF-001..005)
                     extracted: List[Block] = []
                     if page_meta.classification == PageClassification.NATIVE:
@@ -200,44 +236,96 @@ class NativePdfImporter(BaseImporter):
                         log_safe_info(
                             f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
                         )
-                        extracted = self.scanned_extractor.extract_page(page, page_num, block_counter)
+                        extracted = self.scanned_extractor.extract_page(
+                            page, page_num, block_counter, assets_dir=workspace.assets_dir
+                        )
                         block_counter += len(extracted)
 
                     elif page_meta.classification == PageClassification.MIXED:
                         # Mixed page reconciliation path (PDF-004)
                         log_safe_info(f"Page {page_num} routed to mixed reconciliation (PDF-004)")
-                        extracted = self._reconcile_mixed_page(page, page_num, block_counter, page_meta)
+                        extracted = self._reconcile_mixed_page(
+                            page, page_num, block_counter, page_meta, assets_dir=workspace.assets_dir
+                        )
                         block_counter += len(extracted)
+
+                    # 4b. IMG-002: preserve vector artwork when no embedded raster was recovered
+                    if not image_blocks:
+                        table_bboxes = [
+                            (
+                                b.source_bounding_box.x0,
+                                b.source_bounding_box.y0,
+                                b.source_bounding_box.x1,
+                                b.source_bounding_box.y1,
+                            )
+                            for b in extracted
+                            if b.type == BlockType.TABLE and b.source_bounding_box is not None
+                        ]
+                        vector_asset = extract_vector_figure_region(
+                            page,
+                            page_num,
+                            workspace.assets_dir,
+                            page_meta.width,
+                            page_meta.height,
+                            occupied_bboxes=table_bboxes,
+                            on_warning=page_image_warnings.append,
+                        )
+                        if vector_asset is not None:
+                            image_blocks.append(
+                                Block(
+                                    id=f"p{page_num}_img{block_counter}",
+                                    type=BlockType.IMAGE,
+                                    source_page=page_num,
+                                    extraction_method=ExtractionMethod.NATIVE,
+                                    image_asset=vector_asset,
+                                    confidence=1.0,
+                                )
+                            )
+                            block_counter += 1
+
+                    if not extracted or all(b.confidence == 0 for b in extracted):
+                        image_blocks = [self._preserve_page(page, page_num, workspace)]
 
                     # 5. Contextually interleave images with content blocks in reading order
                     page_blocks = self._interleave_images_with_blocks(extracted, image_blocks)
+                    if page_image_warnings:
+                        # Surface image issues on the page's first block (never drop silently).
+                        target = page_blocks[0] if page_blocks else marker_block
+                        target.warnings.extend(page_image_warnings)
                     all_blocks.extend(page_blocks)
 
                     # 5. Checkpoint callback per page (UI-003)
                     if checkpoint_callback:
-                        has_warn = any(bool(b.warnings) for b in page_blocks)
+                        has_warn = any(bool(b.warnings) for b in [marker_block, *page_blocks])
                         warn_msg = None
                         if has_warn:
-                            for b in page_blocks:
+                            for b in [marker_block, *page_blocks]:
                                 if b.warnings:
                                     warn_msg = b.warnings[0]
                                     break
                         checkpoint_callback(page_num, page_meta.classification, has_warn, warn_msg)
 
+                except InterruptedError:
+                    raise
                 except Exception as page_err:
                     # UI-003: Single failed page must not discard already-converted pages
                     log_safe_info(f"Page {page_num} encountered extraction error: {type(page_err).__name__}")
-                    fallback_block = Block(
-                        id=f"p{page_num}_err_fallback",
-                        type=BlockType.PARAGRAPH,
-                        text=f"[Original page {page_num} preserved for review]",
-                        warnings=[f"Page {page_num} extraction failed: {str(page_err)}"],
-                        source_page=page_num,
-                        confidence=0.0,
-                    )
+                    try:
+                        fallback_block = self._preserve_page(page, page_num, workspace)
+                    except Exception:
+                        fallback_block = Block(
+                            id=f"p{page_num}_err_fallback",
+                            type=BlockType.PARAGRAPH,
+                            text=f"[Page {page_num} could not be rendered. Consult the original document.]",
+                            warnings=[f"Page {page_num} could not be extracted or rendered."],
+                            source_page=page_num,
+                            confidence=0.0,
+                        )
                     all_blocks.append(fallback_block)
                     if checkpoint_callback:
                         checkpoint_callback(page_num, page_meta.classification, True, f"Page {page_num} extraction error")
+                finally:
+                    page.close()
 
         finally:
             pike_doc.close()
@@ -262,6 +350,7 @@ class NativePdfImporter(BaseImporter):
         page_num: int,
         start_idx: int,
         page_meta: PageMetadata,
+        assets_dir: Optional[Path] = None,
     ) -> List[Block]:
         """Reconcile native text with selective OCR of regions lacking native text, deduplicating overlaps (PDF-004)."""
         # 1. Native text extraction
@@ -269,7 +358,9 @@ class NativePdfImporter(BaseImporter):
         idx_after_native = start_idx + len(native_blocks)
 
         # 2. Run OCR over entire page
-        ocr_blocks = self.scanned_extractor.extract_page(page, page_num, idx_after_native)
+        ocr_blocks = self.scanned_extractor.extract_page(
+            page, page_num, idx_after_native, assets_dir=assets_dir
+        )
 
         # 3. Deduplicate: keep only OCR blocks that DO NOT overlap native text (Principle 1)
         accepted_ocr_blocks: List[Block] = []
@@ -340,6 +431,34 @@ class NativePdfImporter(BaseImporter):
             img_idx += 1
 
         return merged
+
+    def _preserve_page(self, page: pdfium.PdfPage, page_num: int, workspace: JobWorkspace) -> Block:
+        width, height = page.get_size()
+        scale = bounded_pdf_scale(width, height, 150.0)
+        bitmap = page.render(scale=scale)
+        try:
+            image = bitmap.to_pil()
+            path = workspace.assets_dir / f"p{page_num}_retained.png"
+            image.save(path, format="PNG")
+            asset = ImageAsset(
+                asset_id=f"p{page_num}_retained",
+                file_path=str(path),
+                width=image.width,
+                height=image.height,
+                mime_type="image/png",
+                alt_text=f"Original page {page_num}, retained for review",
+            )
+        finally:
+            bitmap.close()
+        return Block(
+            id=f"p{page_num}_retained",
+            type=BlockType.IMAGE,
+            source_page=page_num,
+            source_bounding_box=BoundingBox(x0=0, y0=0, x1=width, y1=height),
+            image_asset=asset,
+            confidence=0.0,
+            warnings=[f"Page {page_num} needs review. The original page image has been retained."],
+        )
 
     def _extract_native_text(
         self,

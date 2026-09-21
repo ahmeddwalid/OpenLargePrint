@@ -3,7 +3,7 @@ name = "openlargeprint"
 version = "0.1.0"
 description = "Accessible, structure-preserving document reconstruction and large-print conversion engine"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = { text = "GPL-3.0-or-later" }
 authors = [
     { name = "OpenLargePrint Contributors" }
@@ -14,7 +14,7 @@ dependencies = [
     "pikepdf>=8.0.0",
     "python-docx>=1.1.0",
     "pillow>=10.0.0",
-    "rapidocr-onnxruntime>=1.4.0",
+    "rapidocr-onnxruntime==1.4.4",
     "opencv-python-headless>=4.8.0",
     "reportlab>=4.0.0",
     "arabic-reshaper>=3.0.1",

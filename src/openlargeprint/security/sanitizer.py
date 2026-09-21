@@ -37,10 +37,12 @@ def sanitize_pdf(input_path: Path | str, output_path: Path | str) -> Tuple[Path,
     try:
         pdf = pikepdf.open(in_p, allow_overwriting_input=False)
     except Exception as e:
-        # If pikepdf fails, copy as-is or raise depending on error
-        log_safe_info(f"Could not open PDF for pikepdf sanitization: {type(e).__name__}")
-        shutil.copy2(in_p, out_p)
-        return out_p, removed_items
+        # Refuse to hand back an unsanitized copy: silently continuing could let
+        # PDF JavaScript / Launch actions / embedded files through (SEC-002).
+        log_safe_info(f"Could not open PDF for sanitization: {type(e).__name__}")
+        raise SecurityValidationError(
+            "This PDF could not be safely prepared for conversion."
+        ) from e
 
     root = pdf.Root
 
@@ -175,7 +177,23 @@ def _sanitize_rels_xml(rels_bytes: bytes) -> Tuple[bytes, List[str]]:
         if changed:
             return ET.tostring(tree, encoding="utf-8"), removed
     except Exception:
-        pass
+        # Fall back to a byte-level strip so an unparseable .rels can never keep a
+        # live external target (SEC-002).
+        try:
+            text = rels_bytes.decode("utf-8", errors="ignore")
+            def _neutralize(match: "re.Match[str]") -> str:
+                removed.append(f"ExternalRel:{match.group(1)}")
+                return match.group(0).replace(match.group(1), "#")
+
+            new_text = re.sub(
+                r'Target="((?:file|javascript|mhtml):[^"]*)"',
+                _neutralize,
+                text,
+            )
+            if removed:
+                return new_text.encode("utf-8"), removed
+        except Exception:
+            pass
     return rels_bytes, removed
 
 

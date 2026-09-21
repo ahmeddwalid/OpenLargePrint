@@ -4,6 +4,9 @@
 import json
 from pathlib import Path
 import sys
+import subprocess
+import platform
+from build_sidecar import get_target_triple
 
 
 def verify_packaging() -> bool:
@@ -48,9 +51,28 @@ def verify_packaging() -> bool:
         return False
 
     # 6. Check compiled sidecar binary exists
-    sidecar_bin = repo_root / "src-tauri" / "binaries" / "openlargeprint-sidecar-x86_64-pc-windows-msvc.exe"
+    suffix = ".exe" if platform.system() == "Windows" else ""
+    sidecar_bin = repo_root / "src-tauri" / "binaries" / f"openlargeprint-sidecar-{get_target_triple()}{suffix}"
     if not sidecar_bin.exists():
         print(f"Error: sidecar binary not found at {sidecar_bin}. Run build_sidecar.py first.")
+        return False
+
+    try:
+        result = subprocess.run(
+            [str(sidecar_bin), "sidecar"],
+            input='{"command":"health"}\n',
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=True,
+        )
+        events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        if not any(event.get("type") == "health" and event.get("status") == "ready" for event in events):
+            print("Error: packaged sidecar did not report ready.")
+            return False
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        print(f"Error: packaged sidecar smoke test failed ({type(error).__name__}).")
         return False
 
     # 7. Check accessible Windows icons exist
@@ -62,9 +84,10 @@ def verify_packaging() -> bool:
     # 8. Check UI build assets exist
     ui_index = repo_root / "ui" / "dist" / "index.html"
     if not ui_index.exists():
-        print(f"Warning: ui/dist/index.html not built yet. Run 'npm run build' in ui/.")
+        print("Error: ui/dist/index.html not built yet. Run 'npm run build' in ui/.")
+        return False
 
-    print("Packaging verification passed: Tauri 2 configuration, sidecar binary, Windows 11 NSIS targets, icons, and security boundaries are valid.")
+    print("Packaging smoke test passed: configuration, standalone sidecar health, icons, and frontend assets.")
     return True
 
 

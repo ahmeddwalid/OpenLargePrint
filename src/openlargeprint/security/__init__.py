@@ -8,6 +8,7 @@ from .validator import (
     validate_image_dimensions,
 )
 from .isolation import JobWorkspace, log_safe_info
+from .assets import JobAssetStore, default_cache_root
 from .sanitizer import (
     ActiveContentStrippedWarning,
     sanitize_document,
@@ -17,7 +18,9 @@ from .sanitizer import (
 
 __all__ = [
     "ActiveContentStrippedWarning",
+    "JobAssetStore",
     "JobWorkspace",
+    "default_cache_root",
     "SecurityValidationError",
     "SupportedFormat",
     "detect_file_type",

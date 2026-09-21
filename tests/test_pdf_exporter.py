@@ -130,3 +130,16 @@ def test_pdf_export_monochrome(tmp_path: Path):
     pdf = pdfium.PdfDocument(out_pdf)
     assert len(pdf) >= 1
 
+
+
+def test_pdf_table_row_longer_than_a_page(tmp_path):
+    from openlargeprint.ir.models import TableCell, TableStructure
+
+    table = TableStructure(rows=[[TableCell(text="Clause")], [TableCell(text="Long contract provision. " * 300 + "FINAL SENTENCE")]], has_header=True)
+    ir = DocumentIR(metadata=DocumentMetadata(title="Long table", page_count=1), pages=[], blocks=[Block(id="table", type=BlockType.TABLE, source_page=1, table_structure=table)])
+    output = tmp_path / "long-table.pdf"
+    PdfExporter().export(ir, output, ExportOptions())
+    with pdfium.PdfDocument(output) as pdf:
+        assert len(pdf) > 1
+        text = "".join(page.get_textpage().get_text_range() for page in pdf)
+        assert "FINAL SENTENCE" in " ".join(text.split())

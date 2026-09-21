@@ -2,18 +2,18 @@
 
 OpenLargePrint welcomes contributions. All contributions are submitted under the Apache License, Version 2.0. No Contributor License Agreement (CLA) is required.
 
-Before starting work on a contribution, read [SPEC.md](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md) and [DESIGN.md](file:///c:/Users/Ahmed/Projects/OpenLargePrint/DESIGN.md) to understand product requirements and system architecture. In addition, review [AGENTS.md](file:///c:/Users/Ahmed/Projects/OpenLargePrint/AGENTS.md) for testing guidelines, security boundaries, and copy standards.
+Before starting work on a contribution, read [SPEC.md](SPEC.md) and [DESIGN.md](DESIGN.md) to understand product requirements and system architecture. In addition, review [AGENTS.md](AGENTS.md) for testing guidelines, security boundaries, and copy standards.
 
 ## Core Invariants
 
-All contributions must adhere to the non-negotiable principles defined in [SPEC.md §2](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md#L15-L25):
+All contributions must adhere to the non-negotiable principles defined in [SPEC.md §2](SPEC.md#L15-L25):
 
-- Native text takes priority over recognized text. Never run optical character recognition on a page confirmed to have usable native text ([`PDF-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-- Never route recognized text through a generative language model to smooth or alter output ([`OCR-007`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-- Never drop a page or document section on failure. Flag problematic pages for user review and preserve original content ([`UI-004`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-- Preserve source-page provenance. Every reflowed block must retain its original page number and bounding box coordinates ([`PDF-006`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-- Conversions run completely offline. Standard conversions must generate zero network traffic ([`SEC-009`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-- Accessibility is a first-class requirement. Controls, focus states, and text scaling must meet accessibility standards ([`A11Y-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md) through [`A11Y-005`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+- Native text takes priority over recognized text. Never run optical character recognition on a page confirmed to have usable native text ([`PDF-002`](SPEC.md)).
+- Never route recognized text through a generative language model to smooth or alter output ([`OCR-007`](SPEC.md)).
+- Never drop a page or document section on failure. Flag problematic pages for user review and preserve original content ([`UI-004`](SPEC.md)).
+- Preserve source-page provenance. Every reflowed block must retain its original page number and bounding box coordinates ([`PDF-006`](SPEC.md)).
+- Conversions run completely offline. Standard conversions must generate zero network traffic ([`SEC-009`](SPEC.md)).
+- Accessibility is a first-class requirement. Controls, focus states, and text scaling must meet accessibility standards ([`A11Y-001`](SPEC.md) through [`A11Y-005`](SPEC.md)).
 
 ## Development Environment Setup
 
@@ -51,17 +51,17 @@ Install the following development tools:
 
 The codebase is organized into several functional areas:
 
-- [`src/openlargeprint/`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/src/openlargeprint/): Python processing engine.
+- [`src/openlargeprint/`](src/openlargeprint/): Python processing engine.
   - `importers/`: Native PDF extraction, scanned PDF preprocessing, Office importers (DOCX, PPTX), and legacy LibreOffice bridge.
   - `ocr/`: OCR engine protocol and PaddleOCR / RapidOCR ONNX runtime adapter.
-  - `ir/`: Canonical [`DocumentIR`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/src/openlargeprint/ir/models.py) data structures and validation schemas.
+  - `ir/`: Canonical [`DocumentIR`](src/openlargeprint/ir/models.py) data structures and validation schemas.
   - `exporters/`: Large-print PDF, DOCX, and HTML Reader exporters.
   - `sidecar/`: JSON-Lines IPC protocol communicating with the Tauri desktop shell.
   - `text/`: Arabic script reshaping and bidirectional text handling.
-- [`src-tauri/`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/src-tauri/): Rust desktop shell built on Tauri 2. Manages native OS integration, window configuration, file picker dialogues, and sidecar process lifecycle.
-- [`ui/`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/ui/): React 19 and TypeScript frontend. Contains the accessible UI components, format selectors, side-by-side review screen, and interactive Reader.
-- [`tests/`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/tests/): Pytest test suites covering unit tests, schema tests, Arabic RTL handling, security checks, and the rights-safe benchmark corpus.
-- [`packaging/`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/packaging/): Standalone build scripts, PyInstaller spec files, icon generation tools, and packaging verification gates.
+- [`src-tauri/`](src-tauri/): Rust desktop shell built on Tauri 2. Manages native OS integration, window configuration, file picker dialogues, and sidecar process lifecycle.
+- [`ui/`](ui/): React 19 and TypeScript frontend. Contains the accessible UI components, format selectors, side-by-side review screen, and interactive Reader.
+- [`tests/`](tests/): Pytest test suites covering unit tests, schema tests, Arabic RTL handling, security checks, and the rights-safe benchmark corpus.
+- [`packaging/`](packaging/): Standalone build scripts, PyInstaller spec files, icon generation tools, and packaging verification gates.
 
 ## How to Run and Test
 
@@ -127,20 +127,20 @@ npx @tauri-apps/cli dev
 ## Code Style Guidelines
 
 - **Python**:
-  - Follow existing patterns in [`src/openlargeprint/`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/src/openlargeprint/).
+  - Follow existing patterns in [`src/openlargeprint/`](src/openlargeprint/).
   - Use type annotations throughout.
-  - All document importers must normalize output directly into [`DocumentIR`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/src/openlargeprint/ir/models.py). No importer may bypass [`DocumentIR`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/src/openlargeprint/ir/models.py) or communicate directly with an exporter.
-  - New OCR engines must implement the [`DocumentOcrEngine`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/src/openlargeprint/ocr/base.py) protocol interface.
+  - All document importers must normalize output directly into [`DocumentIR`](src/openlargeprint/ir/models.py). No importer may bypass [`DocumentIR`](src/openlargeprint/ir/models.py) or communicate directly with an exporter.
+  - New OCR engines must implement the [`DocumentOcrEngine`](src/openlargeprint/ocr/base.py) protocol interface.
 - **TypeScript and React**:
-  - Adhere to the configuration in [`ui/tsconfig.json`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/ui/tsconfig.json).
+  - Adhere to the configuration in [`ui/tsconfig.json`](ui/tsconfig.json).
   - Maintain WCAG 2.2 accessibility standards:
-    - Primary interactive controls must meet or exceed 48 CSS pixels in width and height ([`A11Y-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-    - The layout must remain fully legible and operable at 200% text enlargement ([`A11Y-002`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-    - Every interactive control must provide a visible keyboard focus indicator ([`A11Y-003`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-    - High-contrast modes and reduced-motion preferences must be respected ([`A11Y-004`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+    - Primary interactive controls must meet or exceed 48 CSS pixels in width and height ([`A11Y-001`](SPEC.md)).
+    - The layout must remain fully legible and operable at 200% text enlargement ([`A11Y-002`](SPEC.md)).
+    - Every interactive control must provide a visible keyboard focus indicator ([`A11Y-003`](SPEC.md)).
+    - High-contrast modes and reduced-motion preferences must be respected ([`A11Y-004`](SPEC.md)).
 - **Rust**:
   - Follow standard `rustfmt` formatting and default `cargo clippy` rules.
-  - Expose only narrow, typed commands over the Tauri bridge. Do not expose arbitrary command execution or unrestricted filesystem APIs to the webview ([`SEC-005`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
+  - Expose only narrow, typed commands over the Tauri bridge. Do not expose arbitrary command execution or unrestricted filesystem APIs to the webview ([`SEC-005`](SPEC.md)).
 - **Documentation and UI Copy**:
   - Write factual, concise sentences.
   - Do not use exclamation marks in copy.
@@ -155,10 +155,10 @@ Before submitting a pull request, verify the following items:
 - [ ] Run the Python test suite and confirm all tests pass: `uv run pytest tests/ -v`.
 - [ ] Verify the frontend builds cleanly without TypeScript errors: `cd ui && npm run build`.
 - [ ] Verify the Rust shell compiles cleanly: `cd src-tauri && cargo check`.
-- [ ] Update [sbom.json](file:///c:/Users/Ahmed/Projects/OpenLargePrint/sbom.json) if any dependencies or model weights are added, updated, or removed ([`LIC-001`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-- [ ] Update [DESIGN.md](file:///c:/Users/Ahmed/Projects/OpenLargePrint/DESIGN.md) if your changes modify architecture, schemas, or IPC boundaries.
-- [ ] Confirm no external network calls are made during the conversion process ([`SEC-009`](file:///c:/Users/Ahmed/Projects/OpenLargePrint/SPEC.md)).
-- [ ] If changing UI components, verify the screen passes the accessibility checklist and visual craft rules in [AGENTS.md §6 and §7](file:///c:/Users/Ahmed/Projects/OpenLargePrint/AGENTS.md#L57-L146).
+- [ ] Update [sbom.json](sbom.json) if any dependencies or model weights are added, updated, or removed ([`LIC-001`](SPEC.md)).
+- [ ] Update [DESIGN.md](DESIGN.md) if your changes modify architecture, schemas, or IPC boundaries.
+- [ ] Confirm no external network calls are made during the conversion process ([`SEC-009`](SPEC.md)).
+- [ ] If changing UI components, verify the screen passes the accessibility checklist and visual craft rules in [AGENTS.md §6 and §7](AGENTS.md#L57-L146).
 
 ## Licensing of Contributions
 

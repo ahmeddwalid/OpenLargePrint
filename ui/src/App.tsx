@@ -71,12 +71,13 @@ export const App: React.FC = () => {
   // Document Selection & Settings State (UI-001, UI-006)
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [textSize, setTextSize] = useState<TextSize>(20); // 20pt default per OUT-006
+  const [customBodyPt, setCustomBodyPt] = useState<number | null>(null);
   const [paperSize, setPaperSize] = useState<PaperSize>('A4'); // A4 default per UI-006
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('pdf');
   const [locationPreset, setLocationPreset] = useState<LocationPreset>('downloads');
   const [customOutputPath, setCustomOutputPath] = useState<string | null>(null);
   const [systemPaths, setSystemPaths] = useState<{ downloads: string; desktop: string; documents: string } | null>(null);
-  const [routingMode, setRoutingMode] = useState<RoutingMode>('max_accuracy');
+  const [routingMode, setRoutingMode] = useState<RoutingMode>('auto');
   const [pageRange, setPageRange] = useState<string>('');
   const [monochrome, setMonochrome] = useState<boolean>(false);
 
@@ -211,6 +212,7 @@ export const App: React.FC = () => {
     const targetOutputPath = customOutputPath || getProposedExportPath();
     const settings: ConversionSettings = {
       textSize,
+      customBodyPt,
       paperSize,
       outputFormat,
       routingMode,
@@ -349,9 +351,8 @@ export const App: React.FC = () => {
 
   const handleRetryReviewItem = async (item: ReviewItem) => {
     const updated = await sidecar.retryPage(item.source_page, true);
-    if (updated.blocks.length > 0) {
-      const newText = updated.blocks[0].text || '';
-      handleAcceptReviewItem(item.id, newText);
+    if (updated && updated.text) {
+      handleAcceptReviewItem(item.id, updated.text);
     }
   };
 
@@ -359,15 +360,51 @@ export const App: React.FC = () => {
     setViewMode('reader');
   };
 
-  const handleExportReader = (selectedPagesOnly?: number[]) => {
-    const targetDesc = selectedPagesOnly
-      ? `pages ${selectedPagesOnly.join(', ')}`
-      : 'the complete document';
-    alert(
-      `Ready to print or save ${targetDesc} at ${textSize}pt on ${paperSize} paper.\nFile: ${
-        exportedFilePath || 'output.pdf'
-      }`
-    );
+  const handleExportReader = async (selection: {
+    pages?: number[];
+    fontPt: number;
+    lineSpacing: number;
+  }) => {
+    if (!selectedFile) {
+      return;
+    }
+
+    const targetOutputPath = customOutputPath || getProposedExportPath();
+    const settings: ConversionSettings = {
+      textSize,
+      customBodyPt: selection.fontPt,
+      paperSize,
+      outputFormat,
+      routingMode,
+      pageRange: selection.pages ? selection.pages.join(',') : '',
+      monochrome,
+      outputPath: targetOutputPath,
+    };
+
+    const targetDocPath = (selectedFile as any)?.nativePath || selectedFile.name;
+    setErrorMessage(null);
+
+    // Preferred path: re-render from the already-built document (no re-extraction/OCR).
+    const handled = await sidecar.exportFromIR(targetDocPath, settings, {
+      onError: (err) => setErrorMessage(err),
+      onSuccess: (result) => setExportedFilePath(result.outputPath),
+    });
+    if (handled) {
+      return;
+    }
+
+    // Fallback (no desktop bridge, or the document is no longer loaded): full conversion.
+    await sidecar.startConversion(targetDocPath, settings, {
+      onProgress: () => {
+        /* keep the reader visible while re-exporting */
+      },
+      onError: (err) => setErrorMessage(err),
+      onCancelled: () => setErrorMessage(t('error.conversion_cancelled')),
+      onSuccess: (result) => {
+        // Only update the exported location; keep the full reader content intact.
+        setExportedFilePath(result.outputPath);
+      },
+    });
   };
 
   return (
@@ -475,7 +512,12 @@ export const App: React.FC = () => {
             />
 
             {/* Step 2: Font size selection (OUT-006) */}
-            <TextSizeSelector value={textSize} onChange={(size) => setTextSize(size)} />
+            <TextSizeSelector
+              value={textSize}
+              onChange={(size) => setTextSize(size)}
+              customBodyPt={customBodyPt}
+              onCustomBodyPtChange={setCustomBodyPt}
+            />
 
             {/* Step 2.5: Direct choice of A4 vs A3 paper size (UI-006) */}
             <PaperSizeSelector value={paperSize} onChange={(size) => setPaperSize(size)} />
@@ -576,7 +618,7 @@ export const App: React.FC = () => {
         {viewMode === 'reader' && documentIR && (
           <ReaderView
             documentIR={documentIR}
-            initialSize={textSize}
+            initialSize={customBodyPt ?? textSize}
             currentTheme={theme}
             exportedFilePath={exportedFilePath}
             onThemeChange={setTheme}

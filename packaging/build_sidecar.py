@@ -8,6 +8,7 @@ following Tauri 2 external-binary naming conventions:
 """
 
 import os
+import importlib.util
 import platform
 import shutil
 import subprocess
@@ -62,7 +63,7 @@ def build_sidecar() -> Path:
         os.environ["PATH"] = sys32 + os.pathsep + os.environ.get("PATH", "")
 
     spec_file = repo_root / "packaging" / f"openlargeprint-sidecar-{target_triple}.spec"
-    if spec_file.exists():
+    if spec_file.exists() and "--reuse-spec" in sys.argv:
         cmd = [
             sys.executable,
             "-m",
@@ -139,13 +140,16 @@ def build_sidecar() -> Path:
 
     try:
         # Check if PyInstaller is installed
-        import PyInstaller  # type: ignore
+        if importlib.util.find_spec("PyInstaller") is None:
+            raise ImportError("PyInstaller is unavailable")
         subprocess.run(cmd, check=True)
         if onedir_mode:
             built_dir = dist_dir / f"openlargeprint-sidecar-{target_triple}"
             built_binary = built_dir / f"openlargeprint-sidecar-{target_triple}{ext}"
             if not built_binary.exists():
                 built_binary = built_dir / f"openlargeprint-sidecar{ext}"
+            if not built_binary.is_file():
+                raise RuntimeError("The sidecar build did not produce its expected executable.")
             engine_dest = tauri_bin_dir / "engine"
             if engine_dest.exists():
                 shutil.rmtree(engine_dest)
@@ -160,26 +164,9 @@ def build_sidecar() -> Path:
                 shutil.copy2(built_binary, final_binary_path)
                 print(f"Successfully packaged and copied sidecar to: {final_binary_path}")
                 return final_binary_path
-    except ImportError:
-        print("PyInstaller not present in build environment — writing standalone stub specification.")
-
-    # Write wrapper runner specification if PyInstaller is not in current virtualenv
-    stub_script = tauri_bin_dir / target_filename
-    if platform.system() == "Windows":
-        cmd_stub = tauri_bin_dir / f"openlargeprint-sidecar-{target_triple}.cmd"
-        with open(cmd_stub, "w") as f:
-            f.write(f'@echo off\r\n"{sys.executable}" -m openlargeprint.cli sidecar %*\r\n')
-        # Also copy python executable as stub binary if needed
-        shutil.copy2(sys.executable, stub_script)
-        print(f"Created executable runner stub at: {stub_script} and {cmd_stub}")
-        return stub_script
-    else:
-        with open(stub_script, "w") as f:
-            f.write("#!/usr/bin/env sh\n")
-            f.write(f'exec "{sys.executable}" -m openlargeprint.cli sidecar "$@"\n')
-        os.chmod(stub_script, 0o755)
-        print(f"Created executable runner stub at: {stub_script}")
-        return stub_script
+    except ImportError as error:
+        raise RuntimeError("PyInstaller is required to build a standalone release sidecar. Run uv sync --dev first.") from error
+    raise RuntimeError("The sidecar build did not produce its expected executable.")
 
 
 if __name__ == "__main__":

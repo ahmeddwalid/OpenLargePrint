@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Optional
-from openlargeprint.security.isolation import log_safe_info
 from .base import DocumentOcrEngine
 from .paddle_engine import PaddleRapidOcrEngine
 
@@ -28,19 +27,8 @@ class OcrRouter:
             self._default_engine = PaddleRapidOcrEngine(use_gpu=False)
 
         if mode == RoutingMode.MAXIMUM_ACCURACY:
-            # Prefer the heavier VLM adapter when its model is installed;
-            # otherwise fall back gracefully to the CPU-friendly default (OCR-001).
-            try:
-                from openlargeprint.ocr.vlm_engine import PaddleOcrVlEngine
-
-                from openlargeprint.models.manager import model_manager
-
-                model_manager.get_model_path("paddleocr_vl_1.6", verify=True)
-                log_safe_info("Routing to Maximum Accuracy VLM OCR engine")
-                return PaddleOcrVlEngine()
-            except Exception:
-                log_safe_info("VLM model not available; using high-accuracy RapidOCR engine")
-                return self._default_engine
+            from .vlm_engine import PaddleOcrVlEngine
+            return PaddleOcrVlEngine(fallback=self._default_engine)
         elif mode in (RoutingMode.AUTOMATIC, RoutingMode.FAST):
             return self._default_engine
         return self.get_engine(RoutingMode.MAXIMUM_ACCURACY)

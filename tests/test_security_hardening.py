@@ -144,3 +144,60 @@ def test_offline_conversion_network_isolation(tmp_path: Path, monkeypatch: pytes
 
     assert res.success
     assert output_pdf.exists()
+
+
+def test_render_scale_bounds_oversized_pages():
+    import math
+    from openlargeprint.security.validator import bounded_pdf_scale, validate_image_dimensions, MAX_RENDER_PIXELS
+
+    for width, height in ((595, 842), (1000000, 2000000), (100, 1000000)):
+        scale = bounded_pdf_scale(width, height)
+        pixels = (math.ceil(width * scale), math.ceil(height * scale))
+        validate_image_dimensions(*pixels)
+        assert pixels[0] * pixels[1] <= MAX_RENDER_PIXELS
+    for width in (0, -1, float("inf"), float("nan")):
+        with pytest.raises(ValueError):
+            bounded_pdf_scale(width, 842)
+
+
+def test_job_identifiers_cannot_escape_asset_root(tmp_path):
+    from openlargeprint.security.assets import JobAssetStore
+
+    for value in ("../outside", "/tmp/outside", "a/b", "a\\b", "..", "x" * 129):
+        with pytest.raises(ValueError):
+            JobAssetStore(job_id=value, root=tmp_path)
+    assert not list(tmp_path.iterdir())
+
+
+def test_export_options_reject_unsafe_sizes():
+    from openlargeprint.exporters import ExportOptions, PresetName
+
+    for value in (0, -1, float("nan"), float("inf"), True, 100000):
+        with pytest.raises(ValueError):
+            ExportOptions(preset=PresetName.CUSTOM, custom_body_pt=value)
+    assert ExportOptions(preset=PresetName.CUSTOM).body_pt == 20
+
+
+def test_atomic_export_keeps_previous_output_on_failure(tmp_path):
+    from openlargeprint.security.isolation import atomic_output
+
+    destination = tmp_path / "report.pdf"
+    destination.write_bytes(b"previous completed report")
+    with pytest.raises(RuntimeError):
+        with atomic_output(destination) as partial:
+            partial.write_bytes(b"incomplete report")
+            raise RuntimeError("export failed")
+    assert destination.read_bytes() == b"previous completed report"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_non_object_ipc_input_is_rejected():
+    import io
+    import json
+    from openlargeprint.sidecar.runner import SidecarRunner
+
+    for payload in ("[]", "null", "12", '"convert"'):
+        output = io.StringIO()
+        runner = SidecarRunner(out_stream=output)
+        runner.execute_command_str(payload)
+        assert json.loads(output.getvalue())["code"] == "INVALID_COMMAND"

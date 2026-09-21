@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import List, Optional
 from reportlab.lib.colors import HexColor
@@ -10,8 +9,6 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A3, A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch, mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
@@ -28,38 +25,8 @@ from openlargeprint.layout.table import TableTier, evaluate_table_fit
 from openlargeprint.security.isolation import log_safe_info
 from openlargeprint.text.bidi import reorder_bidi_for_display
 from .base import BaseExporter, ExportOptions, PaperSize, PresetName
-
-
-_ARABIC_FONT_REGISTERED = False
-_ARABIC_FONT_NAME = "OpenLargePrintArabic"
-
-
-def _ensure_arabic_font() -> str:
-    """Ensure an Arabic-capable TrueType font is registered in ReportLab (LANG-001, LANG-002)."""
-    global _ARABIC_FONT_REGISTERED, _ARABIC_FONT_NAME
-    if _ARABIC_FONT_REGISTERED:
-        return _ARABIC_FONT_NAME
-
-    font_candidates = [
-        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/local/share/fonts/a/Amiri_Regular.ttf",
-        "/usr/share/fonts/amiri-quran-fonts/AmiriQuran.ttf",
-        "/usr/share/fonts/google-noto-vf/NotoSansArabic[wght].ttf",
-        "/usr/local/share/fonts/s/ScheherazadeNew_Regular.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    ]
-
-    for path in font_candidates:
-        if os.path.exists(path):
-            try:
-                pdfmetrics.registerFont(TTFont(_ARABIC_FONT_NAME, path))
-                _ARABIC_FONT_REGISTERED = True
-                return _ARABIC_FONT_NAME
-            except Exception:
-                continue
-
-    return "Helvetica"
+from .fonts import ensure_arabic_font as _ensure_arabic_font
+from .fonts import resolve_reportlab_family
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -132,9 +99,10 @@ class PdfExporter(BaseExporter):
         # 3. Build Story Flowables
         story: List[object] = []
         usable_width = doc_template.width
+        usable_height = doc_template.height
 
         for block in doc.blocks:
-            flowables = self._block_to_flowables(block, options, styles, usable_width)
+            flowables = self._block_to_flowables(block, options, styles, usable_width, usable_height)
             story.extend(flowables)
 
         # 4. Build PDF with NumberedCanvas
@@ -164,6 +132,10 @@ class PdfExporter(BaseExporter):
         body_pt = options.body_pt
         leading_pt = body_pt * options.line_spacing
         arabic_font = _ensure_arabic_font()
+        faces = resolve_reportlab_family(options.font_family, options.fallback_font)
+        font_regular = faces["normal"]
+        font_bold = faces["bold"]
+        font_italic = faces["italic"]
         is_mono = options.monochrome
 
         c_title = HexColor("#000000") if is_mono else HexColor("#111111")
@@ -177,7 +149,7 @@ class PdfExporter(BaseExporter):
         return {
             "title": ParagraphStyle(
                 "Title",
-                fontName="Helvetica-Bold",
+                fontName=font_bold,
                 fontSize=max(28.0, body_pt * 1.5),
                 leading=max(36.0, body_pt * 1.5 * 1.25),
                 textColor=c_title,
@@ -198,7 +170,7 @@ class PdfExporter(BaseExporter):
             ),
             "h1": ParagraphStyle(
                 "H1",
-                fontName="Helvetica-Bold",
+                fontName=font_bold,
                 fontSize=max(26.0, body_pt * 1.4),
                 leading=max(34.0, body_pt * 1.4 * 1.25),
                 textColor=c_title,
@@ -219,7 +191,7 @@ class PdfExporter(BaseExporter):
             ),
             "h2": ParagraphStyle(
                 "H2",
-                fontName="Helvetica-Bold",
+                fontName=font_bold,
                 fontSize=max(23.0, body_pt * 1.25),
                 leading=max(30.0, body_pt * 1.25 * 1.25),
                 textColor=c_h2,
@@ -240,7 +212,7 @@ class PdfExporter(BaseExporter):
             ),
             "h3": ParagraphStyle(
                 "H3",
-                fontName="Helvetica-Bold",
+                fontName=font_bold,
                 fontSize=max(21.0, body_pt * 1.15),
                 leading=max(28.0, body_pt * 1.15 * 1.25),
                 textColor=c_h2,
@@ -261,7 +233,7 @@ class PdfExporter(BaseExporter):
             ),
             "body": ParagraphStyle(
                 "Body",
-                fontName="Helvetica",
+                fontName=font_regular,
                 fontSize=body_pt,
                 leading=leading_pt,
                 textColor=c_body,
@@ -278,7 +250,7 @@ class PdfExporter(BaseExporter):
             ),
             "list": ParagraphStyle(
                 "List",
-                fontName="Helvetica",
+                fontName=font_regular,
                 fontSize=body_pt,
                 leading=leading_pt,
                 textColor=c_body,
@@ -297,7 +269,7 @@ class PdfExporter(BaseExporter):
             ),
             "quote": ParagraphStyle(
                 "Quote",
-                fontName="Helvetica-Oblique",
+                fontName=font_italic,
                 fontSize=body_pt,
                 leading=leading_pt,
                 textColor=c_h2,
@@ -318,7 +290,7 @@ class PdfExporter(BaseExporter):
             ),
             "footnote": ParagraphStyle(
                 "Footnote",
-                fontName="Helvetica-Oblique",
+                fontName=font_italic,
                 fontSize=max(14.0, body_pt * 0.8),
                 leading=max(14.0, body_pt * 0.8) * 1.3,
                 textColor=c_fn,
@@ -335,7 +307,7 @@ class PdfExporter(BaseExporter):
             ),
             "caption": ParagraphStyle(
                 "Caption",
-                fontName="Helvetica-Bold",
+                fontName=font_bold,
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.3,
                 textColor=c_cap,
@@ -355,7 +327,7 @@ class PdfExporter(BaseExporter):
             ),
             "table_cell": ParagraphStyle(
                 "TableCell",
-                fontName="Helvetica",
+                fontName=font_regular,
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.25,
                 textColor=c_body,
@@ -370,7 +342,7 @@ class PdfExporter(BaseExporter):
             ),
             "table_header": ParagraphStyle(
                 "TableHeader",
-                fontName="Helvetica-Bold",
+                fontName=font_bold,
                 fontSize=max(14.0, body_pt * 0.85),
                 leading=max(14.0, body_pt * 0.85) * 1.25,
                 textColor=c_body,
@@ -385,7 +357,7 @@ class PdfExporter(BaseExporter):
             ),
             "table_warning": ParagraphStyle(
                 "TableWarning",
-                fontName="Helvetica-Oblique",
+                fontName=font_italic,
                 fontSize=max(12.0, body_pt * 0.75),
                 leading=max(12.0, body_pt * 0.75) * 1.25,
                 textColor=c_warn,
@@ -394,7 +366,7 @@ class PdfExporter(BaseExporter):
             ),
             "page_marker": ParagraphStyle(
                 "PageMarker",
-                fontName="Helvetica-Bold",
+                fontName=font_bold,
                 fontSize=max(12.0, body_pt * 0.7),
                 leading=max(12.0, body_pt * 0.7) * 1.3,
                 textColor=c_marker,
@@ -411,6 +383,7 @@ class PdfExporter(BaseExporter):
         options: ExportOptions,
         styles: dict[str, ParagraphStyle],
         usable_width: float,
+        usable_height: float = 0.0,
     ) -> List[object]:
         """Convert a semantic Block into ReportLab Platypus flowable elements."""
         flowables: List[object] = []
@@ -438,13 +411,14 @@ class PdfExporter(BaseExporter):
         # Handle lists
         if block.type == BlockType.LIST:
             raw_text = (block.text or "").lstrip("•-* \t")
+            reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL) if is_rtl else raw_text
+            # Escape text first, then add the bullet with numeric entities so the
+            # entity is not itself escaped (renders a real bullet, not "&nbsp;").
+            safe_text = reordered.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             if is_rtl:
-                reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL)
-                safe_text = f"{reordered} &nbsp; •".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                flowables.append(Paragraph(safe_text, styles["list_rtl"]))
+                flowables.append(Paragraph(f"{safe_text}&nbsp;&nbsp;&#8226;", styles["list_rtl"]))
             else:
-                safe_text = f"• &nbsp; {raw_text}".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                flowables.append(Paragraph(safe_text, styles["list"]))
+                flowables.append(Paragraph(f"&#8226;&nbsp;&nbsp;{safe_text}", styles["list"]))
             return flowables
 
         # Handle quotes
@@ -476,7 +450,7 @@ class PdfExporter(BaseExporter):
                 HRFlowable(
                     width="35%",
                     thickness=0.75,
-                    color=HexColor("#888888"),
+                    color=HexColor("#000000") if options.monochrome else HexColor("#888888"),
                     spaceBefore=8,
                     spaceAfter=4,
                     hAlign="RIGHT" if is_rtl else "LEFT",
@@ -494,9 +468,14 @@ class PdfExporter(BaseExporter):
             asset = block.image_asset
             if asset.file_path and Path(asset.file_path).exists():
                 aspect = asset.width / max(1.0, asset.height)
-                # Fit image to width without distortion (IMG-003)
+                # Fit image within the usable width AND height without distortion (IMG-003)
                 display_w = min(usable_width, float(asset.width * 72.0 / 96.0))
                 display_h = display_w / aspect
+                # Leave headroom for the frame's own padding so the flowable always fits.
+                max_h = (usable_height * 0.92) if usable_height and usable_height > 0 else None
+                if max_h is not None and display_h > max_h:
+                    display_h = max_h
+                    display_w = display_h * aspect
 
                 img_path = asset.file_path
                 if options.monochrome:
@@ -554,8 +533,11 @@ class PdfExporter(BaseExporter):
                 aspect = asset.width / max(1.0, asset.height)
                 disp_w = min(usable_width, float(asset.width * 72.0 / 96.0))
                 disp_h = disp_w / aspect
+                retained_path = asset.file_path
+                if options.monochrome:
+                    retained_path = self._get_or_create_monochrome_image(asset.file_path)
                 flowables.append(Spacer(1, 8))
-                flowables.append(PlatypusImage(asset.file_path, width=disp_w, height=disp_h))
+                flowables.append(PlatypusImage(retained_path, width=disp_w, height=disp_h))
                 flowables.append(Spacer(1, 8))
 
             lines = (fit.linearized_text or table_struct.to_linearized_text()).split("\n")
@@ -642,7 +624,7 @@ class PdfExporter(BaseExporter):
         grid_color = HexColor("#000000") if options.monochrome else HexColor("#D0D0D0")
         header_bg = HexColor("#E5E5E5") if options.monochrome else HexColor("#F2F2F2")
 
-        t = PlatypusTable(data, colWidths=calculated_widths, repeatRows=1 if table_struct.has_header else 0)
+        t = PlatypusTable(data, colWidths=calculated_widths, repeatRows=1 if table_struct.has_header else 0, splitInRow=1)
         t_style = [
             ("GRID", (0, 0), (-1, -1), 1.0 if options.monochrome else 0.75, grid_color),
             ("TOPPADDING", (0, 0), (-1, -1), 6),

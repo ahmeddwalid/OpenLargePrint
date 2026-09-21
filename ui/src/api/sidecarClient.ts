@@ -5,6 +5,26 @@
 
 import { ConversionSettings, DocumentBlock, DocumentIR, InspectResult, ProgressInfo, ReviewItem } from '../types';
 
+/**
+ * Backend DocumentIR block types (snake_case vocabulary) mapped to the UI's
+ * display vocabulary. Without this, values like "image"/"list" fall through and
+ * render as plain paragraphs.
+ */
+const BACKEND_BLOCK_TYPE_MAP: Record<string, DocumentBlock['block_type']> = {
+  title: 'heading',
+  heading: 'heading',
+  paragraph: 'paragraph',
+  list: 'list_item',
+  list_item: 'list_item',
+  quote: 'quote',
+  footnote: 'footnote',
+  table: 'table',
+  image: 'figure',
+  figure: 'figure',
+  caption: 'caption',
+  page_marker: 'page_marker',
+};
+
 export interface SidecarCallbacks {
   onProgress: (progress: ProgressInfo) => void;
   onCheckpoint?: (page: number, blocksCount: number) => void;
@@ -239,21 +259,35 @@ export class SidecarClient {
           if (p.document_ir && p.document_ir.blocks) {
             const rawBlocks = p.document_ir.blocks || [];
             const mappedBlocks: DocumentBlock[] = rawBlocks.map((b: any, idx: number) => {
-              let blockType = b.type || b.block_type || 'paragraph';
+              const backendType = b.type || b.block_type || 'paragraph';
+              const blockType = BACKEND_BLOCK_TYPE_MAP[backendType] || 'paragraph';
               let tableData: string[][] | undefined = undefined;
               if (b.table_structure && b.table_structure.rows) {
                 tableData = b.table_structure.rows.map((row: any[]) =>
                   row.map((cell: any) => (typeof cell === 'string' ? cell : cell.text || ''))
                 );
               }
+              const asset = b.image_asset
+                ? {
+                    asset_id: b.image_asset.asset_id,
+                    file_path: b.image_asset.file_path,
+                    data_url: b.image_asset.data_url,
+                    mime_type: b.image_asset.mime_type,
+                    width: b.image_asset.width,
+                    height: b.image_asset.height,
+                    alt_text: b.image_asset.alt_text,
+                  }
+                : undefined;
               return {
                 id: b.id || `b-${idx + 1}`,
                 block_type: blockType,
-                text: b.text || '',
+                text: b.text ?? '',
                 source_page: b.source_page,
-                heading_level: b.heading_level || 1,
+                heading_level: b.level ?? b.heading_level ?? 1,
                 table_data: tableData || b.table_data,
                 caption: b.caption || b.table_structure?.caption,
+                image_asset: asset,
+                warnings: b.warnings || [],
                 reading_order_index: b.reading_order_index,
                 confidence: b.confidence,
               };
@@ -434,6 +468,58 @@ export class SidecarClient {
     });
   }
 
+  /**
+   * Re-render the already-converted document without re-parsing it (OUT-002, OUT-010).
+   *
+   * Returns true when the desktop bridge handled the request (including reporting its own
+   * error), and false when the caller should fall back to a full conversion — either because
+   * Tauri is unavailable or because the engine no longer holds the built document.
+   */
+  public async exportFromIR(
+    filePath: string,
+    settings: ConversionSettings,
+    callbacks: {
+      onError: (error: string) => void;
+      onSuccess: (result: { outputPath: string }) => void;
+    }
+  ): Promise<boolean> {
+    const t = getTauri();
+    if (!t?.invoke || !t?.listen) {
+      return false;
+    }
+    const invoke = t.invoke;
+    const listen = t.listen;
+
+    let unlistenSuccess: (() => void) | undefined;
+    let unlistenError: (() => void) | undefined;
+    const cleanup = () => {
+      if (unlistenSuccess) unlistenSuccess();
+      if (unlistenError) unlistenError();
+    };
+
+    try {
+      unlistenSuccess = await listen('sidecar-success', (event: any) => {
+        cleanup();
+        callbacks.onSuccess({ outputPath: event.payload.output_path });
+      });
+      unlistenError = await listen('sidecar-error', (event: any) => {
+        cleanup();
+        // No cached document in the engine: let the caller do a full conversion instead.
+        if (event.payload?.code === 'NO_IR') {
+          return;
+        }
+        callbacks.onError(event.payload.message || 'Export failed.');
+      });
+
+      await invoke('export_from_ir', { filePath, settings });
+      return true;
+    } catch (err: any) {
+      cleanup();
+      callbacks.onError(typeof err === 'string' ? err : err?.message || 'Export failed.');
+      return true;
+    }
+  }
+
   public cancelConversion(): void {
     this.isCancelled = true;
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
@@ -442,33 +528,34 @@ export class SidecarClient {
     }
   }
 
-  public async retryPage(page: number, maxAccuracy: boolean): Promise<DocumentIR> {
+  public async retryPage(
+    page: number,
+    maxAccuracy: boolean
+  ): Promise<{ text: string; reason?: string; confidence?: number } | null> {
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
-    if (win?.__TAURI__?.core?.invoke) {
-      try {
-        await win.__TAURI__.core.invoke('retry_page', {
-          jobId: 'active',
-          pageNumber: page,
-          maxAccuracy,
-        });
-      } catch (e) {
-        console.error('Tauri retry_page failed:', e);
-      }
+    if (!win?.__TAURI__?.core?.invoke) {
+      return null;
     }
-    return {
-      schema_version: '1.0.0',
-      source_file: 'retry',
-      source_mime: 'application/pdf',
-      page_count: 1,
-      blocks: [
-        {
-          id: `retry-p${page}`,
-          block_type: 'paragraph',
-          text: `Page ${page} re-recognized with ${maxAccuracy ? 'Maximum Accuracy (high DPI VLM)' : 'standard engine'}. Table layout accurately restored.`,
-          source_page: page,
-        },
-      ],
-    };
+    try {
+      const res = await win.__TAURI__.core.invoke('retry_page', {
+        jobId: 'active',
+        pageNumber: page,
+        maxAccuracy,
+      });
+      const flagged = (res && res.flagged_pages) || [];
+      const match =
+        flagged.find((f: any) => f.page_number === page) || flagged[0];
+      if (match) {
+        return {
+          text: match.converted_text || '',
+          reason: match.reason,
+          confidence: match.confidence,
+        };
+      }
+    } catch (e) {
+      console.error('Tauri retry_page failed:', e);
+    }
+    return null;
   }
 }
 

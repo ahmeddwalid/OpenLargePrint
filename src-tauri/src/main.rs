@@ -177,39 +177,64 @@ impl AppSession {
     }
 }
 
+/// Platform-specific sidecar binary names, in preference order.
+fn sidecar_binary_names() -> Vec<&'static str> {
+    #[cfg(target_os = "windows")]
+    {
+        vec![
+            "openlargeprint-sidecar.exe",
+            "openlargeprint-sidecar-x86_64-pc-windows-msvc.exe",
+        ]
+    }
+    #[cfg(target_os = "macos")]
+    {
+        vec![
+            "openlargeprint-sidecar",
+            "openlargeprint-sidecar-aarch64-apple-darwin",
+            "openlargeprint-sidecar-x86_64-apple-darwin",
+        ]
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        vec![
+            "openlargeprint-sidecar",
+            "openlargeprint-sidecar-x86_64-unknown-linux-gnu",
+            "openlargeprint-sidecar-aarch64-unknown-linux-gnu",
+        ]
+    }
+}
+
 fn resolve_sidecar_binary() -> PathBuf {
+    let names = sidecar_binary_names();
+
     // 1. Check relative to current executable (production bundle)
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            let candidate = exe_dir.join("openlargeprint-sidecar.exe");
-            if candidate.exists() {
-                return candidate;
-            }
-            let candidate_named = exe_dir.join("openlargeprint-sidecar-x86_64-pc-windows-msvc.exe");
-            if candidate_named.exists() {
-                return candidate_named;
-            }
-            let engine_sub = exe_dir.join("engine").join("openlargeprint-sidecar.exe");
-            if engine_sub.exists() {
-                return engine_sub;
+            for name in &names {
+                let candidate = exe_dir.join(name);
+                if candidate.exists() {
+                    return candidate;
+                }
+                let engine_sub = exe_dir.join("engine").join(name);
+                if engine_sub.exists() {
+                    return engine_sub;
+                }
             }
         }
     }
-    // 2. Check development binaries folder
-    let dev_bin = PathBuf::from("binaries/openlargeprint-sidecar-x86_64-pc-windows-msvc.exe");
-    if dev_bin.exists() {
-        return dev_bin;
+
+    // 2. Check development binaries folders
+    for dir in ["binaries", "src-tauri/binaries", "packaging/dist"] {
+        for name in &names {
+            let candidate = PathBuf::from(dir).join(name);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
     }
-    let dev_src = PathBuf::from("src-tauri/binaries/openlargeprint-sidecar-x86_64-pc-windows-msvc.exe");
-    if dev_src.exists() {
-        return dev_src;
-    }
-    let dist_bin = PathBuf::from("packaging/dist/openlargeprint-sidecar-x86_64-pc-windows-msvc.exe");
-    if dist_bin.exists() {
-        return dist_bin;
-    }
-    // 3. Fallback
-    PathBuf::from("openlargeprint-sidecar-x86_64-pc-windows-msvc.exe")
+
+    // 3. Fallback to the platform's canonical bare name
+    PathBuf::from(names[0])
 }
 
 #[repr(C)]
@@ -323,10 +348,23 @@ fn native_windows_save_file_dialog(
     None
 }
 
+/// Resolve the current user's home directory on any platform.
+fn user_home() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            return PathBuf::from(profile);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home);
+    }
+    PathBuf::from(".")
+}
+
 #[tauri::command]
 async fn get_system_paths() -> Result<serde_json::Value, String> {
-    let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-    let up = PathBuf::from(&user_profile);
+    let up = user_home();
     let downloads = up.join("Downloads");
     let desktop = up.join("Desktop");
     let documents = up.join("Documents");
@@ -423,8 +461,20 @@ async fn open_path_in_system(path: String) -> Result<(), String> {
         cmd.spawn().map_err(|e| format!("Failed to open file: {}", e))?;
         Ok(())
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
+        std::process::Command::new("open")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+        Ok(())
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
         Ok(())
     }
 }
@@ -443,8 +493,22 @@ async fn reveal_in_folder(path: String) -> Result<(), String> {
         cmd.spawn().map_err(|e| format!("Failed to reveal path: {}", e))?;
         Ok(())
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
+        std::process::Command::new("open")
+            .args(["-R", &p.to_string_lossy()])
+            .spawn()
+            .map_err(|e| format!("Failed to reveal path: {}", e))?;
+        Ok(())
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        // No portable "reveal/select" on Linux; open the containing folder instead.
+        let folder = p.parent().unwrap_or(&p);
+        std::process::Command::new("xdg-open")
+            .arg(folder)
+            .spawn()
+            .map_err(|e| format!("Failed to reveal path: {}", e))?;
         Ok(())
     }
 }
@@ -522,34 +586,16 @@ async fn inspect_file(
     }
 }
 
-#[tauri::command]
-async fn start_conversion(
-    app: AppHandle,
-    session: State<'_, AppSession>,
-    file_path: String,
-    settings: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    session.ensure_sidecar_running(&app).await?;
-    let job_id = uuid_short();
-    {
-        let mut active = session.active_job_id.lock().unwrap();
-        *active = Some(job_id.clone());
-    }
-
-    // Determine output file path
-    let input_path = Path::new(&file_path);
-    if !input_path.exists() {
-        return Err(format!("Input file not found: {}", file_path));
-    }
-
-    let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-    let user_downloads = PathBuf::from(&user_profile).join("Downloads");
-
+/// Resolve the destination path from the conversion/export settings.
+fn resolve_output_path(input_path: &Path, settings: &serde_json::Value) -> PathBuf {
+    let user_downloads = user_home().join("Downloads");
     let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
     let out_fmt = settings.get("outputFormat").and_then(|f| f.as_str()).unwrap_or("pdf");
     let ext = match out_fmt {
         "docx" => "docx",
         "reader" | "html" => "html",
+        // The searchable original is still a PDF on disk.
+        "searchable_pdf" => "pdf",
         _ => "pdf",
     };
 
@@ -570,7 +616,11 @@ async fn start_conversion(
             if p.is_absolute() {
                 p
             } else if trimmed.starts_with("Downloads") || trimmed.starts_with("downloads") {
-                let rest = trimmed.trim_start_matches("Downloads").trim_start_matches("downloads").trim_start_matches('\\').trim_start_matches('/');
+                let rest = trimmed
+                    .trim_start_matches("Downloads")
+                    .trim_start_matches("downloads")
+                    .trim_start_matches('\\')
+                    .trim_start_matches('/');
                 user_downloads.join(rest)
             } else if let Some(parent) = input_path.parent() {
                 if parent.is_absolute() {
@@ -588,30 +638,60 @@ async fn start_conversion(
         default_output_path
     };
 
-    // Ensure output path is strictly absolute
     if output_path.is_relative() {
         output_path = user_downloads.join(&output_path);
     }
-
-    // Ensure destination directory exists on disk
     if let Some(parent) = output_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    output_path
+}
 
-    let preset = settings.get("textSize").and_then(|t| t.as_u64()).map(|s| {
-        match s {
-            18 => "Comfortable",
-            20 => "Large",
-            24 => "Extra Large",
-            28 => "Very Large",
-            _ => "Large",
-        }
-    }).unwrap_or("Large");
+/// Map the UI text-size selection (or a custom point size) to a preset name.
+fn preset_from_settings(settings: &serde_json::Value) -> String {
+    if settings.get("customBodyPt").and_then(|v| v.as_f64()).is_some() {
+        return "Custom".to_string();
+    }
+    match settings.get("textSize").and_then(|t| t.as_u64()) {
+        Some(18) => "Comfortable".to_string(),
+        Some(20) => "Large".to_string(),
+        Some(24) => "Extra Large".to_string(),
+        Some(28) => "Very Large".to_string(),
+        _ => "Large".to_string(),
+    }
+}
 
+#[tauri::command]
+async fn start_conversion(
+    app: AppHandle,
+    session: State<'_, AppSession>,
+    file_path: String,
+    settings: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    session.ensure_sidecar_running(&app).await?;
+    let job_id = uuid_short();
+    {
+        let mut active = session.active_job_id.lock().unwrap();
+        *active = Some(job_id.clone());
+    }
+
+    // Determine output file path
+    let input_path = Path::new(&file_path);
+    if !input_path.exists() {
+        return Err(format!("Input file not found: {}", file_path));
+    }
+
+    let output_path = resolve_output_path(input_path, &settings);
+
+    let preset = preset_from_settings(&settings);
+
+    let out_fmt = settings.get("outputFormat").and_then(|f| f.as_str()).unwrap_or("pdf");
     let paper_size = settings.get("paperSize").and_then(|p| p.as_str()).unwrap_or("A4");
-    let routing_mode = settings.get("routingMode").and_then(|m| m.as_str()).unwrap_or("maximum_accuracy");
+    let routing_mode = settings.get("routingMode").and_then(|m| m.as_str()).unwrap_or("automatic");
     let monochrome = settings.get("monochrome").and_then(|m| m.as_bool()).unwrap_or(false);
     let page_range = settings.get("pageRange").and_then(|r| r.as_str());
+    let custom_body_pt = settings.get("customBodyPt").and_then(|v| v.as_f64());
+    let custom_line_spacing = settings.get("customLineSpacing").and_then(|v| v.as_f64());
 
     let mut convert_cmd = serde_json::json!({
         "id": job_id,
@@ -632,7 +712,76 @@ async fn start_conversion(
         }
     }
 
+    if let Some(pt) = custom_body_pt {
+        convert_cmd["custom_body_pt"] = serde_json::json!(pt);
+    }
+    if let Some(ls) = custom_line_spacing {
+        convert_cmd["custom_line_spacing"] = serde_json::json!(ls);
+    }
+
     session.send_command(&convert_cmd).await?;
+
+    Ok(serde_json::json!({
+        "job_id": job_id,
+        "status": "started",
+        "output_path": output_path.to_string_lossy()
+    }))
+}
+
+/// Re-render the currently loaded document without re-parsing it (OUT-002, OUT-010).
+#[tauri::command]
+async fn export_from_ir(
+    app: AppHandle,
+    session: State<'_, AppSession>,
+    file_path: String,
+    settings: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    session.ensure_sidecar_running(&app).await?;
+    let job_id = {
+        let active = session.active_job_id.lock().unwrap();
+        active.clone()
+    }
+    .ok_or_else(|| "No converted document is loaded. Convert it first.".to_string())?;
+
+    let input_path = Path::new(&file_path);
+    if !input_path.exists() {
+        return Err(format!("Input file not found: {}", file_path));
+    }
+
+    let output_path = resolve_output_path(input_path, &settings);
+    let out_fmt = settings.get("outputFormat").and_then(|f| f.as_str()).unwrap_or("pdf");
+    let preset = preset_from_settings(&settings);
+    let paper_size = settings.get("paperSize").and_then(|p| p.as_str()).unwrap_or("A4");
+    let monochrome = settings.get("monochrome").and_then(|m| m.as_bool()).unwrap_or(false);
+    let page_range = settings.get("pageRange").and_then(|r| r.as_str());
+    let custom_body_pt = settings.get("customBodyPt").and_then(|v| v.as_f64());
+    let custom_line_spacing = settings.get("customLineSpacing").and_then(|v| v.as_f64());
+
+    let mut export_cmd = serde_json::json!({
+        "id": job_id,
+        "command": "export",
+        "job_id": job_id,
+        "output_path": output_path.to_string_lossy(),
+        "preset": preset,
+        "paper_size": paper_size,
+        "export_format": out_fmt,
+        "include_page_markers": true,
+        "monochrome": monochrome,
+    });
+
+    if let Some(r) = page_range {
+        if !r.trim().is_empty() {
+            export_cmd["page_range"] = serde_json::json!(r.trim());
+        }
+    }
+    if let Some(pt) = custom_body_pt {
+        export_cmd["custom_body_pt"] = serde_json::json!(pt);
+    }
+    if let Some(ls) = custom_line_spacing {
+        export_cmd["custom_line_spacing"] = serde_json::json!(ls);
+    }
+
+    session.send_command(&export_cmd).await?;
 
     Ok(serde_json::json!({
         "job_id": job_id,
@@ -725,12 +874,17 @@ async fn retry_page(
 }
 
 fn uuid_short() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
-    let ms = SystemTime::now()
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    format!("job-{:x}", ms)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    format!("job-{:x}-{:x}-{:x}", nanos, pid, seq)
 }
 
 #[tauri::command]
@@ -812,6 +966,7 @@ fn main() {
             health_check,
             inspect_file,
             start_conversion,
+            export_from_ir,
             cancel_conversion,
             get_review_data,
             retry_page,

@@ -6,14 +6,26 @@ import gc
 import json
 import sys
 import uuid
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
 
-from openlargeprint.exporters import ExportOptions, PaperSize, PresetName
-from openlargeprint.ir.models import BlockType
+from openlargeprint.exporters import (
+    DocxExporter,
+    ExportOptions,
+    PaperSize,
+    PdfExporter,
+    PresetName,
+    ReaderExporter,
+    SearchablePdfExporter,
+)
+from openlargeprint.ir.models import BlockType, DocumentIR
 from openlargeprint.ocr.router import RoutingMode
 from openlargeprint.pipeline import PipelineOrchestrator
-from openlargeprint.security import detect_file_type, log_safe_info
+from openlargeprint.pipeline.orchestrator import parse_page_range
+from openlargeprint.security import JobAssetStore, detect_file_type, log_safe_info
+from openlargeprint.security.isolation import atomic_output
 from openlargeprint.sidecar.protocol import (
     CancelledEvent,
     CheckpointEvent,
@@ -48,21 +60,39 @@ class SidecarRunner:
         self._cancel_flags: Dict[str, bool] = {}
         self._review_stores: Dict[str, List[FlaggedPageReview]] = {}
         self._job_inputs: Dict[str, str] = {}
+        # Last built DocumentIR per job, so re-exports never re-extract or re-OCR (OUT-002).
+        self._ir_stores: Dict[str, DocumentIR] = {}
         self._orchestrator = PipelineOrchestrator()
+        self._output_lock = threading.Lock()
 
     def emit_event(self, event) -> None:
         """Write single JSON-Lines event to output stream and flush immediately."""
         raw_json = event.model_dump_json()
-        self.out_stream.write(raw_json + "\n")
-        self.out_stream.flush()
+        with self._output_lock:
+            self.out_stream.write(raw_json + "\n")
+            self.out_stream.flush()
 
     def run_loop(self) -> None:
         """Continuous event loop reading JSON-Lines until EOF."""
-        for line in self.in_stream:
-            line_str = line.strip()
-            if not line_str:
-                continue
-            self.execute_command_str(line_str)
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            pending = None
+            for line in self.in_stream:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    data = json.loads(line_str)
+                except ValueError:
+                    self.execute_command_str(line_str)
+                    continue
+                if isinstance(data, dict) and data.get("command") in ("cancel", "health"):
+                    self.execute_command_str(line_str)
+                elif pending is not None and not pending.done():
+                    self.emit_event(ErrorEvent(message="A document is already being processed. Cancel it or wait for it to finish.", code="BUSY"))
+                else:
+                    pending = worker.submit(self.execute_command_str, line_str)
+            if pending is not None:
+                pending.result()
 
     def execute_command_str(self, json_line: str) -> None:
         """Parse and execute a single JSON-Lines command."""
@@ -77,6 +107,9 @@ class SidecarRunner:
             )
             return
 
+        if not isinstance(cmd_data, dict):
+            self.emit_event(ErrorEvent(message="The command must be a JSON object.", code="INVALID_COMMAND"))
+            return
         command_name = cmd_data.get("command")
         cmd_id = cmd_data.get("id", str(uuid.uuid4())[:8])
 
@@ -87,6 +120,8 @@ class SidecarRunner:
                 self._handle_inspect(cmd_data, cmd_id)
             elif command_name == CommandType.CONVERT.value:
                 self._handle_convert(cmd_data, cmd_id)
+            elif command_name == CommandType.EXPORT.value:
+                self._handle_export(cmd_data, cmd_id)
             elif command_name == CommandType.CANCEL.value:
                 self._handle_cancel(cmd_data)
             elif command_name == CommandType.GET_REVIEW_DATA.value:
@@ -171,7 +206,7 @@ class SidecarRunner:
         paper_size_str = data.get("paper_size", "A4")
         export_format = data.get("export_format", "docx")
         routing_mode_str = data.get("routing_mode", "automatic")
-        page_range = data.get("page_range") if data.get("page_range") else None
+        page_range = data.get("page_range")
         include_markers = data.get("include_page_markers", True)
 
         if self._cancel_flags.get(job_id, False):
@@ -193,27 +228,39 @@ class SidecarRunner:
 
         monochrome = bool(data.get("monochrome", False))
 
+        custom_body_pt = data.get("custom_body_pt")
+        custom_line_spacing = data.get("custom_line_spacing")
         options = ExportOptions(
             preset=preset_enum,
             paper_size=paper_size_enum,
             include_page_markers=include_markers,
             monochrome=monochrome,
+            custom_body_pt=custom_body_pt,
+            custom_line_spacing=custom_line_spacing,
         )
 
-        routing_mode_raw = str(data.get("routing_mode", "maximum_accuracy")).lower().strip()
-        if "fast" in routing_mode_raw or "native_only" in routing_mode_raw:
+        # "Automatic" genuinely means native-first with escalation, not Maximum accuracy.
+        routing_mode_raw = str(data.get("routing_mode", "automatic")).lower().strip()
+        if routing_mode_raw in ("fast", "native_only", "native-only"):
             routing_enum = RoutingMode.FAST
         elif "max" in routing_mode_raw or "acc" in routing_mode_raw:
             routing_enum = RoutingMode.MAXIMUM_ACCURACY
-        elif routing_mode_raw in ("automatic", "auto"):
-            routing_enum = RoutingMode.MAXIMUM_ACCURACY
+        elif routing_mode_raw in ("automatic", "auto", ""):
+            routing_enum = RoutingMode.AUTOMATIC
         else:
             try:
-                routing_enum = RoutingMode(data.get("routing_mode", "Maximum accuracy"))
+                routing_enum = RoutingMode(data.get("routing_mode", RoutingMode.AUTOMATIC.value))
             except ValueError:
-                routing_enum = RoutingMode.MAXIMUM_ACCURACY
+                routing_enum = RoutingMode.AUTOMATIC
 
         orchestrator = PipelineOrchestrator(routing_mode=routing_enum)
+
+        # Persist extracted media outside the disposable workspace (IMG-001)
+        asset_store = JobAssetStore(job_id=job_id)
+        try:
+            asset_store.prune()
+        except Exception:
+            pass
 
         def on_progress(curr: int, total: int, stage: str, msg: str) -> None:
             pct = round((curr / max(1, total)) * 100.0, 1)
@@ -264,10 +311,14 @@ class SidecarRunner:
                 progress_callback=on_progress,
                 cancel_check=cancel_check,
                 checkpoint_callback=on_checkpoint,
+                asset_store=asset_store,
             )
         except InterruptedError:
             self.emit_event(CancelledEvent(job_id=job_id))
             return
+
+        # Retain the built DocumentIR so later exports skip extraction/OCR (OUT-002).
+        self._ir_stores[job_id] = res.document_ir
 
         # Populate converted_text for flagged pages from DocumentIR
         flagged_list = self._review_stores.get(job_id, [])
@@ -278,7 +329,7 @@ class SidecarRunner:
             ]
             fp.converted_text = "\n\n".join(b.text for b in matching_blocks[:3])
 
-        from openlargeprint.ir.serialization import document_to_dict
+        from openlargeprint.ir.serialization import document_to_ui_dict
 
         self.emit_event(
             SuccessEvent(
@@ -288,8 +339,88 @@ class SidecarRunner:
                 page_count=len(res.document_ir.pages),
                 flagged_count=len(flagged_list),
                 warnings=res.warnings,
-                document_ir=document_to_dict(res.document_ir),
+                document_ir=document_to_ui_dict(res.document_ir),
                 review_items=flagged_list,
+            )
+        )
+
+    def _handle_export(self, data: dict, job_id: str) -> None:
+        """Re-render an already-built DocumentIR without re-extraction or OCR (OUT-002, OUT-010).
+
+        This is the "export just this chapter, bigger" path: it reuses the IR built by the
+        preceding conversion, so changing size, paper, monochrome, or page selection is a pure
+        re-style rather than a fresh parse.
+        """
+        doc_ir = self._ir_stores.get(job_id)
+        if doc_ir is None:
+            self.emit_event(
+                ErrorEvent(
+                    job_id=job_id,
+                    message="The converted document is no longer loaded. Convert it again before exporting.",
+                    code="NO_IR",
+                )
+            )
+            return
+
+        output_path = Path(data.get("output_path", "")).resolve()
+        export_format = str(data.get("export_format", "pdf")).lower()
+
+        try:
+            preset_enum = PresetName(data.get("preset", "Large"))
+        except ValueError:
+            preset_enum = PresetName.LARGE
+        try:
+            paper_size_enum = PaperSize(data.get("paper_size", "A4"))
+        except ValueError:
+            paper_size_enum = PaperSize.A4
+
+        options = ExportOptions(
+            preset=preset_enum,
+            paper_size=paper_size_enum,
+            include_page_markers=bool(data.get("include_page_markers", True)),
+            monochrome=bool(data.get("monochrome", False)),
+            custom_body_pt=data.get("custom_body_pt"),
+            custom_line_spacing=data.get("custom_line_spacing"),
+        )
+
+        # Apply an optional source-page selection against the retained IR (OUT-010).
+        target_ir = doc_ir
+        page_range = data.get("page_range")
+        if page_range:
+            total = len(doc_ir.pages) or doc_ir.metadata.page_count
+            selected = parse_page_range(page_range, total)
+            if selected:
+                target_ir = doc_ir.slice_by_source_pages_set(selected)
+
+        with atomic_output(output_path) as temporary:
+            if export_format == "searchable_pdf":
+                source = self._job_inputs.get(job_id)
+                if not source or not Path(source).is_file():
+                    raise FileNotFoundError("The original document is unavailable for this export.")
+                SearchablePdfExporter().export(
+                    Path(source), temporary, ocr_engine=self._orchestrator.pdf_importer.ocr_engine
+                )
+                result_format = "searchable_pdf"
+            elif export_format == "pdf":
+                PdfExporter().export(target_ir, temporary, options)
+                result_format = "pdf"
+            elif export_format in ("reader", "html", "htm"):
+                ReaderExporter().export(target_ir, temporary, options)
+                result_format = "reader"
+            else:
+                DocxExporter().export(target_ir, temporary, options)
+                result_format = "docx"
+
+        self.emit_event(
+            SuccessEvent(
+                job_id=job_id,
+                output_path=str(output_path),
+                format=result_format,
+                page_count=len(target_ir.pages),
+                flagged_count=0,
+                warnings=[],
+                document_ir=None,
+                review_items=[],
             )
         )
 
@@ -325,34 +456,24 @@ class SidecarRunner:
 
         flagged = self._review_stores.get(job_id, [])
         input_path = self._job_inputs.get(job_id, "")
-        # Real re-processing when the source file is known; otherwise fall back
-        # to marking the stored review item verified (keeps old unit test green).
-        if input_path and Path(input_path).exists():
-            try:
-                retried = self._orchestrator.retry_page(
-                    input_path, page_number=page_num, routing_mode=RoutingMode.MAXIMUM_ACCURACY
-                )
-                texts = [b.text for b in retried.blocks if b.text]
-                new_text = "\n\n".join(texts[:3])
-                for fp in flagged:
-                    if fp.page_number == page_num:
-                        fp.reason = "Retried with maximum accuracy — verified"
-                        fp.confidence = 0.98
-                        if new_text:
-                            fp.converted_text = new_text
-                        break
-            except Exception:
-                for fp in flagged:
-                    if fp.page_number == page_num:
-                        fp.reason = "Retried with maximum accuracy — verified"
-                        fp.confidence = 0.98
-                        break
-        else:
-            for fp in flagged:
-                if fp.page_number == page_num:
-                    fp.reason = "Retried with maximum accuracy — verified"
-                    fp.confidence = 0.98
-                    break
+        if not input_path or not Path(input_path).is_file():
+            self.emit_event(ErrorEvent(job_id=job_id, message="The original document is unavailable. Reopen it to retry this page.", code="FILE_NOT_FOUND"))
+            return
+        try:
+            retried = self._orchestrator.retry_page(
+                input_path, page_number=page_num, routing_mode=RoutingMode.MAXIMUM_ACCURACY
+            )
+        except Exception as error:
+            self._handle_error(error, job_id)
+            return
+        blocks = [b for b in retried.blocks if b.type != BlockType.PAGE_MARKER]
+        warnings = [warning for block in blocks for warning in block.warnings]
+        for item in flagged:
+            if item.page_number == page_num:
+                item.reason = "; ".join(warnings) if warnings else "Page processed again. Compare it with the original before accepting."
+                item.confidence = min((b.confidence for b in blocks), default=0.0)
+                item.converted_text = "\n\n".join(b.text for b in blocks if b.text)
+                break
 
         summary = (
             f"{len(flagged)} pages may need review"
@@ -388,8 +509,11 @@ class SidecarRunner:
         elif "TimeoutError" in err_type:
             plain_msg = "The operation timed out. For large files, try selecting a smaller page range."
             code = "TIMEOUT"
+        elif isinstance(err, ValueError):
+            plain_msg = "The document or conversion settings are invalid. Check the file, page selection, text size, and spacing."
+            code = "INVALID_INPUT"
         else:
-            plain_msg = f"The document could not be converted: {err_msg}"
+            plain_msg = "The document could not be converted. The original is unchanged. Try a smaller page range or another output format."
             code = "CONVERSION_ERROR"
 
         self.emit_event(

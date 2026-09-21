@@ -51,6 +51,7 @@ class PptxImporter(BaseImporter):
         blocks: List[Block] = []
         pages: List[PageMetadata] = []
         img_counter = 0
+        document_warnings: List[str] = []
 
         # Slide dimensions in points (72 points per inch; pptx units are EMUs: 1 pt = 12700 EMUs)
         slide_w_pt = round(float(prs.slide_width) / 12700.0, 2)
@@ -156,8 +157,12 @@ class PptxImporter(BaseImporter):
                                 extraction_method=ExtractionMethod.OFFICE_IMPORT,
                             )
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        # Never drop a figure silently.
+                        document_warnings.append(
+                            f"A slide image could not be imported ({type(exc).__name__}); "
+                            "it may be missing from the output"
+                        )
                     continue
 
                 # Tables (TBL-001)
@@ -193,8 +198,18 @@ class PptxImporter(BaseImporter):
                                     extraction_method=ExtractionMethod.NATIVE,
                                 )
                             )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Never drop speaker notes silently (OFF-001, SPEC §2.3).
+                    document_warnings.append(
+                        f"Speaker notes on slide {slide_idx} could not be imported "
+                        f"({type(exc).__name__}); they may be missing from the output"
+                    )
+
+        # Surface anything that could not be imported (never drop silently).
+        if document_warnings:
+            target = next((b for b in blocks if b.type != BlockType.PAGE_MARKER), None)
+            if target is not None:
+                target.warnings.extend(document_warnings)
 
         doc_title = first_title or path.stem.replace("_", " ").title()
 

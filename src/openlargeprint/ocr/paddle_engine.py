@@ -6,8 +6,10 @@ import time
 from typing import Optional, Tuple
 from PIL import Image
 from openlargeprint.security.isolation import log_safe_info
-from .base import CancellationToken, DocumentOcrEngine, EngineCapabilities, EnginePageResult, OcrDetectedLine
+from .base import CancellationToken, EngineCapabilities, EnginePageResult, OcrDetectedLine
 
+MAX_CPU_THREADS = 8
+INTER_OP_THREADS = 1
 
 class PaddleRapidOcrEngine:
     """CPU-friendly PaddleOCR engine adapter running on-device via ONNX Runtime."""
@@ -22,6 +24,18 @@ class PaddleRapidOcrEngine:
             import os
             import onnxruntime
             from rapidocr_onnxruntime import RapidOCR
+            from pathlib import Path
+            import rapidocr_onnxruntime
+            from openlargeprint.models import PINNED_MODELS, ModelManager, ModelIntegrityError
+
+            model_root = Path(rapidocr_onnxruntime.__file__).parent / "models"
+            model_paths = {}
+            for stage, key in (("det", "ch_PP-OCRv4_det"), ("cls", "ch_ppocr_mobile_v2.0_cls"), ("rec", "ch_PP-OCRv4_rec")):
+                path = model_root / f"{key}_infer.onnx"
+                artifact = PINNED_MODELS.models[key]
+                if ModelManager.compute_sha256(path) != artifact.sha256:
+                    raise ModelIntegrityError("The bundled recognition model failed integrity verification. Reinstall the application.")
+                model_paths[f"{stage}_model_path"] = str(path)
 
             available_providers = onnxruntime.get_available_providers()
             has_cuda = "CUDAExecutionProvider" in available_providers
@@ -29,36 +43,36 @@ class PaddleRapidOcrEngine:
             has_trt = "TensorrtExecutionProvider" in available_providers
 
             gpu_available = self.use_gpu and (has_cuda or has_dml or has_trt)
-            cpu_threads = min(8, max(1, (os.cpu_count() or 4)))
+            cpu_threads = min(MAX_CPU_THREADS, max(1, (os.cpu_count() or 4) - 1))
 
-            hw_desc = "NVIDIA CUDA GPU" if has_cuda else ("DirectML GPU" if has_dml else f"Multi-core CPU ({cpu_threads} threads)")
+            hw_desc = "NVIDIA CUDA GPU" if gpu_available and has_cuda else ("DirectML GPU" if gpu_available and has_dml else f"Multi-core CPU ({cpu_threads} threads)")
             log_safe_info(f"Initializing PaddleOCR high-performance engine via {hw_desc}")
 
             # Configure optimal execution parameters for high-tier hardware
             cfg = {
-                "use_cuda": gpu_available and has_cuda,
-                "use_dml": gpu_available and has_dml,
+                "det_use_cuda": gpu_available and has_cuda,
+                "cls_use_cuda": gpu_available and has_cuda,
+                "rec_use_cuda": gpu_available and has_cuda,
+                "det_use_dml": gpu_available and has_dml and not has_cuda,
+                "cls_use_dml": gpu_available and has_dml and not has_cuda,
+                "rec_use_dml": gpu_available and has_dml and not has_cuda,
                 "intra_op_num_threads": cpu_threads,
-                "inter_op_num_threads": min(4, cpu_threads),
+                "inter_op_num_threads": INTER_OP_THREADS,
             }
 
-            self._engine = RapidOCR(
-                Det=cfg,
-                Cls=cfg,
-                Rec=cfg,
-            )
+            self._engine = RapidOCR(**cfg, **model_paths)
         return self._engine
 
     def capabilities(self) -> EngineCapabilities:
         import onnxruntime
         providers = onnxruntime.get_available_providers()
-        is_gpu = any(p in providers for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "TensorrtExecutionProvider"))
+        is_gpu = self.use_gpu and any(p in providers for p in ("CUDAExecutionProvider", "DmlExecutionProvider"))
 
         return EngineCapabilities(
-            engine_name="PaddleOCR-PP-OCRv4/v6 (RapidOCR)",
-            supports_layout=True,
+            engine_name="PP-OCRv4 (RapidOCR)",
+            supports_layout=False,
             supports_confidence=True,
-            supported_languages=["en", "ar", "fr", "de", "es", "zh"],
+            supported_languages=["en", "zh"],
             is_gpu_accelerated=is_gpu,
         )
 

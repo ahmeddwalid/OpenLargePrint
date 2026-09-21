@@ -10,6 +10,7 @@ from typing import Optional
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, TextDirection
 from openlargeprint.security.isolation import log_safe_info
 from .base import BaseExporter, ExportOptions
+from .fonts import css_font_stack
 
 
 class ReaderExporter(BaseExporter):
@@ -54,10 +55,10 @@ class ReaderExporter(BaseExporter):
   <title>{title} — OpenLargePrint Reader</title>
   <style>
     :root {{
-      --base-font-size: {int(options.body_pt)}px;
+      --base-font-size: {options.body_pt:g}pt;
       --line-height: {options.line_spacing};
       --reading-width: 85ch;
-      --reading-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      --reading-font-family: {css_font_stack(options.font_family, options.fallback_font)};
       --reading-font-arabic: "Amiri", "Scheherazade New", "Traditional Arabic", "Noto Sans Arabic", "Geeza Pro", "Arial", sans-serif;
       --bg-color: #fcfbf9;
       --surface-color: #ffffff;
@@ -381,8 +382,19 @@ class ReaderExporter(BaseExporter):
     <!-- Font Size Controls (OUT-002) -->
     <div class="toolbar-group" aria-label="Text Size Adjustment">
       <button id="btn-size-dec" class="toolbar-btn" aria-label="Decrease Text Size" title="Smaller text (A-)">A−</button>
-      <span id="current-size-label" class="size-indicator" aria-live="polite">{int(options.body_pt)}px</span>
+      <span id="current-size-label" class="size-indicator" aria-live="polite">{options.body_pt:g}pt</span>
       <button id="btn-size-inc" class="toolbar-btn" aria-label="Increase Text Size" title="Larger text (A+)">A+</button>
+    </div>
+
+    <!-- Reading Width Control (DESIGN.md §8) -->
+    <div class="toolbar-group" aria-label="Reading Width">
+      <label for="reading-width-select" style="font-weight: 600;">Width</label>
+      <select id="reading-width-select" class="toolbar-btn" aria-label="Reading width">
+        <option value="55">Narrow</option>
+        <option value="70">Comfortable</option>
+        <option value="85" selected>Wide</option>
+        <option value="110">Full</option>
+      </select>
     </div>
 
     <!-- Line Spacing Controls (OUT-002) -->
@@ -422,7 +434,7 @@ class ReaderExporter(BaseExporter):
 
   <!-- Instant client-side re-styling script (OUT-002, zero network traffic SEC-009) -->
   <script>
-    let currentSize = {int(options.body_pt)};
+    let currentSize = {options.body_pt:g};
     const root = document.documentElement;
     const sizeLabel = document.getElementById("current-size-label");
 
@@ -430,8 +442,8 @@ class ReaderExporter(BaseExporter):
       if (newSize < 14) newSize = 14;
       if (newSize > 48) newSize = 48;
       currentSize = newSize;
-      root.style.setProperty("--base-font-size", currentSize + "px");
-      if (sizeLabel) sizeLabel.textContent = currentSize + "px";
+      root.style.setProperty("--base-font-size", currentSize + "pt");
+      if (sizeLabel) sizeLabel.textContent = currentSize + "pt";
     }}
 
     document.getElementById("btn-size-dec").addEventListener("click", () => setFontSize(currentSize - 2));
@@ -440,6 +452,11 @@ class ReaderExporter(BaseExporter):
     document.getElementById("btn-spacing-14").addEventListener("click", () => root.style.setProperty("--line-height", "1.4"));
     document.getElementById("btn-spacing-15").addEventListener("click", () => root.style.setProperty("--line-height", "1.5"));
     document.getElementById("btn-spacing-16").addEventListener("click", () => root.style.setProperty("--line-height", "1.6"));
+
+    const widthSelect = document.getElementById("reading-width-select");
+    if (widthSelect) {{
+      widthSelect.addEventListener("change", () => root.style.setProperty("--reading-width", widthSelect.value + "ch"));
+    }}
 
     document.getElementById("theme-light").addEventListener("click", () => root.setAttribute("data-theme", "light"));
     document.getElementById("theme-sepia").addEventListener("click", () => root.setAttribute("data-theme", "sepia"));

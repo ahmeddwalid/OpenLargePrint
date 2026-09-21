@@ -26,7 +26,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install Python dependencies
-        run: uv sync --dev
+        run: uv sync --locked --dev --extra dev --python 3.12
 
       - name: Install Node.js 20
         uses: actions/setup-node@v4
@@ -42,9 +42,18 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Validate engine and frontend
+        run: |
+          uv run pytest tests/ -q
+          npm --prefix ui test -- --run
       - name: Package standalone Python engine sidecar
         run: uv run python packaging/build_sidecar.py
 
+      - name: Smoke-test packaged engine
+        shell: pwsh
+        run: |
+          '{"command":"health"}' | & .\src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe sidecar
+          if ($LASTEXITCODE -ne 0) { throw "Packaged engine failed" }
       - name: Build Windows NSIS installer and portable package
         run: powershell -ExecutionPolicy Bypass -File packaging/build_windows_app.ps1 -SkipSidecarBuild
 
@@ -58,14 +67,51 @@ jobs:
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ github.ref_name }}
           name: OpenLargePrint ${{ github.ref_name }}
-          draft: false
+          draft: true
           prerelease: false
           generate_release_notes: true
           files: |
             packaging/dist/OpenLargePrint_*_x64-setup.exe
             packaging/dist/OpenLargePrint_*_windows_x64_portable.zip
             packaging/dist/SHA256SUMS.txt
+
+  build-linux:
+    name: Build Linux x86_64 packages
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install desktop prerequisites
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Install and validate
+        run: |
+          uv sync --locked --dev --extra dev --python 3.12
+          npm --prefix ui ci
+          uv run pytest tests/ -q
+          npm --prefix ui test -- --run
+      - name: Package engine
+        run: uv run python packaging/build_sidecar.py
+      - name: Smoke-test packaged engine
+        run: |
+          printf '%s\n' '{"command":"health"}' | src-tauri/binaries/openlargeprint-sidecar-x86_64-unknown-linux-gnu sidecar
+      - name: Build Linux bundles
+        working-directory: src-tauri
+        run: npx -y @tauri-apps/cli@2 build --bundles deb,rpm,appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openlargeprint-linux-x86_64
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
