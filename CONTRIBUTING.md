@@ -1,6 +1,6 @@
 # Contributing to OpenLargePrint
 
-OpenLargePrint welcomes contributions. All contributions are submitted under the Apache License, Version 2.0. No Contributor License Agreement (CLA) is required.
+OpenLargePrint welcomes contributions. All contributions are submitted under the GNU General Public License v3.0 or later, matching the project license in [LICENSE](LICENSE). No Contributor License Agreement (CLA) is required.
 
 Before starting work on a contribution, read [SPEC.md](SPEC.md) and [DESIGN.md](DESIGN.md) to understand product requirements and system architecture. In addition, review [AGENTS.md](AGENTS.md) for testing guidelines, security boundaries, and copy standards.
 
@@ -31,7 +31,7 @@ Install the following development tools:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/openlargeprint/openlargeprint.git
+   git clone https://github.com/ahmeddwalid/OpenLargePrint.git
    cd openlargeprint
    ```
 
@@ -160,6 +160,22 @@ Before submitting a pull request, verify the following items:
 - [ ] Confirm no external network calls are made during the conversion process ([`SEC-009`](SPEC.md)).
 - [ ] If changing UI components, verify the screen passes the accessibility checklist and visual craft rules in [AGENTS.md §6 and §7](AGENTS.md#L57-L146).
 
+## Visual verification harness
+
+The anti-slop gate in [AGENTS.md §7](AGENTS.md) requires screenshots of every finished screen. A small
+harness under [`ui/`](ui/audit.html) renders the file picker flow, progress, review, and Reader screens
+against a recorded conversion fixture ([`ui/audit-data.json`](ui/audit-data.json)) so screenshots can be
+regenerated without a fresh document conversion:
+
+```bash
+cd ui
+npm run dev
+# open http://localhost:1420/audit.html?view=review&theme=sepia
+```
+
+`view` accepts `review`, `complete`, `reader`, and `progress`; `theme` accepts the app theme names;
+`scale=200%` exercises the 200% text-enlargement check ([`A11Y-002`](SPEC.md)).
+
 ## Licensing of Contributions
 
-All contributions submitted to OpenLargePrint become part of the project codebase under the terms of the Apache License, Version 2.0. By contributing, you agree that your work is licensed under Apache-2.0 without requiring a separate contributor license agreement.
+All contributions submitted to OpenLargePrint become part of the project codebase under the terms of the GNU General Public License v3.0 or later, the same license as the [LICENSE](LICENSE) file. By contributing, you agree that your work is licensed under GPL-3.0-or-later without requiring a separate contributor license agreement.

@@ -31,7 +31,7 @@ Quality reports distinguish measured text error from missing reference transcrip
 - **Multiple output formats**: Exports reflowed large-print PDF files (A4 and A3 paper sizes), editable large-print DOCX documents, and an in-app interactive Reader ([`OUT-001`](SPEC.md) through [`OUT-007`](SPEC.md)).
 - **Source provenance and side-by-side review**: Each reflowed block retains its source page number and bounding box coordinates. Pages with low OCR confidence are flagged for side-by-side review against the original page image ([`PDF-006`](SPEC.md), [`UI-004`](SPEC.md)).
 - **Accessible interface**: Built to WCAG 2.2 standards with controls meeting or exceeding 48px target sizes, visible keyboard focus indicators, high-contrast color modes, and full operability at 200% text enlargement ([`A11Y-001`](SPEC.md) through [`A11Y-005`](SPEC.md)).
-- **Update system**: Checks GitHub releases in the background and allows downloading and applying updates directly from the app without manual browser navigation. Respects offline isolation and can be toggled off in settings.
+- **Opt-in update system**: With update checks enabled, the app checks GitHub releases and can download a checksum-verified installer directly from the app without manual browser navigation. Disabled by default; fully separate from offline document conversion.
 
 ## Supported Formats
 
@@ -86,11 +86,11 @@ The installer is not code-signed, so Windows SmartScreen may warn on first run. 
 
 ### Software Updates
 
-OpenLargePrint includes an update checker that communicates with GitHub Releases:
-- On startup, the app checks if a newer version is available.
-- When an update is detected, an accessible notification banner appears with release details and a direct "Download and install update" action.
-- Clicking the update button downloads the verified installer and initiates the upgrade without requiring the user to navigate the GitHub website manually.
-- The update check is completely separate from document conversion. Users in air-gapped environments can disable update checks under "More options".
+OpenLargePrint includes an opt-in update checker that communicates with GitHub Releases:
+- Update checks are disabled by default and make no network request until enabled under "More options".
+- When enabled and a newer version is detected, an accessible notification banner appears with release details and a direct "Download and install update" action.
+- The download is restricted to the OpenLargePrint release repository, must carry a valid SHA-256 release digest, and is verified in-process before the installer is launched. Windows installers are the only asset offered; other platforms show the release page instead.
+- The update check is completely separate from document conversion, which never touches the network. Users in air-gapped environments can simply leave update checks disabled.
 
 ## System Requirements
 

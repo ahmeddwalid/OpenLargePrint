@@ -1,7 +1,7 @@
 # OpenLargePrint — Handoff Notes
 
-Status: work in progress on branch `main`, **uncommitted**. This file summarizes a
-reliability/output-fidelity pass so the next agent can continue without re-deriving context.
+Status: **complete and committed** on branch `main`, pushed to GitHub. This file summarizes
+the reliability/output-fidelity passes so the next agent can continue without re-deriving context.
 
 Full plan: `~/.commandcode/plans/openlargeprint-reliability-fix-plan.md`.
 
@@ -107,26 +107,34 @@ A subsequent agent extended this work. Verified present in the tree:
   `test_ocr_engine.py`, `test_page_range_slicing.py`, `test_sidecar_protocol.py`,
   and `tests/test_output_fidelity.py`.
 
-## Remaining work
+## Final state (all work committed)
 
-1. ~~UI tests~~ Done — **11 passed** (`cd ui && NODE_ENV=test npx vitest run`); `npx tsc --noEmit` clean.
-2. ~~Rust check~~ Done — `cargo check` passes (only pre-existing Windows-only unused warnings on Linux).
-3. ~~Phase 7 doc links~~ Done — `CHANGELOG.md` / `CONTRIBUTING.md` / `SIGNING.md` now use
-   repo-relative links; `sbom.json` / `DESIGN.md` updated by the second pass; `CHANGELOG.md`
-   gained an `[Unreleased]` entry.
-4. **Still open:**
-   - Confirm `packaging/build_sidecar.py` / `build_windows_app.ps1` bundle any new runtime assets
-     (note: `fonts.py` resolves host fonts, so no font files are added to the bundle).
-   - ~~DOCX section-break page semantics~~ Done — paragraph-level non-continuous `w:sectPr`
-     now advances the source page (`importers/office/docx.py`), covered by
-     `test_docx_section_break_advances_page`. PPTX (one page per slide) was already correct.
-   - ~~Reader re-export from a cached `DocumentIR`~~ Done — the sidecar retains the built IR per
-     job (`sidecar/runner.py` `_ir_stores`) and a new `export` command re-renders from it without
-     re-extraction/OCR; wired through `src-tauri` (`export_from_ir`) and the UI
-     (`sidecar.exportFromIR`, with a full-conversion fallback). Covered by
-     `test_sidecar_export_reuses_built_document` / `test_sidecar_export_without_document_reports_no_ir`.
-   - Deferred: `BenchmarkCase.expected_*` fields still unused (metrics are real, but not compared
-     against per-case expectations).
+A third pass completed the review flow, hardened the update system, and redesigned the interface:
+
+- **Review flow** (`UI-004`, `UI-005`, `OUT-002`): flagged sections are reviewed per block; the
+  original page is shown as a bounded preview image; retry shows the repeated recognition result
+  for comparison; corrections typed in review are applied on export via `text_edits`.
+- **Update hardening** (`SEC-006`, `SEC-009`): checks are opt-in (no network before opt-in);
+  downloads are restricted to the OpenLargePrint GitHub release repository and require a valid
+  SHA-256 digest, verified in-process with the `sha2` crate.
+- **Interface redesign** (`VIS-001..004`, `A11Y-001..005`, `UI-001`): rem-based type scale on
+  bundled Source Sans 3 and Noto Sans Arabic (OFL, recorded in `sbom.json`); olive accent on warm
+  sepia; flat option strips; export location behind a "Save location" disclosure; 48px targets;
+  reduced-motion and forced-colors media queries. `ui/audit.*` regenerate VIS screenshots.
+- **Linux dialogs** (`PKG-001`, `SEC-005`): open/save dialogs via `tauri-plugin-dialog`.
+- **Demo fallbacks removed** (`UI-005`): the sidecar client reports a plain-language error when the
+  desktop bridge is unavailable instead of synthesizing a mock conversion.
+
+Verified on this machine: 148 pytest passed, 12 vitest passed, `tsc --noEmit` clean, `cargo check`
+clean, `cargo test` clean, production `npm run build` succeeds with the fonts in `ui/dist/fonts/`.
+
+## Still open (release blockers, unchanged)
+
+- Optional higher-accuracy OCR pack and verified Arabic scan recognition (`OCR-002..003`, `LANG-002`).
+- `BenchmarkCase.expected_*` fields still unused (metrics are real, but not compared against
+  per-case expectations).
+- Packaged Windows CPU/GPU corpus runs, Linux desktop tests, screen-reader checks, physical printing
+  at 100% scale, and target-machine RAM/VRAM measurement (`PKG-001`, `PERF-002`, `QA-001`).
 
 ---
 
@@ -146,7 +154,8 @@ cd ui && npx tsc --noEmit
 cd src-tauri && cargo check
 ```
 
-## Not committed
+## Commit history
 
-All changes are in the working tree only. Commit messages should follow the existing
-`type(scope): summary (REQ-IDs)` style seen in `git log`.
+All three passes are committed to `main` and pushed to GitHub. Commit messages follow the
+existing `type(scope): summary (REQ-IDs)` style seen in `git log`; the final commits are the UI
+redesign, the review/update hardening, and the documentation sync.

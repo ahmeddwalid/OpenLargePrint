@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Interface redesign (`VIS-001..004`, `A11Y-001..005`, `UI-001`)**: the whole UI moved to a rem-based type scale built on bundled Source Sans 3 with Noto Sans Arabic for Arabic text (both OFL, recorded in the SBOM), so 200% text enlargement scales the chrome and the Reader together. The accent moved from terracotta to an olive tone on warm sepia, format and text-size choices became flat option strips instead of a repeated card grid, the export location moved behind a "Save location" disclosure, and reduced-motion and forced-colors media queries were added. All primary controls now target 48px.
+- **Review flow reworked (`UI-004`, `UI-005`, `OUT-002`)**: flagged sections are reviewed per block rather than per page; the original page is shown as a bounded preview image next to the converted text; retrying a section shows the repeated recognition result for comparison instead of silently replacing the text; corrections typed during review are carried into exports.
+- **Update system hardened (`SEC-006`, `SEC-009`)**: update checks are now opt-in and make no network request until enabled; the installer download is restricted to the OpenLargePrint GitHub release repository and requires a valid SHA-256 release digest, verified in-process instead of through PowerShell; on non-Windows systems no installer asset is offered.
+- **Native dialogs on Linux (`SEC-005`, `PKG-001`)**: the open/save file dialogs now use the Tauri dialog plugin outside Windows, so Linux builds no longer require manual path entry.
+- **Honest default routing (`UI-001`, `OCR-002`)**: "Automatic" is the default routing mode; the unavailable higher-accuracy pack is disabled in Advanced options instead of being presented as selectable.
+- **Removed demo fallbacks (`UI-005`)**: the frontend no longer synthesizes a mock document or progress loop when the desktop bridge is unavailable; it reports a plain-language error instead.
+- **Vector figure retention (`IMG-002`)**: the vector-figure region fallback now also captures single-shape artwork while keeping the area and size guards that exclude rules and table hairlines.
+
 ## [0.2.0] - 2026-09-21
 
 Reliability and output-fidelity hardening. These changes fix the paths that caused converted

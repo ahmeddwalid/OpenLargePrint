@@ -317,6 +317,13 @@ This is closer to a library or bookbinding object than a SaaS dashboard. The aud
 2. **Review against the brief.** For each choice, ask whether it's what any similar app would default to, or a decision made for this reader and this content. Revise anything that's a default rather than a choice, and note what changed and why.
 3. **Build, then critique.** Screenshot every finished screen and check it against `AGENTS.md §7` before calling it done.
 
+### Shipped token system (as implemented in `ui/src/styles/theme.css`)
+
+- **Palette**: warm sepia backgrounds (`#f3efdf` primary, `#e9e5d8` surface, `#dddcca` raised), ink-toned text (`#2d261e` primary), and an olive accent (`#485a34`, hover `#344425`) chosen for reading comfort rather than as a default accent; a high-contrast dark theme mirrors the same hues. Warning/success tones are reserved for semantic states.
+- **Typefaces**: Source Sans 3 (bundled, OFL) as the interface family with a variable 200–900 weight range; Noto Sans Arabic (bundled, OFL) for Arabic UI and Reader text; Georgia as the Reader serif option. Both bundles ship their OFL license files and are recorded in `sbom.json`.
+- **Scale and targets**: rem-based type scale so the 200% text-enlargement setting scales chrome and Reader together; primary controls target 48 CSS px (`A11Y-001`); focus rings are 3px in the accent color.
+- **Structure**: format and text-size choices are flat bordered option strips rather than repeated cards; the export destination lives behind a "Save location" disclosure to keep the main flow at three decisions (`UI-001`); reduced-motion and forced-colors media queries are active.
+
 ### Known AI-generated-design tells to avoid as unexamined defaults
 
 - A warm cream background with a high-contrast serif display and a terracotta/warm-clay accent.
