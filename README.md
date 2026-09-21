@@ -1,8 +1,10 @@
-# OpenLargePrint
+<p align="center">
+  <img src="logo.svg" alt="OpenLargePrint logo" width="180">
+</p>
 
-Open-source, local-first desktop application that reconstructs dense PDFs, law books, and Office documents into large-print publications for low-vision readers.
+<h1 align="center">OpenLargePrint</h1>
 
-![OpenLargePrint interface](docs/screenshot-home.png)
+<p align="center">Open-source, local-first desktop application that reconstructs dense PDFs, law books, and Office documents into large-print publications for low-vision readers.</p>
 
 ## Overview
 
