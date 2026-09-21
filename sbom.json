@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "OpenLargePrint",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "project_license": "GPL-3.0-or-later",
   "description": "Software Bill of Materials (SBOM) and license inventory as mandated by LIC-001 and LIC-002",
   "dependencies": [
@@ -136,6 +136,52 @@
       "network_behavior": "none",
       "parses_untrusted_content": false,
       "purpose": "Underlying tabular data serialisation helper for python-pptx charts and tables"
+    },
+    {
+      "component": "tauri-plugin-dialog",
+      "version": "2.7.3",
+      "code_license": "Apache-2.0 OR MIT",
+      "model_weight_license": null,
+      "download_source": "crates.io",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Native open/save dialogs on Linux"
+    },
+    {
+      "component": "sha2",
+      "version": "0.10.9",
+      "code_license": "Apache-2.0 OR MIT",
+      "model_weight_license": null,
+      "download_source": "crates.io",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Mandatory Windows installer SHA-256 verification"
+    },
+    {
+      "component": "Source Sans 3",
+      "version": "bundled",
+      "code_license": "OFL-1.1",
+      "model_weight_license": null,
+      "download_source": "https://github.com/google/fonts/tree/main/ofl/sourcesans3",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Offline desktop interface typography",
+      "sha256": "042fe2cc0b933e328410d7acbd0aa6a1873dca5aef81875f4bc214b08825c7b9"
+    },
+    {
+      "component": "Noto Sans Arabic",
+      "version": "bundled",
+      "code_license": "OFL-1.1",
+      "model_weight_license": null,
+      "download_source": "https://github.com/google/fonts/tree/main/ofl/notosansarabic",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Offline Arabic interface and Reader typography",
+      "sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e"
     }
   ],
   "models": [

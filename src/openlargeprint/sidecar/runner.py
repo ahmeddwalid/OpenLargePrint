@@ -9,7 +9,7 @@ import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO
+from typing import Dict, List, Optional, TextIO
 
 from openlargeprint.exporters import (
     DocxExporter,
@@ -99,7 +99,7 @@ class SidecarRunner:
         """Parse and execute a single JSON-Lines command."""
         try:
             cmd_data = json.loads(json_line)
-        except Exception as e:
+        except Exception:
             self.emit_event(
                 ErrorEvent(
                     message="Invalid JSON command received by sidecar engine.",
@@ -206,7 +206,6 @@ class SidecarRunner:
         preset_str = data.get("preset", "Large")
         paper_size_str = data.get("paper_size", "A4")
         export_format = data.get("export_format", "docx")
-        routing_mode_str = data.get("routing_mode", "automatic")
         page_range = data.get("page_range")
         include_markers = data.get("include_page_markers", True)
 
@@ -321,14 +320,44 @@ class SidecarRunner:
         # Retain the built DocumentIR so later exports skip extraction/OCR (OUT-002).
         self._ir_stores[job_id] = res.document_ir
 
-        # Populate converted_text for flagged pages from DocumentIR
-        flagged_list = self._review_stores.get(job_id, [])
-        for fp in flagged_list:
-            matching_blocks = [
-                b for b in res.document_ir.blocks
-                if b.source_page == fp.page_number and b.type != BlockType.PAGE_MARKER and b.text
-            ]
-            fp.converted_text = "\n\n".join(b.text for b in matching_blocks[:3])
+        flagged_list = []
+        for flagged in self._review_stores.get(job_id, []):
+            matching = [block for block in res.document_ir.blocks
+                        if block.source_page == flagged.page_number
+                        and block.type != BlockType.PAGE_MARKER and block.text]
+            if not matching:
+                flagged_list.append(flagged)
+            for block in matching:
+                flagged_list.append(flagged.model_copy(update={
+                    "block_id": block.id,
+                    "converted_text": block.text,
+                    "confidence": block.confidence,
+                }))
+        self._review_stores[job_id] = flagged_list
+        previews = {}
+        if detect_file_type(input_path) == "pdf" and flagged_list:
+            import base64
+            import io
+            import pypdfium2 as pdfium
+            from openlargeprint.security.validator import bounded_pdf_scale
+
+            with pdfium.PdfDocument(input_path) as source:
+                for page_number in dict.fromkeys(item.page_number for item in flagged_list):
+                    page = source[page_number - 1]
+                    try:
+                        width, height = page.get_size()
+                        scale = min(bounded_pdf_scale(width, height, 96), 1200 / max(width, height))
+                        bitmap = page.render(scale=scale)
+                        try:
+                            with io.BytesIO() as buffer:
+                                bitmap.to_pil().convert("RGB").save(buffer, format="JPEG", quality=80)
+                                previews[page_number] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+                        finally:
+                            bitmap.close()
+                    except Exception:
+                        pass
+                    finally:
+                        page.close()
 
         from openlargeprint.ir.serialization import document_to_ui_dict
 
@@ -342,6 +371,7 @@ class SidecarRunner:
                 warnings=res.warnings,
                 document_ir=document_to_ui_dict(res.document_ir),
                 review_items=flagged_list,
+                review_previews=previews,
             )
         )
 
@@ -364,7 +394,24 @@ class SidecarRunner:
             return
 
         output_path = Path(data.get("output_path", "")).resolve()
+        source_path = self._job_inputs.get(job_id)
+        if source_path and output_path == Path(source_path).resolve():
+            raise ValueError("The output cannot replace the original document.")
         export_format = str(data.get("export_format", "pdf")).lower()
+        if export_format not in {"pdf", "docx", "html", "htm", "reader", "searchable_pdf"}:
+            raise ValueError("Unsupported export format.")
+        edits = data.get("text_edits", {})
+        if not isinstance(edits, dict):
+            raise ValueError("Invalid review corrections.")
+        editable = {block.id: block for block in doc_ir.blocks
+                    if block.text is not None and block.type not in {BlockType.TABLE, BlockType.PAGE_MARKER}}
+        if any(key not in editable or not isinstance(value, str) or len(value) > 1_000_000
+               for key, value in edits.items()):
+            raise ValueError("Invalid review corrections.")
+        doc_ir = doc_ir.model_copy(deep=True)
+        for block in doc_ir.blocks:
+            if block.id in edits:
+                block.text = edits[block.id]
 
         try:
             preset_enum = PresetName(data.get("preset", "Large"))
@@ -387,8 +434,9 @@ class SidecarRunner:
         # Apply an optional source-page selection against the retained IR (OUT-010).
         target_ir = doc_ir
         page_range = data.get("page_range")
+        selected = None
         if page_range:
-            total = len(doc_ir.pages) or doc_ir.metadata.page_count
+            total = doc_ir.metadata.page_count
             selected = parse_page_range(page_range, total)
             if selected:
                 target_ir = doc_ir.slice_by_source_pages_set(selected)
@@ -399,7 +447,8 @@ class SidecarRunner:
                 if not source or not Path(source).is_file():
                     raise FileNotFoundError("The original document is unavailable for this export.")
                 SearchablePdfExporter().export(
-                    Path(source), temporary, ocr_engine=self._orchestrator.pdf_importer.ocr_engine
+                    Path(source), temporary, ocr_engine=self._orchestrator.pdf_importer.ocr_engine,
+                    selected_pages=selected, cancel_check=lambda: self._cancel_flags.get(job_id, False)
                 )
                 result_format = "searchable_pdf"
             elif export_format == "pdf":

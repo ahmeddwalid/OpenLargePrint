@@ -382,10 +382,11 @@ async fn get_system_paths() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn open_file_dialog() -> Result<Option<serde_json::Value>, String> {
-    tokio::task::spawn_blocking(|| {
+async fn open_file_dialog(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "windows")]
         {
+            let _ = &app;
             if let Some(path) = native_windows_open_file_dialog() {
                 let file_name = path
                     .file_name()
@@ -404,7 +405,18 @@ async fn open_file_dialog() -> Result<Option<serde_json::Value>, String> {
 
         #[cfg(not(target_os = "windows"))]
         {
-            Ok(None)
+            use tauri_plugin_dialog::DialogExt;
+            let selected = app.dialog().file()
+                .add_filter("Documents", &["pdf", "docx", "pptx", "doc", "ppt"])
+                .blocking_pick_file();
+            let Some(selected) = selected else { return Ok(None) };
+            let path = selected.into_path().map_err(|_| "Choose a local document.".to_string())?;
+            let metadata = std::fs::metadata(&path).map_err(|_| "The selected file could not be opened.".to_string())?;
+            Ok(Some(serde_json::json!({
+                "path": path.to_string_lossy(),
+                "name": path.file_name().unwrap_or_default().to_string_lossy(),
+                "size": metadata.len(),
+            })))
         }
     })
     .await
@@ -413,6 +425,7 @@ async fn open_file_dialog() -> Result<Option<serde_json::Value>, String> {
 
 #[tauri::command]
 async fn choose_save_dialog(
+    app: AppHandle,
     default_name: Option<String>,
     filter_ext: Option<String>,
     initial_dir: Option<String>,
@@ -420,6 +433,7 @@ async fn choose_save_dialog(
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "windows")]
         {
+            let _ = &app;
             if let Some(path) = native_windows_save_file_dialog(
                 default_name.as_deref(),
                 filter_ext.as_deref(),
@@ -432,7 +446,18 @@ async fn choose_save_dialog(
 
         #[cfg(not(target_os = "windows"))]
         {
-            Ok(None)
+            use tauri_plugin_dialog::DialogExt;
+            let mut dialog = app.dialog().file();
+            if let Some(name) = default_name { dialog = dialog.set_file_name(name); }
+            if let Some(directory) = initial_dir { dialog = dialog.set_directory(directory); }
+            if let Some(extension) = filter_ext {
+                if ["pdf", "docx", "html"].contains(&extension.as_str()) {
+                    dialog = dialog.add_filter("Document", &[extension.as_str()]);
+                }
+            }
+            let Some(selected) = dialog.blocking_save_file() else { return Ok(None) };
+            let path = selected.into_path().map_err(|_| "Choose a local output file.".to_string())?;
+            Ok(Some(path.to_string_lossy().into_owned()))
         }
     })
     .await
@@ -785,6 +810,9 @@ async fn export_from_ir(
         export_cmd["custom_line_spacing"] = serde_json::json!(ls);
     }
 
+    if let Some(edits) = settings.get("textEdits") {
+        export_cmd["text_edits"] = edits.clone();
+    }
     session.send_command(&export_cmd).await?;
 
     Ok(serde_json::json!({
@@ -901,17 +929,33 @@ async fn download_and_apply_update(
     download_url: String,
     expected_sha256: Option<String>,
 ) -> Result<(), String> {
-    if !download_url.starts_with("https://") {
-        return Err("Insecure download URL: only HTTPS is permitted".to_string());
+    let url = tauri::Url::parse(&download_url).map_err(|_| "Invalid update URL.".to_string())?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("github.com")
+        || !url.path().starts_with("/ahmeddwalid/OpenLargePrint/releases/download/")
+        || !url.path().ends_with(".exe")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Updates must come from the OpenLargePrint release repository.".to_string());
     }
+    let expected = expected_sha256
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| "A valid installer checksum is required.".to_string())?;
 
-    let temp_dir = std::env::temp_dir();
-    let installer_path = temp_dir.join("OpenLargePrint_setup_update.exe");
+    #[cfg(not(target_os = "windows"))]
+    let _ = expected;
 
     #[cfg(target_os = "windows")]
     {
+        let temp_dir = std::env::temp_dir().join(uuid_short());
+        std::fs::create_dir(&temp_dir).map_err(|_| "Could not create the update directory.".to_string())?;
+        let installer_path = temp_dir.join("OpenLargePrint_setup_update.exe");
         let status = tokio::process::Command::new("curl.exe")
-            .args(["-sSL", "--max-time", "300", &download_url, "-o", &installer_path.to_string_lossy()])
+            .args(["--fail", "-sSL", "--proto", "=https", "--proto-redir", "=https", "--max-time", "300", "--max-filesize", "2147483648", &download_url, "-o", &installer_path.to_string_lossy()])
             .status()
             .await
             .map_err(|e| format!("Downloader error: {}", e))?;
@@ -920,25 +964,23 @@ async fn download_and_apply_update(
             return Err("Download process failed to complete successfully".to_string());
         }
 
-        if let Some(expected) = expected_sha256 {
-            let expected_trimmed = expected.trim().to_lowercase();
-            if expected_trimmed.len() == 64 {
-                let out = tokio::process::Command::new("powershell.exe")
-                    .args([
-                        "-NoProfile",
-                        "-Command",
-                        &format!("(Get-FileHash -Algorithm SHA256 -LiteralPath '{}').Hash", installer_path.display()),
-                    ])
-                    .output()
-                    .await
-                    .map_err(|e| format!("Hash verification command failed: {}", e))?;
-
-                let actual_hash = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
-                if actual_hash != expected_trimmed {
-                    let _ = std::fs::remove_file(&installer_path);
-                    return Err(format!("Installer hash mismatch. Expected: {}, Got: {}", expected_trimmed, actual_hash));
-                }
-            }
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let mut file = std::fs::File::open(&installer_path)
+            .map_err(|_| "Could not read the downloaded installer.".to_string())?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0_u8; 65536];
+        loop {
+            let count = file.read(&mut buffer)
+                .map_err(|_| "Could not verify the downloaded installer.".to_string())?;
+            if count == 0 { break; }
+            hash.update(&buffer[..count]);
+        }
+        drop(file);
+        if format!("{:x}", hash.finalize()) != expected.to_ascii_lowercase() {
+            let _ = std::fs::remove_file(&installer_path);
+            let _ = std::fs::remove_dir(&temp_dir);
+            return Err("The installer checksum does not match the release. Update cancelled.".to_string());
         }
 
         let mut spawn_cmd = std::process::Command::new(&installer_path);
@@ -958,6 +1000,7 @@ async fn download_and_apply_update(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppSession::default())
         .invoke_handler(tauri::generate_handler![
             open_file_dialog,
@@ -979,4 +1022,23 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenLargePrint application");
+}
+
+#[cfg(test)]
+mod update_validation_tests {
+    use super::download_and_apply_update;
+
+    #[tokio::test]
+    async fn refuses_untrusted_installers_and_missing_checksums() {
+        let hash = "a".repeat(64);
+        for url in ["http://github.com/ahmeddwalid/OpenLargePrint/releases/download/v1/setup.exe",
+                    "https://example.com/setup.exe",
+                    "https://github.com/other/project/releases/download/v1/setup.exe"] {
+            assert!(download_and_apply_update(url.into(), Some(hash.clone())).await.is_err());
+        }
+        let url = "https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v1/setup.exe";
+        for hash in [None, Some(String::new()), Some("z".repeat(64))] {
+            assert!(download_and_apply_update(url.into(), hash).await.is_err());
+        }
+    }
 }

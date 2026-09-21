@@ -83,11 +83,12 @@ def test_ui_dict_embeds_image_data_url(tmp_path: Path):
     assert image_blocks[0]["image_asset"]["data_url"].startswith("data:image/")
 
 
-def test_vector_figure_region_retained(tmp_path: Path):
+@pytest.mark.parametrize("path_count", [1, 12])
+def test_vector_figure_region_retained(tmp_path: Path, path_count: int):
     """A page with vector artwork but no embedded raster still keeps the figure (IMG-002)."""
     pdf_path = tmp_path / "vector.pdf"
     c = canvas.Canvas(str(pdf_path), pagesize=letter)
-    for i in range(12):
+    for i in range(path_count):
         c.rect(100 + i * 10, 400 + i * 8, 200, 120, stroke=1, fill=0)
     c.setFont("Helvetica", 10)
     c.drawString(50, 60, "Vector figure above.")

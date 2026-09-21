@@ -359,3 +359,28 @@ def test_sidecar_cli_entrypoint():
     assert lines[0]["type"] == EventType.HEALTH.value
     assert lines[0]["status"] == "ready"
 
+
+
+def test_export_applies_review_edits_and_rejects_invalid_targets(tmp_path: Path):
+    source = tmp_path / "source.docx"
+    create_sample_docx(source)
+    runner = SidecarRunner(in_stream=io.StringIO(), out_stream=io.StringIO())
+    runner.execute_command_str(json.dumps({
+        "command": "convert", "id": "edit_job", "file_path": str(source),
+        "output_path": str(tmp_path / "first.pdf"), "export_format": "pdf",
+    }))
+    document = runner._ir_stores["edit_job"]
+    block = next(block for block in document.blocks if block.text and block.type.value == "paragraph")
+    original = source.read_bytes()
+    command = {"command": "export", "id": "edit_job", "job_id": "edit_job",
+               "output_path": str(tmp_path / "edited.html"), "export_format": "html",
+               "text_edits": {block.id: "A reviewed correction survives export."}}
+    runner.execute_command_str(json.dumps(command))
+    assert "A reviewed correction survives export." in (tmp_path / "edited.html").read_text()
+    for changes in [{"output_path": str(source)}, {"text_edits": {"missing": "replacement"}},
+                    {"export_format": "invalid"}, {"text_edits": {block.id: ["invalid"]}}]:
+        runner.out_stream = io.StringIO()
+        runner.execute_command_str(json.dumps(command | changes))
+        events = [json.loads(line) for line in runner.out_stream.getvalue().splitlines()]
+        assert any(event.get("type") == "error" for event in events)
+        assert source.read_bytes() == original

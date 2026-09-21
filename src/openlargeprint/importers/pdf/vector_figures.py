@@ -17,7 +17,7 @@ from openlargeprint.ir.models import ImageAsset
 from openlargeprint.security.validator import bounded_pdf_scale
 
 # Conservative thresholds so text rules / table hairlines are not mistaken for figures.
-_MIN_PATH_OBJECTS = 4
+_MIN_PATH_OBJECTS = 1
 _MIN_REGION_AREA_RATIO = 0.04
 _MIN_REGION_SIDE_PT = 30.0
 _RENDER_DPI = 200.0

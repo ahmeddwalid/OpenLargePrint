@@ -134,6 +134,7 @@ class FlaggedPageReview(BaseModel):
     page_number: int
     reason: str  # Plain-language reason, e.g. "Scanned text required fallback" (UI-005)
     original_crop_path: Optional[str] = None
+    block_id: Optional[str] = None
     converted_text: str
     confidence: float
     can_retry: bool = True
@@ -170,6 +171,7 @@ class SuccessEvent(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     document_ir: Optional[dict[str, Any]] = None
     review_items: List[FlaggedPageReview] = Field(default_factory=list)
+    review_previews: dict[int, str] = Field(default_factory=dict)
 
 
 class CancelledEvent(BaseModel):
