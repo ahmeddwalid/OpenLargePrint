@@ -26,6 +26,7 @@ from openlargeprint.pipeline import PipelineOrchestrator
 from openlargeprint.pipeline.orchestrator import parse_page_range
 from openlargeprint.security import JobAssetStore, detect_file_type, log_safe_info
 from openlargeprint.security.isolation import atomic_output
+from openlargeprint.version import __version__ as ENGINE_VERSION
 from openlargeprint.sidecar.protocol import (
     CancelledEvent,
     CheckpointEvent,
@@ -144,7 +145,7 @@ class SidecarRunner:
         self.emit_event(
             HealthCheckEvent(
                 status="ready",
-                engine_version="0.1.0",
+                engine_version=ENGINE_VERSION,
                 ocr_available=True,
             )
         )

@@ -553,7 +553,7 @@ async fn health_check(
         Ok(Ok(val)) => Ok(val),
         _ => Ok(serde_json::json!({
             "status": "ready",
-            "desktop_version": "0.1.0",
+            "desktop_version": env!("CARGO_PKG_VERSION"),
             "sidecar_binary": resolve_sidecar_binary().to_string_lossy()
         })),
     }

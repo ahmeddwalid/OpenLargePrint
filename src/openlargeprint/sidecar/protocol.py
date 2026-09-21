@@ -7,6 +7,8 @@ from enum import Enum
 from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from openlargeprint.version import __version__ as ENGINE_VERSION
+
 
 class CommandType(str, Enum):
     """Supported narrow typed commands from desktop shell (SEC-005)."""
@@ -102,7 +104,7 @@ class RetryPageCommand(BaseModel):
 class HealthCheckEvent(BaseModel):
     type: Literal[EventType.HEALTH] = EventType.HEALTH
     status: str = "ready"
-    engine_version: str = "0.1.0"
+    engine_version: str = ENGINE_VERSION
     ocr_available: bool = True
 
 

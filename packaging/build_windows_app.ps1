@@ -17,6 +17,16 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
+# Single source of truth for the version (keeps artifact names in sync with the tag).
+$TauriConfPath = Join-Path $RepoRoot "src-tauri\tauri.conf.json"
+if (-not (Test-Path $TauriConfPath)) {
+    Write-Error "Cannot determine application version: $TauriConfPath not found."
+}
+$AppVersion = (Get-Content -LiteralPath $TauriConfPath -Raw | ConvertFrom-Json).version
+if (-not $AppVersion) {
+    Write-Error "tauri.conf.json does not declare a version."
+}
+
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host " OpenLargePrint -- Windows Application Packaging Pipeline" -ForegroundColor Cyan
 Write-Host " Target: Windows 10/11 x64 (NSIS Standalone Installer)" -ForegroundColor Cyan
@@ -171,7 +181,7 @@ if (Test-Path $NsisPath) {
         Copy-Item -LiteralPath "$RepoRoot\LICENSE" -Destination (Join-Path $PortableDir "LICENSE.txt")
         Copy-Item -LiteralPath "$RepoRoot\README.md" -Destination (Join-Path $PortableDir "README.txt")
 
-        $PortableZip = Join-Path $DistPath "OpenLargePrint_0.1.0_windows_x64_portable.zip"
+        $PortableZip = Join-Path $DistPath ("OpenLargePrint_{0}_windows_x64_portable.zip" -f $AppVersion)
         if (Test-Path $PortableZip) { Remove-Item -Force $PortableZip }
         Compress-Archive -Path "$PortableDir\*" -DestinationPath $PortableZip -CompressionLevel Optimal
         if (Test-Path $PortableZip) {
