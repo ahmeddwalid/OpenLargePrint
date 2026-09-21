@@ -53,25 +53,27 @@ Quality reports distinguish measured text error from missing reference transcrip
 
 Pre-compiled packages for Windows 10 and 11 (64-bit) are available on the [GitHub Releases](https://github.com/ahmeddwalid/OpenLargePrint/releases) page.
 
-### Current Release: v0.1.0
+### Current Release: v0.2.0
 
 | Package | Format | File Size | Description |
 |---|---|---|---|
-| [`OpenLargePrint_0.1.0_x64-setup.exe`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.1.0/OpenLargePrint_0.1.0_x64-setup.exe) | NSIS Installer | ~116 MB | Standard Windows installer with start menu and context menu integration |
-| [`OpenLargePrint_0.1.0_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.1.0/OpenLargePrint_0.1.0_windows_x64_portable.zip) | Portable Archive | ~115 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
+| [`OpenLargePrint_0.2.0_x64-setup.exe`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.2.0/OpenLargePrint_0.2.0_x64-setup.exe) | NSIS Installer | ~117 MB | Standard Windows installer with start menu and context menu integration |
+| [`OpenLargePrint_0.2.0_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.2.0/OpenLargePrint_0.2.0_windows_x64_portable.zip) | Portable Archive | ~117 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
 
 ### Checksums (SHA-256)
 
 ```text
-32972fc4df1bb3e90228d6913eb1a572f83039d2500896939d9ab70ab5f6b4e7  OpenLargePrint_0.1.0_x64-setup.exe
-f64aa4247112379214c69b0ca300887a8985391621bebe5d2d66d0d1c9577fe8  OpenLargePrint_0.1.0_windows_x64_portable.zip
+d21e129a5ee09c617dd83c9c496b21ae49988b9338699a8bb91fa2babad1a2a5  OpenLargePrint_0.2.0_x64-setup.exe
+5db744845ce6c0123cff625b670df45333e26e5c08bae8577a3c836aebd3f62e  OpenLargePrint_0.2.0_windows_x64_portable.zip
 ```
 
 To verify the downloaded installer on Windows PowerShell:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 OpenLargePrint_0.1.0_x64-setup.exe
+Get-FileHash -Algorithm SHA256 OpenLargePrint_0.2.0_x64-setup.exe
 ```
+
+The installer is not code-signed, so Windows SmartScreen may warn on first run. See [`SIGNING.md`](SIGNING.md) for signing options.
 
 ## Installation and Updates
 
