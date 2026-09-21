@@ -50,6 +50,7 @@ export interface ReviewItem {
   block_id?: string;
   reason: string;
   original_snippet: string;
+  original_preview?: string;
   converted_text: string;
   status: 'pending' | 'accepted' | 'retried';
 }
@@ -57,6 +58,8 @@ export interface ReviewItem {
 export interface ConversionSettings {
   textSize: TextSize;
   customBodyPt?: number | null;
+  customLineSpacing?: number;
+  textEdits?: Record<string, string>;
   paperSize: PaperSize;
   outputFormat: OutputFormat;
   routingMode: RoutingMode;

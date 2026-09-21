@@ -6,7 +6,7 @@ interface ReviewScreenProps {
   reviewItems: ReviewItem[];
   onAccept: (itemId: string, editedText?: string) => void;
   onAcceptAll?: (currentId?: string, currentEditedText?: string) => void;
-  onRetry: (item: ReviewItem) => Promise<void>;
+  onRetry: (item: ReviewItem) => Promise<string | null>;
   onFinish: () => void;
 }
 
@@ -21,12 +21,14 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
   const [editedText, setEditedText] = useState<string>('');
+  const [retryResult, setRetryResult] = useState<string | null>(null);
 
   const currentItem = reviewItems[currentIndex] || null;
 
   React.useEffect(() => {
     if (currentItem) {
       setEditedText(currentItem.converted_text);
+      setRetryResult(null);
     }
   }, [currentIndex, currentItem]);
 
@@ -81,7 +83,10 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   const handleRetryCurrent = async () => {
     setIsRetrying(true);
     try {
-      await onRetry(currentItem);
+      const result = await onRetry(currentItem);
+      setRetryResult(result || 'Recognition could not be repeated. Your current correction is unchanged.');
+    } catch {
+      setRetryResult('Recognition could not be repeated. Your current correction is unchanged.');
     } finally {
       setIsRetrying(false);
     }
@@ -105,17 +110,17 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
           gap: '12px',
         }}
       >
-        <h2 id="review-title" style={{ fontSize: '22px' }}>
+        <h2 id="review-title" style={{ fontSize: '1.375rem' }}>
           Page {currentItem.source_page}: Section {currentIndex + 1} of {reviewItems.length}
         </h2>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
           <button
             type="button"
             className="secondary-btn"
             onClick={handleAcceptAll}
             aria-label={t('review.accept_all_aria')}
             style={{
-              minHeight: '44px',
+              minHeight: '48px',
               padding: '0 16px',
               fontWeight: 600,
               backgroundColor: 'var(--bg-surface)',
@@ -130,7 +135,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
             onClick={handlePrev}
             disabled={currentIndex === 0}
             aria-label={t('review.previous')}
-            style={{ minHeight: '44px', padding: '0 16px' }}
+            style={{ minHeight: '48px', padding: '0 16px' }}
           >
             {t('review.previous')}
           </button>
@@ -140,7 +145,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
             onClick={handleNext}
             disabled={currentIndex === reviewItems.length - 1}
             aria-label={t('review.next')}
-            style={{ minHeight: '44px', padding: '0 16px' }}
+            style={{ minHeight: '48px', padding: '0 16px' }}
           >
             {t('review.next')}
           </button>
@@ -169,7 +174,9 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
               whiteSpace: 'pre-wrap',
             }}
           >
-            {currentItem.original_snippet || '[No raw text detected on source page]'}
+            {currentItem.original_preview ? (
+              <img src={currentItem.original_preview} alt={`Original page ${currentItem.source_page}`} style={{ width: '100%', height: 'auto' }} />
+            ) : currentItem.original_snippet || 'Page preview unavailable. Compare this text with the original document.'}
           </div>
         </div>
 
@@ -185,6 +192,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
             id="edit-converted-text"
             className="pane-content"
             value={editedText}
+            readOnly={!currentItem.block_id}
             onChange={(e) => setEditedText(e.target.value)}
             style={{
               width: '100%',
@@ -201,7 +209,14 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
         </div>
       </div>
 
-      {/* Action buttons */}
+      {retryResult && (
+        <section className="review-pane" aria-live="polite">
+          <h3>Repeated recognition result</h3>
+          <p>Compare this page result with the original. Copy any corrections into the section above before accepting.</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{retryResult}</p>
+        </section>
+      )}
+
       <div className="review-actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
         <button
           type="button"

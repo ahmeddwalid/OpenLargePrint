@@ -9,31 +9,29 @@ interface DocumentTypeSelectorProps {
 interface FormatOption {
   id: OutputFormat;
   title: string;
-  badge?: string;
   description: string;
 }
 
 const FORMAT_OPTIONS: FormatOption[] = [
   {
     id: 'pdf',
-    title: 'PDF Document (.pdf)',
-    badge: 'Default',
+    title: 'PDF',
     description: 'Print-ready reflowed document at selected point size',
   },
   {
     id: 'docx',
-    title: 'Word Document (.docx)',
-    description: 'Editable Microsoft Word format with semantic hierarchy',
+    title: 'Word document',
+    description: 'Edit the enlarged document in Word',
   },
   {
     id: 'html',
-    title: 'Interactive Reader (.html)',
-    description: 'Self-contained accessible web reader with zoom controls',
+    title: 'HTML reader',
+    description: 'Read offline and adjust text size',
   },
   {
     id: 'searchable_pdf',
     title: 'Searchable original PDF',
-    description: 'Keeps the original page layout and adds a text layer for searching',
+    description: 'Keeps the original size. Adds searchable text; does not enlarge.',
   },
 ];
 
@@ -47,7 +45,7 @@ export const DocumentTypeSelector: React.FC<DocumentTypeSelectorProps> = ({
         3. Choose export format
       </h2>
       <div
-        className="radio-group-grid"
+        className="format-options"
         role="radiogroup"
         aria-labelledby="step-format-label"
       >
@@ -68,25 +66,7 @@ export const DocumentTypeSelector: React.FC<DocumentTypeSelectorProps> = ({
                 onChange={() => onChange(opt.id)}
                 aria-checked={isSelected}
               />
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span className="radio-title">{opt.title}</span>
-                {opt.badge && (
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--border-color)',
-                      color: isSelected ? 'var(--accent-text)' : 'var(--text-secondary)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                    }}
-                  >
-                    {opt.badge}
-                  </span>
-                )}
-              </div>
+              <span className="radio-title" style={{ marginBottom: '4px' }}>{opt.title}</span>
               <span className="radio-sub">{opt.description}</span>
             </label>
           );

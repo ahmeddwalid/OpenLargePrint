@@ -19,7 +19,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
   }
 
   const handleInstallUpdate = async () => {
-    if (!updateInfo.downloadUrl) {
+    if (!updateInfo.downloadUrl || !updateInfo.expectedSha256) {
       if (updateInfo.releaseUrl) {
         window.open(updateInfo.releaseUrl, '_blank');
       }
@@ -36,7 +36,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
         setUpdateStatus('Downloading update package...');
         await tauri.core.invoke('download_and_apply_update', {
           downloadUrl: updateInfo.downloadUrl,
-          expectedSha256: null,
+          expectedSha256: updateInfo.expectedSha256,
         });
         setUpdateStatus('Launching installer...');
       } else {
@@ -70,7 +70,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       role="region"
       aria-label="Software update announcement"
       style={{
-        backgroundColor: 'var(--bg-secondary)',
+        backgroundColor: 'var(--bg-surface)',
         border: '2px solid var(--border-color)',
         borderRadius: 'var(--radius-md)',
         padding: '16px 20px',
@@ -127,14 +127,14 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
               padding: '0 20px',
               borderRadius: 'var(--radius-sm)',
               border: 'none',
-              backgroundColor: 'var(--accent-color, #2b5797)',
-              color: '#ffffff',
+              backgroundColor: 'var(--accent-primary)',
+              color: 'var(--accent-text)',
               fontWeight: 700,
               cursor: isUpdating ? 'wait' : 'pointer',
               opacity: isUpdating ? 0.7 : 1,
             }}
           >
-            {isUpdating ? (updateStatus ?? 'Updating...') : 'Download and install update'}
+            {isUpdating ? (updateStatus ?? 'Updating...') : updateInfo.downloadUrl && updateInfo.expectedSha256 ? 'Download and install update' : 'View release downloads'}
           </button>
 
           <button

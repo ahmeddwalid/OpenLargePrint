@@ -44,7 +44,6 @@ function getTauri() {
 }
 
 export class SidecarClient {
-  private isCancelled = false;
 
   public async openFileDialog(): Promise<{ path: string; name: string; size: number } | null> {
     const t = getTauri();
@@ -181,30 +180,7 @@ export class SidecarClient {
       }
     }
 
-    // Default / Mock estimation
-    const isScanned = filePath.toLowerCase().includes('scanned');
-    const isDocx = filePath.toLowerCase().endsWith('.docx');
-    const isPptx = filePath.toLowerCase().endsWith('.pptx');
-
-    let detectedType: InspectResult['detectedType'] = 'native_pdf';
-    let mime = 'application/pdf';
-    if (isScanned) detectedType = 'scanned_pdf';
-    if (isDocx) {
-      detectedType = 'docx';
-      mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    }
-    if (isPptx) {
-      detectedType = 'pptx';
-      mime = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-    }
-
-    return {
-      filePath,
-      mimeType: mime,
-      pageCount: isScanned ? 12 : 6,
-      detectedType,
-      estimatedDurationSeconds: isScanned ? 24 : 4,
-    };
+    throw new Error('The document could not be inspected. Open it in the desktop app and try again.');
   }
 
   public async startConversion(
@@ -212,7 +188,6 @@ export class SidecarClient {
     settings: ConversionSettings,
     callbacks: SidecarCallbacks
   ): Promise<void> {
-    this.isCancelled = false;
 
     // Check Tauri desktop bridge
     const t = getTauri();
@@ -302,29 +277,17 @@ export class SidecarClient {
               warnings: p.warnings || p.document_ir.warnings || [],
             };
           } else {
-            docIR = {
-              schema_version: '1.0.0',
-              source_file: filePath,
-              source_mime: 'application/pdf',
-              page_count: p.page_count || 1,
-              blocks: [
-                {
-                  id: 'block-done',
-                  block_type: 'paragraph',
-                  text: `Successfully converted ${p.page_count || 1} pages to large-print layout.`,
-                  source_page: 1,
-                },
-              ],
-              warnings: p.warnings || [],
-            };
+            callbacks.onError('The engine did not return the converted document. Please convert it again.');
+            return;
           }
 
           const reviewItems: ReviewItem[] = (p.review_items || []).map((r: any, idx: number) => ({
             id: `rev-${idx + 1}`,
             source_page: r.page_number,
-            block_id: `b-${r.page_number}`,
+            block_id: r.block_id || undefined,
             reason: r.reason || 'Flagged for optical review',
-            original_snippet: r.original_crop_path || `[Original page ${r.page_number}]`,
+            original_snippet: '',
+            original_preview: p.review_previews?.[r.page_number],
             converted_text: r.converted_text || '',
             status: 'pending' as const,
           }));
@@ -356,116 +319,7 @@ export class SidecarClient {
       }
     }
 
-    // Interactive Demo / Web Preview conversion loop fallback
-    const totalPages = filePath.toLowerCase().includes('scanned') ? 8 : 4;
-    const isScanned = filePath.toLowerCase().includes('scanned') || settings.routingMode === 'ocr_scanned_only';
-    const stagePrefix = isScanned ? 'Recognizing scanned text' : 'Extracting readable text';
-
-    for (let page = 1; page <= totalPages; page++) {
-      if (this.isCancelled) {
-        callbacks.onCancelled();
-        return;
-      }
-
-      const percent = Math.round((page / totalPages) * 100);
-      const humanMessage = `${stagePrefix} — page ${page} of ${totalPages}`;
-
-      callbacks.onProgress({
-        currentPage: page,
-        totalPages,
-        stage: isScanned ? 'ocr' : 'extract',
-        humanMessage,
-        percent,
-      });
-
-      if (callbacks.onCheckpoint) {
-        callbacks.onCheckpoint(page, page * 3);
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 350));
-    }
-
-    if (this.isCancelled) {
-      callbacks.onCancelled();
-      return;
-    }
-
-    // Synthesized DocumentIR for demo mode
-    const docIR: DocumentIR = {
-      schema_version: '1.0.0',
-      source_file: filePath,
-      source_mime: 'application/pdf',
-      page_count: totalPages,
-      blocks: [
-        {
-          id: 'b-1',
-          block_type: 'heading',
-          heading_level: 1,
-          text: 'OpenLargePrint Readable Document',
-          source_page: 1,
-        },
-        {
-          id: 'b-2',
-          block_type: 'paragraph',
-          text: 'This document has been converted into accessible large-print typography. All text has been reflowed to eliminate horizontal scrolling, and heading hierarchies are cleanly preserved.',
-          source_page: 1,
-        },
-        {
-          id: 'b-3',
-          block_type: 'heading',
-          heading_level: 2,
-          text: 'Key Rights and Obligations',
-          source_page: 2,
-        },
-        {
-          id: 'b-4',
-          block_type: 'paragraph',
-          text: 'In contract law, an obligor is bound by duty to perform an act or make payment as stipulated in the covenants. Failure to perform without legal excuse constitutes a breach.',
-          source_page: 2,
-        },
-        {
-          id: 'b-5',
-          block_type: 'table',
-          source_page: 3,
-          table_data: [
-            ['Section', 'Obligation', 'Remedy'],
-            ['§ 2.1', 'Timely notice of claims', 'Cure period of 30 days'],
-            ['§ 4.3', 'Delivery of accessible format', 'Immediate replacement or refund'],
-          ],
-          caption: 'Summary of Statutory Remedies',
-        },
-        {
-          id: 'b-6',
-          block_type: 'paragraph',
-          text: 'The parties agree that all disputes arising under this agreement shall be settled through expedited mediation prior to formal court filing.',
-          source_page: 4,
-        },
-      ],
-      warnings: isScanned ? ['Page 3 contains low-contrast marginal notes.'] : [],
-    };
-
-    const reviewItems: ReviewItem[] = isScanned
-      ? [
-          {
-            id: 'rev-1',
-            source_page: 3,
-            block_id: 'b-5',
-            reason: 'Complex table formatting detected with low optical confidence',
-            original_snippet: '[Scan Crop] Table § 2.1 Timely notice of claims...',
-            converted_text: '§ 2.1 Timely notice of claims | Cure period of 30 days',
-            status: 'pending',
-          },
-        ]
-      : [];
-
-    const baseName = filePath.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || 'document';
-    const outputPath = `${baseName}-largeprint.${settings.outputFormat}`;
-
-    callbacks.onSuccess({
-      outputPath,
-      documentIR: docIR,
-      reviewItems,
-    });
+    callbacks.onError('Document conversion requires the OpenLargePrint desktop app.');
   }
 
   /**
@@ -505,9 +359,6 @@ export class SidecarClient {
       unlistenError = await listen('sidecar-error', (event: any) => {
         cleanup();
         // No cached document in the engine: let the caller do a full conversion instead.
-        if (event.payload?.code === 'NO_IR') {
-          return;
-        }
         callbacks.onError(event.payload.message || 'Export failed.');
       });
 
@@ -521,7 +372,6 @@ export class SidecarClient {
   }
 
   public cancelConversion(): void {
-    this.isCancelled = true;
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, any>) : undefined;
     if (win?.__TAURI__?.core?.invoke) {
       win.__TAURI__.core.invoke('cancel_conversion').catch(console.error);

@@ -15,6 +15,7 @@ export interface UpdateInfo {
   releaseNotes?: string;
   publishedAt?: string;
   assetName?: string;
+  expectedSha256?: string;
 }
 
 export const CURRENT_VERSION = '0.2.0';
@@ -28,10 +29,9 @@ const DISMISSED_VERSION_KEY = 'openlargeprint_dismissed_update_version';
 export function isAutoUpdateEnabled(): boolean {
   try {
     const val = localStorage.getItem(AUTO_UPDATE_KEY);
-    // Enabled by default; user can opt-out in Advanced Settings
-    return val !== 'false';
+    return val === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -135,8 +135,9 @@ export async function checkForUpdates(forceCheck: boolean = false): Promise<Upda
     // Locate the Windows installer asset (.exe)
     let downloadUrl: string | undefined;
     let assetName: string | undefined;
+    let expectedSha256: string | undefined;
 
-    if (Array.isArray(data.assets)) {
+    if (/Win/i.test(navigator.platform) && Array.isArray(data.assets)) {
       const exeAsset = data.assets.find(
         (a: { name?: string; browser_download_url?: string }) =>
           typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
@@ -144,6 +145,9 @@ export async function checkForUpdates(forceCheck: boolean = false): Promise<Upda
       if (exeAsset) {
         downloadUrl = exeAsset.browser_download_url;
         assetName = exeAsset.name;
+        if (typeof exeAsset.digest === 'string' && /^sha256:[a-f0-9]{64}$/i.test(exeAsset.digest)) {
+          expectedSha256 = exeAsset.digest.slice(7);
+        }
       }
     }
 
@@ -156,6 +160,7 @@ export async function checkForUpdates(forceCheck: boolean = false): Promise<Upda
       releaseNotes: releaseNotes || undefined,
       publishedAt: publishedAt || undefined,
       assetName: assetName || undefined,
+      expectedSha256,
     };
   } catch {
     return { available: false, currentVersion: CURRENT_VERSION };

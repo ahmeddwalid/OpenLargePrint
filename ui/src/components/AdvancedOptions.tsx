@@ -105,10 +105,10 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
                 borderRadius: 'var(--radius-sm)',
               }}
             >
-              <option value="max_accuracy">Maximum Accuracy (Default — 300 DPI, multi-core accelerated)</option>
-              <option value="auto">Automatic (Balanced)</option>
-              <option value="native_only">Fast Digital Extraction Only (skips scanned pages)</option>
-              <option value="ocr_scanned_only">Force Scanned Recognition</option>
+              <option value="max_accuracy" disabled>Higher accuracy pack unavailable</option>
+              <option value="auto">Automatic (default)</option>
+              <option value="native_only">Native text only (preserves scans for review)</option>
+              <option value="ocr_scanned_only">Recognize scanned pages</option>
             </select>
           </div>
 
@@ -154,7 +154,7 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
                 onClick={handleCheckUpdatesNow}
                 disabled={isCheckingUpdate}
                 style={{
-                  minHeight: '44px',
+                  minHeight: '48px',
                   padding: '0 16px',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--border-color)',

@@ -20,15 +20,15 @@ export const ProgressScreen: React.FC<ProgressScreenProps> = ({
     >
       <div className="progress-header">
         <div>
-          <h2 id="progress-title" style={{ fontSize: '24px', marginBottom: '4px' }}>
+          <h2 id="progress-title" style={{ fontSize: '1.5rem', marginBottom: '4px' }}>
             Converting Document
           </h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '16px' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '1rem' }}>
             {fileName}
           </p>
         </div>
         <span
-          style={{ fontSize: '20px', fontWeight: 700, color: 'var(--accent-primary)' }}
+          style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--accent-primary)' }}
           aria-hidden="true"
         >
           {progress.percent}%

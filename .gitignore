@@ -76,3 +76,6 @@ packaging/certs/
 
 
 
+
+.playwright-mcp/
+:memory:.ses

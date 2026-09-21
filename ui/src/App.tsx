@@ -349,11 +349,9 @@ export const App: React.FC = () => {
     setViewMode('reader');
   };
 
-  const handleRetryReviewItem = async (item: ReviewItem) => {
-    const updated = await sidecar.retryPage(item.source_page, true);
-    if (updated && updated.text) {
-      handleAcceptReviewItem(item.id, updated.text);
-    }
+  const handleRetryReviewItem = async (item: ReviewItem): Promise<string | null> => {
+    const updated = await sidecar.retryPage(item.source_page, false);
+    return updated?.text || null;
   };
 
   const handleFinishReview = () => {
@@ -373,6 +371,10 @@ export const App: React.FC = () => {
     const settings: ConversionSettings = {
       textSize,
       customBodyPt: selection.fontPt,
+      customLineSpacing: selection.lineSpacing,
+      textEdits: Object.fromEntries((documentIR?.blocks || [])
+        .filter((block) => typeof block.text === 'string' && block.block_type !== 'table' && block.block_type !== 'page_marker')
+        .map((block) => [block.id, block.text as string])),
       paperSize,
       outputFormat,
       routingMode,
@@ -431,7 +433,7 @@ export const App: React.FC = () => {
         </div>
 
         <div className="header-controls">
-          <label htmlFor="global-theme-toggle" style={{ fontSize: '15px', fontWeight: 600 }}>
+          <label htmlFor="global-theme-toggle" style={{ fontSize: '0.9375rem', fontWeight: 600 }}>
             {t('theme.label')}
           </label>
           <select
@@ -452,7 +454,7 @@ export const App: React.FC = () => {
             <option value="dark">{t('theme.dark')}</option>
           </select>
 
-          <label htmlFor="global-lang-select" style={{ fontSize: '15px', fontWeight: 600 }}>
+          <label htmlFor="global-lang-select" style={{ fontSize: '0.9375rem', fontWeight: 600 }}>
             {t('lang.label')}
           </label>
           <select
@@ -519,32 +521,14 @@ export const App: React.FC = () => {
               onCustomBodyPtChange={setCustomBodyPt}
             />
 
-            {/* Step 2.5: Direct choice of A4 vs A3 paper size (UI-006) */}
-            <PaperSizeSelector value={paperSize} onChange={(size) => setPaperSize(size)} />
-
             {/* Step 3: Export Format Selector (Default: PDF) */}
             <DocumentTypeSelector
               value={outputFormat}
               onChange={handleFormatChange}
             />
 
-            {/* Step 4: Export Location Picker */}
-            <ExportLocationPicker
-              outputPath={getProposedExportPath()}
-              defaultFileName={selectedFile ? selectedFile.name : 'document'}
-              outputFormat={outputFormat}
-              preset={locationPreset}
-              onPresetChange={(newPreset) => {
-                setLocationPreset(newPreset);
-                if (newPreset !== 'custom') {
-                  setCustomOutputPath(null);
-                }
-              }}
-              onCustomPathSelected={(chosenPath) => {
-                setCustomOutputPath(chosenPath);
-                setLocationPreset('custom');
-              }}
-            />
+            {/* Step 2.5: Direct choice of A4 vs A3 paper size (UI-006) */}
+            <PaperSizeSelector value={paperSize} onChange={(size) => setPaperSize(size)} />
 
             {/* Step 5: Convert Action */}
             <div style={{ marginTop: '28px', display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -567,6 +551,28 @@ export const App: React.FC = () => {
                 {t('convert.button')}
               </button>
             </div>
+
+            <details className="output-options">
+              <summary>Save location</summary>
+            {/* Step 4: Export Location Picker */}
+            <ExportLocationPicker
+              outputPath={getProposedExportPath()}
+              defaultFileName={selectedFile ? selectedFile.name : 'document'}
+              outputFormat={outputFormat}
+              preset={locationPreset}
+              onPresetChange={(newPreset) => {
+                setLocationPreset(newPreset);
+                if (newPreset !== 'custom') {
+                  setCustomOutputPath(null);
+                }
+              }}
+              onCustomPathSelected={(chosenPath) => {
+                setCustomOutputPath(chosenPath);
+                setLocationPreset('custom');
+              }}
+            />
+
+            </details>
 
             {/* Collapsible Disclosure for Advanced Settings (UI-001) */}
             <AdvancedOptions

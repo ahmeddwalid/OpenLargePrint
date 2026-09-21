@@ -57,13 +57,13 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
           alignItems: 'center',
           gap: '8px',
           fontWeight: 600,
-          fontSize: '16px',
+          fontSize: '1rem',
           color: 'var(--text-primary)',
           background: 'none',
           border: 'none',
           cursor: 'pointer',
           padding: '8px 0',
-          minHeight: '44px',
+          minHeight: '48px',
         }}
       >
         <span>{isOpen ? '▾' : '▸'}</span>
@@ -92,7 +92,7 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                   <div
                     style={{
                       fontWeight: 600,
-                      fontSize: '16px',
+                      fontSize: '1rem',
                       color: 'var(--text-primary)',
                       wordBreak: 'break-all',
                     }}
@@ -101,7 +101,7 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                   </div>
                   <div
                     style={{
-                      fontSize: '13px',
+                      fontSize: '0.8125rem',
                       color: 'var(--text-secondary)',
                       marginTop: '4px',
                       fontFamily: 'Consolas, monospace',
@@ -110,7 +110,7 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                   >
                     {item.outputPath}
                   </div>
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
                     {item.dateFormatted} • {item.textSize} • {item.format.toUpperCase()}
                   </div>
                 </div>
@@ -121,7 +121,7 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                       type="button"
                       className="secondary-btn"
                       onClick={() => onOpenInReader(item.documentIR!, item.outputPath)}
-                      style={{ minHeight: '44px', padding: '8px 14px' }}
+                      style={{ minHeight: '48px', padding: '8px 14px' }}
                       aria-label={`Open ${item.sourceName} in Large Print Reader`}
                     >
                       Reader
@@ -131,7 +131,7 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                     type="button"
                     className="secondary-btn"
                     onClick={() => handleOpenFile(item.outputPath)}
-                    style={{ minHeight: '44px', padding: '8px 14px' }}
+                    style={{ minHeight: '48px', padding: '8px 14px' }}
                     aria-label={`Open output file ${item.outputPath}`}
                   >
                     {t('file.open_file')}
@@ -140,7 +140,7 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                     type="button"
                     className="secondary-btn"
                     onClick={() => sidecar.revealInFolder(item.outputPath)}
-                    style={{ minHeight: '44px', padding: '8px 14px' }}
+                    style={{ minHeight: '48px', padding: '8px 14px' }}
                     aria-label={`Show output file in folder: ${item.outputPath}`}
                   >
                     {t('file.show_in_folder')}
@@ -159,10 +159,10 @@ export const RecentDocuments: React.FC<RecentDocumentsProps> = ({
                 background: 'none',
                 border: 'none',
                 color: 'var(--text-secondary)',
-                fontSize: '14px',
+                fontSize: '0.875rem',
                 cursor: 'pointer',
                 textDecoration: 'underline',
-                minHeight: '44px',
+                minHeight: '48px',
                 padding: '8px',
               }}
             >

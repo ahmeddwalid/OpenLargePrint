@@ -45,7 +45,7 @@ export const ExportLocationPicker: React.FC<ExportLocationPickerProps> = ({
   return (
     <section className="decision-step" aria-labelledby="step-destination-label">
       <h2 id="step-destination-label" className="step-label">
-        4. Choose export destination
+        Save location
       </h2>
       <div
         className="export-location-card"
@@ -85,14 +85,14 @@ export const ExportLocationPicker: React.FC<ExportLocationPickerProps> = ({
                   }
                 }}
                 style={{
-                  minHeight: '44px',
+                  minHeight: '48px',
                   padding: '8px 16px',
                   borderRadius: 'var(--radius-sm)',
                   border: `2px solid ${isActive ? 'var(--accent-primary)' : 'var(--border-color)'}`,
                   backgroundColor: isActive ? 'var(--accent-primary)' : 'var(--bg-surface)',
                   color: isActive ? 'var(--accent-text)' : 'var(--text-primary)',
                   fontWeight: 600,
-                  fontSize: '14px',
+                  fontSize: '0.875rem',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
@@ -116,13 +116,13 @@ export const ExportLocationPicker: React.FC<ExportLocationPickerProps> = ({
           <div
             style={{
               flex: '1 1 280px',
-              minHeight: '44px',
+              minHeight: '48px',
               padding: '10px 14px',
               backgroundColor: 'var(--bg-surface)',
               border: '1px solid var(--border-color)',
               borderRadius: 'var(--radius-sm)',
               fontFamily: 'Consolas, "Courier New", monospace',
-              fontSize: '14px',
+              fontSize: '0.875rem',
               color: 'var(--text-primary)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -141,14 +141,14 @@ export const ExportLocationPicker: React.FC<ExportLocationPickerProps> = ({
               className="secondary-btn"
               onClick={handleBrowseCustom}
               aria-label="Change custom export destination folder or file name"
-              style={{ minHeight: '44px' }}
+              style={{ minHeight: '48px' }}
             >
               Browse...
             </button>
           )}
         </div>
 
-        <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0' }}>
+        <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', margin: '0' }}>
           {preset === 'downloads' && 'Default: Output file will be saved directly in your Downloads folder.'}
           {preset === 'desktop' && 'Output file will be saved directly on your Desktop for easy access.'}
           {preset === 'source' && 'Output file will be saved in the same directory as your original document.'}

@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   isNewerVersion,
   isAutoUpdateEnabled,
   setAutoUpdateEnabled,
   CURRENT_VERSION,
+  checkForUpdates,
 } from '../api/update-checker';
 
 describe('In-App Update Checker', () => {
@@ -29,6 +30,15 @@ describe('In-App Update Checker', () => {
     // Reset back to true for default behavior
     setAutoUpdateEnabled(true);
     expect(isAutoUpdateEnabled()).toBe(true);
+  });
+
+  it('makes no network request before opting in', async () => {
+    localStorage.removeItem('openlargeprint_auto_update');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    expect(isAutoUpdateEnabled()).toBe(false);
+    await checkForUpdates();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it('has a valid current version format', () => {

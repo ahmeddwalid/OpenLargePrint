@@ -1,20 +1,34 @@
+@font-face {
+  font-family: "Source Sans 3";
+  src: url("/fonts/SourceSans3.ttf") format("truetype");
+  font-weight: 200 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Sans Arabic";
+  src: url("/fonts/NotoSansArabic.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 /* OpenLargePrint Accessibility & Subject-Grounded Design System */
 /* Adheres strictly to SPEC.md A11Y-001..005, VIS-001..004, and AGENTS.md §7 */
 
 :root {
   /* Warm Sepia Theme (default) */
-  --bg-primary: #f4ecd8;
-  --bg-surface: #e9dfc6;
-  --bg-surface-raised: #ded3b7;
+  --bg-primary: #f3efdf;
+  --bg-surface: #e9e5d8;
+  --bg-surface-raised: #dddcca;
   --text-primary: #2d261e;
   --text-secondary: #594d3f;
-  --text-muted: #7d705f;
+  --text-muted: #655d50;
   --border-color: #cbbe9f;
-  --border-focus: #824317;
-  --focus-ring: #824317;
-  --accent-primary: #824317;
-  --accent-hover: #69320e;
-  --accent-text: #f4ecd8;
+  --border-focus: #485a34;
+  --focus-ring: #485a34;
+  --accent-primary: #485a34;
+  --accent-hover: #344425;
+  --accent-text: #f3efdf;
   --warning-bg: #fdf3e7;
   --warning-border: #d97724;
   --warning-text: #7a3a00;
@@ -23,13 +37,13 @@
   --success-text: #1d4717;
 
   /* Typography */
-  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-family-arabic: "Noto Sans Arabic", "Segoe UI", "Tahoma", sans-serif;
+  --font-family: "Source Sans 3", "Noto Sans Arabic", sans-serif;
+  --font-family-arabic: "Noto Sans Arabic", "Source Sans 3", sans-serif;
   --font-serif: "Georgia", "Times New Roman", serif;
-  --font-size-base: 18px;
-  --font-size-lg: 20px;
-  --font-size-xl: 24px;
-  --font-size-2xl: 28px;
+  --font-size-base: 1.125rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 1.75rem;
   --line-height-base: 1.5;
 
   /* Sizing & Touch Targets (A11Y-001: minimum 48px) */
@@ -48,10 +62,10 @@
   --text-secondary: #4a473f;
   --text-muted: #736f66;
   --border-color: #d6d0c2;
-  --border-focus: #9c4a1a;
-  --focus-ring: #9c4a1a;
-  --accent-primary: #9c4a1a;
-  --accent-hover: #803912;
+  --border-focus: #485a34;
+  --focus-ring: #485a34;
+  --accent-primary: #485a34;
+  --accent-hover: #344425;
   --accent-text: #faf8f5;
   --warning-bg: #fdf3e7;
   --warning-border: #d97724;
@@ -63,18 +77,18 @@
 
 /* Sepia Theme */
 [data-theme="sepia"] {
-  --bg-primary: #f4ecd8;
-  --bg-surface: #e9dfc6;
-  --bg-surface-raised: #ded3b7;
+  --bg-primary: #f3efdf;
+  --bg-surface: #e9e5d8;
+  --bg-surface-raised: #dddcca;
   --text-primary: #2d261e;
   --text-secondary: #594d3f;
-  --text-muted: #7d705f;
+  --text-muted: #655d50;
   --border-color: #cbbe9f;
-  --border-focus: #824317;
-  --focus-ring: #824317;
-  --accent-primary: #824317;
-  --accent-hover: #69320e;
-  --accent-text: #f4ecd8;
+  --border-focus: #485a34;
+  --focus-ring: #485a34;
+  --accent-primary: #485a34;
+  --accent-hover: #344425;
+  --accent-text: #f3efdf;
 }
 
 /* Dark High-Contrast Theme */
@@ -86,10 +100,10 @@
   --text-secondary: #cfccc2;
   --text-muted: #9e9a8f;
   --border-color: #47453e;
-  --border-focus: #e07a38;
-  --focus-ring: #e07a38;
-  --accent-primary: #d96820;
-  --accent-hover: #f07e35;
+  --border-focus: #bccba0;
+  --focus-ring: #bccba0;
+  --accent-primary: #bccba0;
+  --accent-hover: #d1ddba;
   --accent-text: #161614;
   --warning-bg: #2d2113;
   --warning-border: #f09543;
@@ -110,10 +124,10 @@
     --text-secondary: #cfccc2;
     --text-muted: #9e9a8f;
     --border-color: #47453e;
-    --border-focus: #e07a38;
-    --focus-ring: #e07a38;
-    --accent-primary: #d96820;
-    --accent-hover: #f07e35;
+    --border-focus: #bccba0;
+    --focus-ring: #bccba0;
+    --accent-primary: #bccba0;
+    --accent-hover: #d1ddba;
     --accent-text: #161614;
     --warning-bg: #2d2113;
     --warning-border: #f09543;
@@ -222,7 +236,7 @@ button.secondary-btn {
   padding: 32px 24px;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 32px;
 }
 
 /* Header */
@@ -235,13 +249,13 @@ button.secondary-btn {
 }
 
 .app-title-group h1 {
-  font-size: 28px;
+  font-size: 1.75rem;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 .app-title-group p {
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--text-secondary);
   margin-top: 4px;
 }
@@ -267,7 +281,7 @@ button.secondary-btn {
 
 .step-label {
   display: block;
-  font-size: 19px;
+  font-size: 1.1875rem;
   font-weight: 700;
   margin-bottom: 12px;
   color: var(--text-primary);
@@ -276,7 +290,7 @@ button.secondary-btn {
 /* Radio Option Grid */
 .radio-group-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
   gap: 12px;
 }
 
@@ -310,12 +324,12 @@ button.secondary-btn {
 }
 
 .radio-title {
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 600;
 }
 
 .radio-sub {
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--text-secondary);
   margin-top: 2px;
 }
@@ -325,7 +339,7 @@ button.secondary-btn {
   border: 2px dashed var(--border-color);
   border-radius: var(--radius-lg);
   padding: 36px 20px;
-  text-align: center;
+  text-align: start;
   background-color: var(--bg-primary);
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -337,13 +351,13 @@ button.secondary-btn {
 }
 
 .dropzone-prompt {
-  font-size: 19px;
+  font-size: 1.1875rem;
   font-weight: 600;
   margin-bottom: 8px;
 }
 
 .dropzone-help {
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--text-muted);
   margin-bottom: 16px;
 }
@@ -370,7 +384,7 @@ button.secondary-btn {
 }
 
 .file-meta {
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--text-muted);
 }
 
@@ -382,7 +396,7 @@ button.secondary-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
   padding: 8px 0;
   cursor: pointer;
@@ -420,7 +434,7 @@ button.secondary-btn {
 }
 
 .progress-message {
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 600;
 }
 
@@ -428,7 +442,7 @@ button.secondary-btn {
   width: 100%;
   height: 20px;
   background-color: var(--bg-primary);
-  border-radius: 10px;
+  border-radius: 2px;
   overflow: hidden;
   border: 1px solid var(--border-color);
 }
@@ -452,7 +466,7 @@ button.secondary-btn {
   border: 1px solid var(--warning-border);
   color: var(--warning-text);
   border-radius: var(--radius-md);
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 600;
 }
 
@@ -482,15 +496,13 @@ button.secondary-btn {
 }
 
 .pane-title {
-  font-size: 16px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text-muted);
 }
 
 .pane-content {
-  font-size: 20px;
+  font-size: 1.25rem;
   line-height: 1.6;
 }
 
@@ -606,7 +618,6 @@ button.secondary-btn {
   right: 0;
   height: 3px;
   background-color: var(--accent-primary);
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.45);
   pointer-events: none;
   z-index: 9999;
   transition: top 0.05s ease-out;
@@ -656,4 +667,125 @@ button.secondary-btn {
     page-break-inside: avoid;
     break-inside: avoid;
   }
+}
+
+.app-header, .header-controls, .progress-header, .reader-toolbar, .review-actions, .file-badge {
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.app-title-group, .file-info, .review-pane, fieldset {
+  min-width: 0;
+}
+
+.file-name, .pane-content, .progress-header p {
+  overflow-wrap: anywhere;
+}
+
+.radio-card:has(input:focus-visible) {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.text-size-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border-block: 1px solid var(--border-color);
+}
+
+.text-size-options .radio-card {
+  flex: 1 1 9rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  justify-content: flex-start;
+  padding: 16px;
+}
+
+.text-size-options .radio-card.selected {
+  background: var(--bg-surface-raised);
+  box-shadow: inset 0 -2px var(--accent-primary);
+}
+
+.text-size-options .radio-title {
+  font-weight: 650;
+}
+
+.text-size-custom {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  flex-basis: 100%;
+}
+
+.text-size-custom label {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+textarea, input, select {
+  max-width: 100%;
+}
+
+@media (max-width: 600px) {
+  .app-container { padding: 16px; }
+  .panel, .progress-container, .review-pane { padding: 16px; }
+  .reader-body { padding: 24px 16px; }
+  .app-title-group h1 { font-size: 1.5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
+}
+
+@media (forced-colors: active) {
+  .radio-card.selected { outline: 2px solid Highlight; }
+  .progress-fill { background: Highlight; forced-color-adjust: none; }
+  button, select, input, textarea { border: 1px solid ButtonText; }
+}
+
+.format-options {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-color);
+}
+
+.format-options .radio-card {
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  background: transparent;
+  padding-inline-start: 48px;
+}
+
+.format-options .radio-card.selected {
+  background: var(--bg-surface-raised);
+}
+
+.format-options input[type="radio"] {
+  opacity: 1;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  inset-inline-start: 16px;
+  accent-color: var(--accent-primary);
+}
+
+input[type="number"], textarea {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.output-options { margin-top: 24px; }
+.output-options summary {
+  min-height: 48px;
+  padding-block: 12px;
+  cursor: pointer;
+  font-weight: 600;
 }

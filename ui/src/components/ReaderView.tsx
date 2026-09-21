@@ -22,7 +22,7 @@ const HeadingBlock: React.FC<{
   const style: React.CSSProperties = {
     marginTop: '1.2em',
     marginBottom: '0.6em',
-    fontSize: `${fontSize * (boundedLevel === 1 ? 1.4 : 1.2)}px`,
+    fontSize: `${fontSize / 12 * (boundedLevel === 1 ? 1.4 : 1.2)}rem`,
     fontWeight: 700,
   };
 
@@ -45,9 +45,9 @@ const HeadingBlock: React.FC<{
 export type ReaderFont = 'system' | 'hyperlegible' | 'lexend' | 'mono';
 
 const FONT_FAMILIES: Record<ReaderFont, string> = {
-  system: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  hyperlegible: '"Atkinson Hyperlegible", "Segoe UI", sans-serif',
-  lexend: '"Lexend", "Segoe UI", sans-serif',
+  system: 'var(--font-family)',
+  hyperlegible: 'var(--font-family-arabic)',
+  lexend: 'Georgia, serif',
   mono: 'Consolas, "Courier New", monospace',
 };
 
@@ -115,7 +115,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             border: '1px solid var(--success-border)',
             borderRadius: 'var(--radius-md)',
             color: 'var(--success-text)',
-            fontSize: '15px',
+            fontSize: '0.9375rem',
             marginBottom: '8px',
           }}
         >
@@ -124,7 +124,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             <span
               style={{
                 fontFamily: 'Consolas, monospace',
-                fontSize: '13px',
+                fontSize: '0.8125rem',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -140,7 +140,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               type="button"
               className="primary-btn"
               onClick={() => sidecar.openPathInSystem(exportedFilePath)}
-              style={{ minHeight: '38px', padding: '6px 14px', fontSize: '14px' }}
+              style={{ minHeight: '48px', padding: '6px 14px', fontSize: '0.875rem' }}
             >
               {t('file.open_file')}
             </button>
@@ -148,7 +148,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               type="button"
               className="secondary-btn"
               onClick={() => sidecar.revealInFolder(exportedFilePath)}
-              style={{ minHeight: '38px', padding: '6px 14px', fontSize: '14px' }}
+              style={{ minHeight: '48px', padding: '6px 14px', fontSize: '0.875rem' }}
             >
               {t('file.show_in_folder')}
             </button>
@@ -181,7 +181,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontWeight: 600, fontSize: '15px' }}>Text Size:</span>
+          <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>Text Size:</span>
           <button
             type="button"
             className="secondary-btn"
@@ -205,7 +205,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
         {/* Font Family Selection */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <label htmlFor="reader-font-select" style={{ fontWeight: 600, fontSize: '15px' }}>
+          <label htmlFor="reader-font-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
             Font:
           </label>
           <select
@@ -220,15 +220,15 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            <option value="system">System Clean</option>
-            <option value="hyperlegible">Atkinson Hyperlegible</option>
-            <option value="lexend">Lexend</option>
+            <option value="system">Source Sans 3</option>
+            <option value="hyperlegible">Noto Sans Arabic</option>
+            <option value="lexend">Georgia</option>
             <option value="mono">Monospace</option>
           </select>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <label htmlFor="line-spacing-select" style={{ fontWeight: 600, fontSize: '15px' }}>
+          <label htmlFor="line-spacing-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
             Spacing:
           </label>
           <select
@@ -251,7 +251,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <label htmlFor="reading-width-select" style={{ fontWeight: 600, fontSize: '15px' }}>
+          <label htmlFor="reading-width-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
             Width:
           </label>
           <select
@@ -275,7 +275,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <label htmlFor="theme-select" style={{ fontWeight: 600, fontSize: '15px' }}>
+          <label htmlFor="theme-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
             Theme:
           </label>
           <select
@@ -340,7 +340,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
         {pages.length > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label htmlFor="page-jump-select" style={{ fontWeight: 600, fontSize: '15px' }}>
+            <label htmlFor="page-jump-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
               Page:
             </label>
             <select
@@ -388,7 +388,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       <main
         className="reader-body"
         style={{
-          fontSize: `${fontSize}pt`,
+          fontSize: `${fontSize / 12}rem`,
           lineHeight: lineHeight,
           maxWidth: `${readingWidth}ch`,
           fontFamily: FONT_FAMILIES[readerFont],
@@ -494,7 +494,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   color: 'var(--text-muted)',
                 }}
               >
-                {block.text || `— Original Page ${block.source_page} —`}
+                {block.text || `Original page ${block.source_page}`}
               </div>
             );
           }

@@ -10,9 +10,9 @@ interface TextSizeSelectorProps {
 
 const SIZES: { size: TextSize; label: string; description: string }[] = [
   { size: 18, label: '18 pt', description: 'Standard large print' },
-  { size: 20, label: '20 pt (Default)', description: 'Recommended for most readers' },
+  { size: 20, label: '20 pt', description: 'Default size' },
   { size: 24, label: '24 pt', description: 'Enhanced visibility' },
-  { size: 28, label: '28 pt', description: 'Maximum enlargement' },
+  { size: 28, label: '28 pt', description: 'Larger text' },
 ];
 
 const MIN_CUSTOM_PT = 14;
@@ -29,7 +29,7 @@ export const TextSizeSelector: React.FC<TextSizeSelectorProps> = ({
   return (
     <fieldset className="decision-step" style={{ border: 'none', padding: 0 }}>
       <legend className="step-label">2. Choose text size</legend>
-      <div className="radio-group-grid" role="radiogroup" aria-label="Text size options">
+      <div className="text-size-options" role="radiogroup" aria-label="Text size options">
         {SIZES.map((item) => {
           const isSelected = !isCustom && value === item.size;
           return (
@@ -49,17 +49,15 @@ export const TextSizeSelector: React.FC<TextSizeSelectorProps> = ({
                   onChange(item.size);
                 }}
               />
-              <span className="radio-title">{item.label}</span>
+              <span className="radio-title" style={{ fontSize: `${item.size / 16}rem` }}>{item.label}</span>
               <span className="radio-sub">{item.description}</span>
             </label>
           );
         })}
 
         {onCustomBodyPtChange && (
-          <label
-            className={`radio-card ${isCustom ? 'selected' : ''}`}
-            htmlFor="size-custom"
-          >
+          <div className="text-size-custom">
+            <label htmlFor="size-custom">
             <input
               type="radio"
               id="size-custom"
@@ -69,6 +67,7 @@ export const TextSizeSelector: React.FC<TextSizeSelectorProps> = ({
               onChange={() => onCustomBodyPtChange(isCustom ? customBodyPt ?? 22 : 22)}
             />
             <span className="radio-title">Custom size</span>
+            </label>
             <span className="radio-sub" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
               <label htmlFor="custom-body-pt" style={{ fontWeight: 600 }}>
                 Body size:
@@ -92,7 +91,7 @@ export const TextSizeSelector: React.FC<TextSizeSelectorProps> = ({
               />
               <span>pt</span>
             </span>
-          </label>
+          </div>
         )}
       </div>
     </fieldset>

@@ -90,14 +90,14 @@ const en: Record<string, string> = {
   'progress.cancel': 'Cancel',
 
   // Review screen
-  'review.banner': '{count} pages may need review',
+  'review.banner': 'Sections needing review: {count}',
   'review.original_pane': 'ORIGINAL',
   'review.converted_pane': 'CONVERTED',
   'review.accept': 'Accept',
   'review.accept_as_is': 'Accept as-is',
   'review.accept_all': 'Okay to all',
   'review.accept_all_aria': 'Accept all flagged sections and continue to reader',
-  'review.retry': 'Retry at higher accuracy',
+  'review.retry': 'Recognize this page again',
   'review.retrying': 'Re-recognizing page...',
   'review.finish': 'Continue to Reader',
   'review.previous': 'Previous',

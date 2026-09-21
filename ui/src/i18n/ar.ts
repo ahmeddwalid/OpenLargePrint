@@ -90,14 +90,14 @@ const ar: Record<string, string> = {
   'progress.cancel': 'إلغاء',
 
   // Review screen
-  'review.banner': '{count} صفحات قد تحتاج مراجعة',
+  'review.banner': 'مقاطع تحتاج مراجعة: {count}',
   'review.original_pane': 'الأصل',
   'review.converted_pane': 'المحوّل',
   'review.accept': 'قبول',
   'review.accept_as_is': 'قبول كما هو',
   'review.accept_all': 'موافق على الكل',
   'review.accept_all_aria': 'قبول جميع الأقسام المحددة للمراجعة والمتابعة إلى القارئ',
-  'review.retry': 'إعادة المحاولة بدقة أعلى',
+  'review.retry': 'إعادة التعرف على الصفحة',
   'review.retrying': 'جارٍ إعادة التعرف على الصفحة...',
   'review.finish': 'متابعة إلى القارئ',
   'review.previous': 'السابق',
