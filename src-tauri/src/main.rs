@@ -237,6 +237,9 @@ fn resolve_sidecar_binary() -> PathBuf {
     PathBuf::from(names[0])
 }
 
+// Windows-only Win32 common-dialog FFI. Gated so non-Windows builds do not try
+// to link `comdlg32`, which does not exist on Linux/macOS.
+#[cfg(target_os = "windows")]
 #[repr(C)]
 struct OpenFileNameW {
     l_struct_size: u32,
@@ -264,6 +267,7 @@ struct OpenFileNameW {
     flags_ex: u32,
 }
 
+#[cfg(target_os = "windows")]
 #[link(name = "comdlg32")]
 extern "system" {
     fn GetOpenFileNameW(lpofn: *mut OpenFileNameW) -> i32;
