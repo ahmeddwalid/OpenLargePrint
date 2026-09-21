@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-21
 
 Reliability and output-fidelity hardening. These changes fix the paths that caused converted
 documents to lose images, ignore the configured text size, or render with clipped/corrupt layout.

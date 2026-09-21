@@ -17,7 +17,7 @@ export interface UpdateInfo {
   assetName?: string;
 }
 
-export const CURRENT_VERSION = '0.1.0';
+export const CURRENT_VERSION = '0.2.0';
 const REPO_OWNER = 'ahmeddwalid';
 const REPO_NAME = 'OpenLargePrint';
 const RELEASES_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
