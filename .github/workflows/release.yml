@@ -96,7 +96,9 @@ jobs:
           $stable = "packaging/dist/OpenLargePrint-Setup-x64.exe"
           Copy-Item -LiteralPath $installer.FullName -Destination $stable -Force
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stable).Hash.ToLowerInvariant()
-          Add-Content "packaging/dist/SHA256SUMS.txt" ("{0}  OpenLargePrint-Setup-x64.exe" -f $hash)
+          $sums = "packaging/dist/SHA256SUMS.txt"
+          $existing = (Get-Content $sums -Raw).TrimEnd("`r", "`n")
+          Set-Content $sums -Value ($existing + "`r`n" + ("{0}  OpenLargePrint-Setup-x64.exe" -f $hash)) -Encoding ascii
           Write-Host ("Stable download name ready: {0}" -f $stable)
 
       - name: Publish GitHub Release

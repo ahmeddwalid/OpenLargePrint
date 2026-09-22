@@ -63,24 +63,27 @@ Quality reports distinguish measured text error from missing reference transcrip
 
 Pre-compiled packages for Windows 10 and 11 (64-bit) are available on the [GitHub Releases](https://github.com/ahmeddwalid/OpenLargePrint/releases) page.
 
-### Current Release: v0.2.0
+### Current Release: v0.3.0
 
 | Package | Format | File Size | Description |
 |---|---|---|---|
-| [`OpenLargePrint_0.2.0_x64-setup.exe`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.2.0/OpenLargePrint_0.2.0_x64-setup.exe) | NSIS Installer | ~117 MB | Standard Windows installer with start menu and context menu integration |
-| [`OpenLargePrint_0.2.0_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.2.0/OpenLargePrint_0.2.0_windows_x64_portable.zip) | Portable Archive | ~117 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
+| [`OpenLargePrint-Setup-x64.exe`](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/OpenLargePrint-Setup-x64.exe) | NSIS Installer | ~117 MB | Standard Windows installer with start menu and context menu integration. This link always fetches the newest stable release |
+| [`OpenLargePrint_0.3.0_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.3.0/OpenLargePrint_0.3.0_windows_x64_portable.zip) | Portable Archive | ~117 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
 
 ### Checksums (SHA-256)
 
 ```text
-d21e129a5ee09c617dd83c9c496b21ae49988b9338699a8bb91fa2babad1a2a5  OpenLargePrint_0.2.0_x64-setup.exe
-5db744845ce6c0123cff625b670df45333e26e5c08bae8577a3c836aebd3f62e  OpenLargePrint_0.2.0_windows_x64_portable.zip
+dda30cfc9d28ced67107d5f3c7fe5a5cc7b862f5962186b27c3da9beba33898f  OpenLargePrint-Setup-x64.exe
+dda30cfc9d28ced67107d5f3c7fe5a5cc7b862f5962186b27c3da9beba33898f  OpenLargePrint_0.3.0_x64-setup.exe
+3ab45a755ebe32c3ba30750a3fa0e0aa218587387e7c1b440b229150b7c86e90  OpenLargePrint_0.3.0_windows_x64_portable.zip
 ```
+
+The stable download name and the versioned installer are the same file, so they share one hash.
 
 To verify the downloaded installer on Windows PowerShell:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 OpenLargePrint_0.2.0_x64-setup.exe
+Get-FileHash -Algorithm SHA256 OpenLargePrint-Setup-x64.exe
 ```
 
 ### Code signing and Smart App Control
