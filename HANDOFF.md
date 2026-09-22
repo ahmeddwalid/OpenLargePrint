@@ -128,15 +128,75 @@ A third pass completed the review flow, hardened the update system, and redesign
 Verified on this machine: 148 pytest passed, 12 vitest passed, `tsc --noEmit` clean, `cargo check`
 clean, `cargo test` clean, production `npm run build` succeeds with the fonts in `ui/dist/fonts/`.
 
-## Still open (release blockers, unchanged)
+## Pass 4 — Smart App Control, benchmark gate, real-document acceptance
 
-- Optional higher-accuracy OCR pack and verified Arabic scan recognition (`OCR-002..003`, `LANG-002`).
-- `BenchmarkCase.expected_*` fields still unused (metrics are real, but not compared against
-  per-case expectations).
-- Packaged Windows CPU/GPU corpus runs, Linux desktop tests, screen-reader checks, physical printing
-  at 100% scale, and target-machine RAM/VRAM measurement (`PKG-001`, `PERF-002`, `QA-001`).
+### Windows Smart App Control (`PKG-001`)
 
----
+Reporter's machine: `VerifiedAndReputablePolicyState = 1` (enforced). Code Integrity events 3033/3077 name
+`%LOCALAPPDATA%\OpenLargePrint\openlargeprint-desktop.exe` and `uninstall.exe` as failing "the Enterprise signing level
+requirements". The block applies to the installed executables, so signing only the NSIS installer could never fix it.
+
+- `packaging/sign_windows.ps1` (new): single signing entry point, SHA-256, RFC 3161 timestamp, post-sign `/pa`
+  verification, fails closed.
+- `packaging/verify_signatures.ps1` (new): release gate over real Authenticode state, optional publisher pinning,
+  non-zero exit on anything unsigned.
+- `packaging/build_windows_app.ps1`: `tauri build --no-bundle` -> sign shell + sidecar -> `tauri bundle --bundles nsis`
+  -> sign installer, so signatures are sealed inside the installer. Flip `OLP_REQUIRE_SIGNING=1` to make an unsigned
+  build a hard failure.
+- `packaging/create_self_signed_cert.ps1`: now imports the generated certificate into `Cert:\CurrentUser\Root`, which
+  `signtool verify /pa` requires (previously it exported the certificate but never trusted it).
+- Verified by signing a genuinely unsigned PE (a copy of `rustc.exe`, confirmed `NotSigned`): signature valid,
+  publisher `CN=OpenLargePrint`, timestamped, gate exit 0; gate exit 1 on an unsigned file and on a publisher mismatch.
+- Still required for users: a publicly trusted certificate (SignPath Foundation application, or a commercial/EV
+  certificate). Until then releases stay unsigned and Smart App Control keeps blocking them.
+
+### Benchmark corpus is now a gate (`QA-001`)
+
+`BenchmarkCase.expected_*` was dead data. `CASE_EXPECTATIONS` in `src/openlargeprint/qa/corpus_builder.py` now carries
+per-case structure (pages, required text, table, images), `_check_expectations()` compares every run against it, and
+`python -m openlargeprint.cli benchmark --fail-on-mismatch` is a CI job (`benchmark-gate`). Verified that the gate
+fires for a lost page, lost text, lost table, lost images, and an unexpectedly converted malformed fixture.
+
+Measured on this machine (`benchmark --fail-on-mismatch`, 16/16 cases converted, 0 expectation mismatches):
+
+| Case | CER | WER | Order | Table | Images | Anchors | s/page |
+|---|---|---|---|---|---|---|---|
+| born_digital_english | 0.000 | 0.000 | 1.00 | 1.00 | 1.00 | 1.00 | 0.10 |
+| skewed_page | 0.000 | 0.000 | 1.00 | 1.00 | 1.00 | 1.00 | 2.06 |
+| low_res_scan | 0.000 | 0.000 | 1.00 | 1.00 | 1.00 | 1.00 | 1.89 |
+| scanned_english | 0.031 | 0.333 | 1.00 | 1.00 | 1.00 | 1.00 | 4.67 |
+| scanned_table | 0.488 | 1.750 | 1.00 | 1.00 | 1.00 | 1.00 | 2.82 |
+| arabic_scan | N/A | N/A | 1.00 | 1.00 | 1.00 | 1.00 | 4.27 |
+| all other cases | N/A | N/A | 1.00 | 1.00 | 1.00 | 1.00 | 0.07-3.01 |
+
+Reading order, table, image retention and anchor columns are heuristics; CER/WER are null where no reference transcript
+exists. `arabic_scan` reporting N/A is the visible form of the open `SPEC 6.3` gate.
+
+### Real-document acceptance (`QA-001`, `PERF-002`)
+
+`scripts/acceptance_run.py` converts every PDF in `test-documents/` and records pages, anchors, geometry, warnings,
+time per page, and peak process RAM; it writes `acceptance.md`/`acceptance.json` under `scratch/acceptance/`.
+Document text is never written to the report (SEC-007) and the input directory is never modified.
+
+Smoke run (8 real documents, first 3 pages each, A4): 0 failures, 0 pages lost their anchor, 0 geometry mismatches,
+0.79-3.86 s/page, 767-824 MB peak process RAM.
+
+`get_current_ram_mb()` was returning 0.0 on Windows: ctypes passed the process handle with default marshalling, the
+handle truncated to 32 bits, `GetProcessMemoryInfo` failed, and the function reported a healthy-looking zero. Every
+performance number in earlier reports was meaningless; fixed with explicit `argtypes`/`restype` and covered by a test.
+
+## Still open (release blockers)
+
+- **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Until a
+  trusted certificate is configured, Windows 11 with Smart App Control enforced cannot run the application at all.
+- **The generated uninstaller stays unsigned**: NSIS creates `uninstall.exe` at install time, so it does not inherit
+  the installer's signature and Smart App Control blocks the Settings > Apps entry. Needs an NSIS build hook.
+- Optional higher-accuracy OCR pack and verified Arabic scan recognition (`OCR-002..003`, `LANG-002`); the Arabic
+  corpus case still has no reference transcript, so its CER/WER are unmeasured.
+- Packaged Windows CPU/GPU corpus runs, Linux desktop tests, screen-reader checks, physical printing at 100% scale,
+  and target-machine RAM/VRAM measurement (`PKG-001`, `PERF-002`, `QA-001`) — the acceptance harness now produces the
+  numbers, but a packaged (signed) build has not been measured on a Smart App Control machine yet.
+- Automated UI accessibility gates (axe + 200% text scale) are not yet in the UI test suite.
 
 ## Environment gotchas (this machine)
 
