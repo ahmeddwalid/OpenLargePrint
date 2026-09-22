@@ -203,6 +203,30 @@ recovery affects asset availability and reporting rather than the visible page. 
 filter keeps, now survive instead of being lost. Whether a page-filling image should be retained when it is the page's
 only content remains an open product decision (see below).
 
+### Arabic recognition lane (`LANG-002`, `OCR-002`, `OCR-003`)
+
+The Arabic corpus page was unmeasurable twice over: it was drawn with PIL's default bitmap font, which has no
+Arabic glyph coverage, so the page held replacement boxes rather than Arabic, and it carried no reference
+transcript, which is why `arabic_scan` reported CER and WER as unavailable. The page is now drawn with the bundled
+Noto Sans Arabic face and the drawn lines are its transcript, so the case produces real numbers.
+
+Measured on this machine against that transcript:
+
+| Engine | Recognised text | CER |
+|---|---|---|
+| Bundled `ch_PP-OCRv4` (the current default) | `pbsUggb` | 1.000 |
+| `arabic_PP-OCRv3` recognition model | the expected Arabic line | 0.300 |
+
+The Arabic model is `languages/arabic/rec.onnx` plus its dictionary from the `monkt/paddleocr-onnx` conversion of
+the PaddleOCR Arabic recognition model (Apache-2.0, same as PaddleOCR), 8,978,664 bytes,
+sha256 `7982d371612785238fd99080cff36354deaec84fdc6ff7da9c82af4243fa0c9a`; dictionary 405 bytes,
+sha256 `637c27c88512c22089bef927b34ada08f748dc132ac70facd68d8202384c2726`. It loads under the engine already in
+use (`rec_model_path` plus `rec_keys_path`), so no new runtime dependency is needed.
+
+Still to do for this lane: add the artifact to `PINNED_MODELS` with those hashes and a download path, construct a
+second engine instance using it, route pages whose detected script is Arabic to that engine, and gate the result
+with a corpus expectation on the Arabic case instead of leaving it unmeasured.
+
 ## Still open (release blockers)
 
 - **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Until a
