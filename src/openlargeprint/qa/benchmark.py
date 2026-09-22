@@ -27,10 +27,15 @@ def get_current_ram_mb() -> float:
         import resource
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
     except ImportError:
-        # Windows API fallback via ctypes
+        # Windows API fallback via ctypes (PERF-002).
+        # GetProcessMemoryInfo must be declared with explicit argtypes/restype: a process
+        # handle passed with ctypes' default C int truncates to 32 bits, the call fails,
+        # and this function then silently reports 0.0 MB, which makes every performance
+        # number in the reports meaningless.
         try:
             import ctypes
             from ctypes import wintypes
+
             class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
                 _fields_ = [
                     ("cb", wintypes.DWORD),
@@ -44,10 +49,21 @@ def get_current_ram_mb() -> float:
                     ("PagefileUsage", ctypes.c_size_t),
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+            psapi.GetProcessMemoryInfo.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+                wintypes.DWORD,
+            ]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+
             counters = PROCESS_MEMORY_COUNTERS()
             counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-            handle = ctypes.windll.kernel32.GetCurrentProcess()
-            if ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            handle = kernel32.GetCurrentProcess()
+            if psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
                 return counters.PeakWorkingSetSize / (1024.0 * 1024.0)
         except Exception:
             pass
