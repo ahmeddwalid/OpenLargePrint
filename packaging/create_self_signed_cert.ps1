@@ -41,6 +41,16 @@ if ($Existing -and -not $Force) {
     # Export public certificate (.cer)
     $CerPath = Join-Path $CertDir "OpenLargePrint-CodeSigning.cer"
     Export-Certificate -Cert $Cert -FilePath $CerPath | Out-Null
+
+# Trust the development certificate locally so `signtool verify /pa` succeeds.
+# This does NOT make Smart App Control accept the binary: SAC only trusts certificates
+# that chain to the Microsoft Trusted Root Program (see SIGNING.md).
+try {
+    Import-Certificate -FilePath $CerPath -CertStoreLocation "Cert:\CurrentUser\Root" -ErrorAction Stop | Out-Null
+    Write-Host "Imported the certificate into Cert:\CurrentUser\Root (development machines only)." -ForegroundColor Yellow
+} catch {
+    Write-Host "Note: could not import the certificate into Cert:\CurrentUser\Root: $($_.Exception.Message)" -ForegroundColor Yellow
+}
     
     # Export PFX
     $PfxPath = Join-Path $CertDir "OpenLargePrint-CodeSigning.pfx"
@@ -76,6 +86,16 @@ Write-Host "  Valid Until: $($Cert.NotAfter)"
 $CerPath = Join-Path $CertDir "OpenLargePrint-CodeSigning.cer"
 Export-Certificate -Cert $Cert -FilePath $CerPath | Out-Null
 Write-Host "Exported public certificate to: $CerPath" -ForegroundColor Green
+
+# Trust the development certificate locally so `signtool verify /pa` succeeds.
+# This does NOT make Smart App Control accept the binary: SAC only trusts certificates
+# that chain to the Microsoft Trusted Root Program (see SIGNING.md).
+try {
+    Import-Certificate -FilePath $CerPath -CertStoreLocation "Cert:\CurrentUser\Root" -ErrorAction Stop | Out-Null
+    Write-Host "Imported the certificate into Cert:\CurrentUser\Root (development machines only)." -ForegroundColor Yellow
+} catch {
+    Write-Host "Note: could not import the certificate into Cert:\CurrentUser\Root: $($_.Exception.Message)" -ForegroundColor Yellow
+}
 
 # Export PFX with password
 $PfxPath = Join-Path $CertDir "OpenLargePrint-CodeSigning.pfx"

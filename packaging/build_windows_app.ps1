@@ -119,13 +119,44 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "Packaging verification gate failed."
 }
 
-# 6. Bundle Windows application with Tauri
-Write-Host "[6/6] Building Windows desktop bundle (NSIS installer)..." -ForegroundColor Green
+# 6. Compile the desktop shell, sign it, then assemble the installer.
+#    Smart App Control evaluates the executables Windows will load after install,
+#    so the shell and the sidecar must be signed BEFORE the NSIS bundle seals them
+#    inside the installer (signing the installer alone is not sufficient) (PKG-001).
+Write-Host "[6/6] Building Windows desktop shell (unbundled)..." -ForegroundColor Green
 Push-Location "$RepoRoot\src-tauri"
 try {
-    npx -y @tauri-apps/cli build
+    npx -y @tauri-apps/cli@2 build --no-bundle
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Notice: If cargo build script is blocked by Smart App Control, ensure Developer Mode is enabled in Windows Settings." -ForegroundColor Yellow
+        Write-Host "Notice: If the cargo build is blocked by Smart App Control, enable Developer Mode in Windows Settings." -ForegroundColor Yellow
+        Write-Error "Tauri build failed."
+    }
+} finally {
+    Pop-Location
+}
+
+$DesktopExe = Join-Path $RepoRoot "src-tauri\target\release\openlargeprint-desktop.exe"
+$SidecarExe = Join-Path $RepoRoot "src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe"
+
+if ($env:OLP_CODESIGN_THUMBPRINT) {
+    Write-Host "Signing desktop shell and engine sidecar before bundling..." -ForegroundColor Green
+    $PreBundleTargets = @($DesktopExe, $SidecarExe) | Where-Object { Test-Path $_ }
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "sign_windows.ps1") -Path $PreBundleTargets
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Pre-bundle code signing failed."
+    }
+} elseif ($env:OLP_REQUIRE_SIGNING -eq "1") {
+    Write-Error "OLP_REQUIRE_SIGNING=1 but OLP_CODESIGN_THUMBPRINT is not set; refusing to build artifacts that Smart App Control will block."
+} else {
+    Write-Host "WARNING: no signing certificate configured. The desktop shell and sidecar stay unsigned and will be blocked by Smart App Control on Windows 11 (PKG-001)." -ForegroundColor Yellow
+}
+
+Write-Host "Assembling NSIS installer from the signed binaries..." -ForegroundColor Green
+Push-Location "$RepoRoot\src-tauri"
+try {
+    npx -y @tauri-apps/cli@2 bundle --bundles nsis
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Tauri bundle step failed."
     }
 } finally {
     Pop-Location

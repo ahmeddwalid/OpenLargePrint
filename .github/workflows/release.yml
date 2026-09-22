@@ -57,6 +57,26 @@ jobs:
       - name: Build Windows NSIS installer and portable package
         run: powershell -ExecutionPolicy Bypass -File packaging/build_windows_app.ps1 -SkipSidecarBuild
 
+      # Windows 11 Smart App Control blocks unsigned executables outright. This gate
+      # inspects the real Authenticode state of what is about to be published.
+      # It becomes mandatory the moment signing is configured (see SIGNING.md).
+      - name: Verify Windows signatures (Smart App Control gate)
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        shell: pwsh
+        run: |
+          $artifacts = @()
+          $artifacts += Get-ChildItem "packaging/dist/OpenLargePrint_*_x64-setup.exe" | Select-Object -ExpandProperty FullName
+          $artifacts += (Resolve-Path "src-tauri/target/release/openlargeprint-desktop.exe").Path
+          $artifacts += (Resolve-Path "src-tauri/binaries/openlargeprint-sidecar-x86_64-pc-windows-msvc.exe").Path
+          powershell -ExecutionPolicy Bypass -File packaging/verify_signatures.ps1 `
+            -Path $artifacts -ExpectedPublisherMatch "SignPath Foundation"
+
+      - name: Flag unsigned artifacts
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID == '' }}
+        shell: pwsh
+        run: |
+          Write-Warning "No code signing is configured. Smart App Control on Windows 11 will block these artifacts for end users. See SIGNING.md section 3."
+
       - name: Verify release artifacts exist
         shell: pwsh
         run: |
