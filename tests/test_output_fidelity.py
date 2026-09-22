@@ -329,3 +329,21 @@ def test_failed_extraction_preserves_real_page_image(tmp_path: Path, monkeypatch
     assert retained
     assert Path(retained[0].image_asset.file_path).is_file()
     assert result.warnings
+def test_every_source_page_keeps_its_anchor(tmp_path: Path):
+    """No source page may be dropped during conversion (SPEC 2, PDF-006, OUT-005)."""
+    src = tmp_path / "six_pages.pdf"
+    c = canvas.Canvas(str(src), pagesize=letter)
+    for i in range(6):
+        c.setFont("Helvetica", 12)
+        c.drawString(60, 700, f"Article {i + 1}. This clause survives reflow.")
+        c.showPage()
+    c.save()
+
+    result = PipelineOrchestrator().convert(src, tmp_path / "six_pages_out.docx")
+
+    source_pages = {p.page_number for p in result.document_ir.pages}
+    marked_pages = {b.page_marker for b in result.document_ir.blocks if b.type == BlockType.PAGE_MARKER}
+
+    assert result.success is True
+    assert source_pages == {1, 2, 3, 4, 5, 6}
+    assert source_pages <= marked_pages, f"pages without an anchor: {sorted(source_pages - marked_pages)}"
