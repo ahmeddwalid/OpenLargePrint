@@ -146,6 +146,42 @@ def test_offline_conversion_network_isolation(tmp_path: Path, monkeypatch: pytes
     assert output_pdf.exists()
 
 
+def test_offline_conversion_cannot_even_create_a_socket(tmp_path, monkeypatch):
+    """No socket may be created and no DNS lookup may run (SEC-009).
+
+    Blocking only socket.connect() still allows a transport to be constructed, or a
+    name to be resolved, before the connection fails. This guards the stricter
+    property the product promises: the standard conversion path never touches the
+    network at all.
+    """
+    attempts: list[str] = []
+
+    class _BlockedSocket:
+        def __init__(self, *args, **kwargs):
+            attempts.append("socket.socket")
+            raise AssertionError("A socket was created during an offline conversion (SEC-009)")
+
+    def _blocked_getaddrinfo(*args, **kwargs):
+        attempts.append("socket.getaddrinfo")
+        raise AssertionError("A DNS lookup was attempted during an offline conversion (SEC-009)")
+
+    monkeypatch.setattr(socket, "socket", _BlockedSocket)
+    monkeypatch.setattr(socket, "getaddrinfo", _blocked_getaddrinfo)
+
+    input_pdf = tmp_path / "offline_strict.pdf"
+    c = canvas.Canvas(str(input_pdf))
+    c.drawString(72, 750, "Offline conversion guard")
+    c.showPage()
+    c.save()
+
+    output_pdf = tmp_path / "offline_strict_out.pdf"
+    res = PipelineOrchestrator().convert(input_pdf, output_pdf, export_format="pdf")
+
+    assert res.success
+    assert output_pdf.exists()
+    assert attempts == []
+
+
 def test_render_scale_bounds_oversized_pages():
     import math
     from openlargeprint.security.validator import bounded_pdf_scale, validate_image_dimensions, MAX_RENDER_PIXELS
