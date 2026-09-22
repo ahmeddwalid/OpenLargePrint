@@ -74,11 +74,10 @@ Pre-compiled packages for Windows 10 and 11 (64-bit) are available on the [GitHu
 
 ```text
 dda30cfc9d28ced67107d5f3c7fe5a5cc7b862f5962186b27c3da9beba33898f  OpenLargePrint-Setup-x64.exe
-dda30cfc9d28ced67107d5f3c7fe5a5cc7b862f5962186b27c3da9beba33898f  OpenLargePrint_0.3.0_x64-setup.exe
 3ab45a755ebe32c3ba30750a3fa0e0aa218587387e7c1b440b229150b7c86e90  OpenLargePrint_0.3.0_windows_x64_portable.zip
 ```
 
-The stable download name and the versioned installer are the same file, so they share one hash.
+The installer keeps one name across releases so the download link above stays valid; the release tag carries the version.
 
 To verify the downloaded installer on Windows PowerShell:
 

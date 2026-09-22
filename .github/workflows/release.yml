@@ -85,21 +85,23 @@ jobs:
           }
           Get-Content "packaging/dist/SHA256SUMS.txt"
 
-      # A versioned installer name breaks every "latest download" link as soon as the
-      # version changes, so publish a stable-named copy for the README button. It is the
-      # same bytes as the versioned installer, so it carries the same SHA-256 entry.
-      - name: Publish stable-named installer copy
+      # One installer, one stable name. A version-stamped asset name breaks the
+      # repository's latest-download link as soon as the version changes, and two .exe
+      # assets also make the in-app updater's asset choice depend on asset ordering.
+      # The version is carried by the release tag, not by the file name.
+      - name: Publish the installer under its stable name
         shell: pwsh
         run: |
           $installer = Get-ChildItem "packaging/dist/OpenLargePrint_*_x64-setup.exe" | Select-Object -First 1
           if (-not $installer) { throw "No Windows installer was produced." }
+          $versionedName = $installer.Name
           $stable = "packaging/dist/OpenLargePrint-Setup-x64.exe"
-          Copy-Item -LiteralPath $installer.FullName -Destination $stable -Force
+          Move-Item -LiteralPath $installer.FullName -Destination $stable -Force
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stable).Hash.ToLowerInvariant()
           $sums = "packaging/dist/SHA256SUMS.txt"
-          $existing = (Get-Content $sums -Raw).TrimEnd("`r", "`n")
-          Set-Content $sums -Value ($existing + "`r`n" + ("{0}  OpenLargePrint-Setup-x64.exe" -f $hash)) -Encoding ascii
-          Write-Host ("Stable download name ready: {0}" -f $stable)
+          $kept = Get-Content $sums | Where-Object { $_.Trim() -ne "" -and $_ -notmatch [regex]::Escape($versionedName) }
+          Set-Content -Path $sums -Value (($kept + ("{0}  OpenLargePrint-Setup-x64.exe" -f $hash)) -join "`r`n") -Encoding ascii
+          Write-Host ("Renamed {0} to the published name {1}" -f $versionedName, (Split-Path $stable -Leaf))
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -112,7 +114,6 @@ jobs:
           generate_release_notes: true
           files: |
             packaging/dist/OpenLargePrint-Setup-x64.exe
-            packaging/dist/OpenLargePrint_*_x64-setup.exe
             packaging/dist/OpenLargePrint_*_windows_x64_portable.zip
             packaging/dist/SHA256SUMS.txt
 
