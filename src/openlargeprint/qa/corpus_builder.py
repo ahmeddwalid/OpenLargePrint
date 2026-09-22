@@ -20,6 +20,13 @@ from openlargeprint.security.isolation import log_safe_info
 class BenchmarkCorpusBuilder:
     """Builds a complete, rights-safe synthetic benchmark corpus on demand."""
 
+    #: Text of the Arabic fixture page, in reading order. Used as its reference
+    #: transcript so Arabic recognition error rates are measured, not assumed.
+    _ARABIC_PAGE_LINES = (
+        "عقد بيع ابتدائي وتنازل",
+        "تم الاتفاق بين الطرفين على البنود والشروط المذكورة أدناه.",
+    )
+
     def __init__(self, output_dir: Path | str):
         self.output_dir = Path(output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -132,14 +139,38 @@ class BenchmarkCorpusBuilder:
         self._write_ground_truth(out_path, "\n".join(lines))
         return out_path
 
-    def build_arabic_scan(self) -> Path:
-        """Case 5: Arabic scan (tests RTL OCR)."""
-        out_path = self.output_dir / "05_arabic_scan.pdf"
+    def arabic_font(self, size: int) -> ImageFont.FreeTypeFont:
+        """Load the bundled Arabic face, or fail instead of drawing boxes (QA-002, OCR-003).
+
+        PIL's default bitmap font has no Arabic glyph coverage: drawing Arabic with
+        it produces replacement boxes, which turns the Arabic fixture into a page of
+        noise and makes every Arabic measurement meaningless.
+        """
+        relative = Path("ui") / "public" / "fonts" / "NotoSansArabic.ttf"
+        here = Path(__file__).resolve()
+        for parent in (here, *here.parents):
+            candidate = parent / relative
+            if candidate.exists():
+                return ImageFont.truetype(str(candidate), size)
+        raise FileNotFoundError(
+            "The bundled Arabic font is missing, so the Arabic benchmark page cannot be "
+            "rendered with real Arabic text."
+        )
+
+    def render_arabic_page(self) -> Image.Image:
+        """Draw the Arabic benchmark page (LANG-002, OCR-003)."""
         img = Image.new("RGB", (800, 1100), color=(252, 250, 246))
         draw = ImageDraw.Draw(img)
-        draw.text((300, 100), "عقد بيع ابتدائي وتنازل", fill=(10, 10, 10))
-        draw.text((200, 160), "تم الاتفاق بين الطرفين على البنود والشروط المذكورة أدناه.", fill=(20, 20, 20))
-        return self._save_image_as_pdf(img, out_path)
+        title, body = self._ARABIC_PAGE_LINES
+        draw.text((300, 100), title, fill=(10, 10, 10), font=self.arabic_font(34))
+        draw.text((60, 170), body, fill=(20, 20, 20), font=self.arabic_font(28))
+        return img
+
+    def build_arabic_scan(self) -> Path:
+        """Case 5: Arabic scan (tests RTL OCR, Arabic recognition and reading order)."""
+        out_path = self.output_dir / "05_arabic_scan.pdf"
+        self._write_ground_truth(out_path, "\n".join(self._ARABIC_PAGE_LINES))
+        return self._save_image_as_pdf(self.render_arabic_page(), out_path)
 
     def build_mixed_bidi(self) -> Path:
         """Case 6: Mixed Arabic/English (tests bidi layout)."""
