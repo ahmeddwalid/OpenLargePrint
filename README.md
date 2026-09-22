@@ -73,7 +73,14 @@ To verify the downloaded installer on Windows PowerShell:
 Get-FileHash -Algorithm SHA256 OpenLargePrint_0.2.0_x64-setup.exe
 ```
 
-The installer is not code-signed, so Windows SmartScreen may warn on first run. See [`SIGNING.md`](SIGNING.md) for signing options.
+### Code signing and Smart App Control
+
+These releases are **not yet code-signed**, which has two separate consequences on Windows:
+
+- **SmartScreen** may warn on first run. The warning can be dismissed with "More info" and "Run anyway".
+- **Smart App Control** (Windows 11) blocks the application outright. There is no override button: unsigned executables are treated as untrusted, and the block applies to the installed `openlargeprint-desktop.exe` and `openlargeprint-sidecar.exe` as well as to the installer. If Smart App Control is enabled on your machine, the application cannot be started until a signed release is published.
+
+The packaging pipeline signs the desktop shell, the engine sidecar, and the installer before the installer is assembled, and the release workflow refuses to publish artifacts that fail signature verification once a signing certificate is configured. Certificate options, the development-certificate workflow, and the exact commands are documented in [`SIGNING.md`](SIGNING.md).
 
 ## Installation and Updates
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Windows release signing (`PKG-001`, `SEC-006`)**: the packaging pipeline now signs the desktop shell and the engine sidecar *before* the NSIS installer is assembled, then signs the installer, because Windows 11 Smart App Control evaluates the installed executables rather than the installer and blocks unsigned ones with no override. `packaging/sign_windows.ps1` is the single signing entry point (SHA-256, RFC 3161 timestamp, post-sign verification, fails closed) and `packaging/verify_signatures.ps1` is a release gate that inspects real Authenticode state and can pin the expected publisher.
+
 ### Changed
 
 - **Interface redesign (`VIS-001..004`, `A11Y-001..005`, `UI-001`)**: the whole UI moved to a rem-based type scale built on bundled Source Sans 3 with Noto Sans Arabic for Arabic text (both OFL, recorded in the SBOM), so 200% text enlargement scales the chrome and the Reader together. The accent moved from terracotta to an olive tone on warm sepia, format and text-size choices became flat option strips instead of a repeated card grid, the export location moved behind a "Save location" disclosure, and reduced-motion and forced-colors media queries were added. All primary controls now target 48px.
