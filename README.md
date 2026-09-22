@@ -6,6 +6,16 @@
 
 <p align="center">Open-source, local-first desktop application that reconstructs dense PDFs, law books, and Office documents into large-print publications for low-vision readers.</p>
 
+<p align="center">
+  <a href="https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/OpenLargePrint-Setup-x64.exe">
+    <img src="https://img.shields.io/badge/Download_installer-Windows_11-5f7340?style=for-the-badge" alt="Download the latest OpenLargePrint installer for Windows">
+  </a>
+</p>
+
+<p align="center">Installs on Windows 11 and does not need Python or a terminal. The <a href="https://github.com/ahmeddwalid/OpenLargePrint/releases">releases page</a> also carries the portable archive, its SHA-256 checksums, and older versions.</p>
+
+<p align="center"><sub>Windows 11 Smart App Control refuses unsigned applications. Until a signing certificate is configured, installs on a machine with Smart App Control enforced need the steps in <a href="SIGNING.md">SIGNING.md</a>.</sub></p>
+
 ## Overview
 
 When low-vision readers encounter materials with dense layouts (such as two-column law textbooks, academic papers, and scanned legal documents), basic magnification tools like standard PDF zoom fail. Fixed-layout pages clip text, require constant horizontal scrolling, and overlap columns when magnified.

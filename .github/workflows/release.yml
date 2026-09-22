@@ -85,6 +85,20 @@ jobs:
           }
           Get-Content "packaging/dist/SHA256SUMS.txt"
 
+      # A versioned installer name breaks every "latest download" link as soon as the
+      # version changes, so publish a stable-named copy for the README button. It is the
+      # same bytes as the versioned installer, so it carries the same SHA-256 entry.
+      - name: Publish stable-named installer copy
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "packaging/dist/OpenLargePrint_*_x64-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "No Windows installer was produced." }
+          $stable = "packaging/dist/OpenLargePrint-Setup-x64.exe"
+          Copy-Item -LiteralPath $installer.FullName -Destination $stable -Force
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stable).Hash.ToLowerInvariant()
+          Add-Content "packaging/dist/SHA256SUMS.txt" ("{0}  OpenLargePrint-Setup-x64.exe" -f $hash)
+          Write-Host ("Stable download name ready: {0}" -f $stable)
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -95,6 +109,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
+            packaging/dist/OpenLargePrint-Setup-x64.exe
             packaging/dist/OpenLargePrint_*_x64-setup.exe
             packaging/dist/OpenLargePrint_*_windows_x64_portable.zip
             packaging/dist/SHA256SUMS.txt

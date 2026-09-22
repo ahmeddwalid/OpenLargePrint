@@ -167,7 +167,7 @@ is unsigned, tampered with, or signed by an unexpected publisher:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging/verify_signatures.ps1 `
-    -Path packaging/dist/OpenLargePrint_0.2.0_x64-setup.exe `
+    -Path packaging/dist/OpenLargePrint_0.3.0_x64-setup.exe `
     -ExpectedPublisherMatch "SignPath Foundation"
 ```
 
