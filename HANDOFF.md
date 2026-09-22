@@ -185,6 +185,24 @@ Smoke run (8 real documents, first 3 pages each, A4): 0 failures, 0 pages lost t
 handle truncated to 32 bits, `GetProcessMemoryInfo` failed, and the function reported a healthy-looking zero. Every
 performance number in earlier reports was meaningless; fixed with explicit `argtypes`/`restype` and covered by a test.
 
+### JBIG2 images were being dropped (`IMG-001`, `IMG-003`)
+
+Real scanned books store page images with codecs that pikepdf delegates to external helpers. On this machine every
+page of `English Phrasal Verbs In Use (Intermediate) (2004)_text.pdf` raised
+`pikepdf.DependencyError: jbig2dec - not installed or not found`, so those images were skipped with a warning.
+
+`extract_lossless_images_for_page()` now takes the matching pdfium page and recovers exactly the images whose pixel
+dimensions failed to decode, by asking pdfium for the same page object (pdfium carries its own decoders). Recovered
+copies are normalised to PNG, dimension-bounded before decoding (`SEC-003`), never added when the lossless path already
+produced the same image, and always reported: the warning states that the image was re-decoded rather than the original
+encoded stream, so the substitution stays visible. Verified on page 1 of that book, both page images are now produced
+as PNG assets where previously one was skipped.
+
+A page-filling image is still omitted from the reflowed output by the background-art filter, so for full-page scans the
+recovery affects asset availability and reporting rather than the visible page. Images smaller than a page, which the
+filter keeps, now survive instead of being lost. Whether a page-filling image should be retained when it is the page's
+only content remains an open product decision (see below).
+
 ## Still open (release blockers)
 
 - **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Until a
@@ -197,6 +215,9 @@ performance number in earlier reports was meaningless; fixed with explicit `argt
   and target-machine RAM/VRAM measurement (`PKG-001`, `PERF-002`, `QA-001`) — the acceptance harness now produces the
   numbers, but a packaged (signed) build has not been measured on a Smart App Control machine yet.
 - Automated UI accessibility gates (axe + 200% text scale) are not yet in the UI test suite.
+- **Page-filling images are omitted from reflowed output by design**: on the real textbooks that means the page artwork
+  drops out while text is preserved. Retaining it would contradict the "do not rasterise every page" rule in `SPEC 2`,
+  so it needs an explicit decision rather than a heuristic change.
 
 ## Environment gotchas (this machine)
 

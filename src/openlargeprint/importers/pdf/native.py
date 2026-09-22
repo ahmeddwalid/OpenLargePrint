@@ -153,6 +153,7 @@ class NativePdfImporter(BaseImporter):
                     images = extract_lossless_images_for_page(
                         pike_page, page_num, workspace.assets_dir,
                         on_warning=page_image_warnings.append,
+                        pdfium_page=page,
                     )
 
                     # Candidate figure bounds: IMAGE and FORM objects. Figures are often
