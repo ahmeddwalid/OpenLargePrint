@@ -227,6 +227,25 @@ Still to do for this lane: add the artifact to `PINNED_MODELS` with those hashes
 second engine instance using it, route pages whose detected script is Arabic to that engine, and gate the result
 with a corpus expectation on the Arabic case instead of leaving it unmeasured.
 
+### Release 0.3.0 (2026-09-22)
+
+Tag `v0.3.0` on `f26f61d`; both release jobs succeeded (Windows NSIS plus portable archive, Linux deb/rpm/AppImage)
+and the GitHub release is published as latest. The version is declared in `pyproject.toml`,
+`src/openlargeprint/version.py`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` with its `Cargo.lock` entry,
+`ui/package.json` and `ui/package-lock.json`, `uv.lock`, and `ui/src/api/update-checker.ts` (`CURRENT_VERSION`, which
+decides whether the running build reports itself as out of date).
+
+The README carries a one-click download button pointing at
+`releases/latest/download/OpenLargePrint-Setup-x64.exe`. That path only resolves because the release workflow now
+publishes a stable-named copy of the installer next to the versioned one and appends its checksum to
+`SHA256SUMS.txt`: the versioned asset name would break the link at every version change. Verified end to end after
+publishing: the URL redirects to the tag's installer, the downloaded file is 123,463,141 bytes with sha256
+`dda30cfc9d28ced67107d5f3c7fe5a5cc7b862f5962186b27c3da9beba33898f`, matching the published manifest, and starts with the
+`MZ` header of a Windows executable.
+
+The release is unsigned, so Smart App Control still blocks it on machines where the policy is enforced. That is the
+remaining blocker, and it is also stated next to the download button so nobody downloads 117 MB to find out.
+
 ## Still open (release blockers)
 
 - **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Until a
