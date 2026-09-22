@@ -293,3 +293,27 @@ class BenchmarkCorpusBuilder:
         notes.text = "Opening slide remarks for the board."
         prs.save(str(out_path))
         return out_path
+
+#: Expected structural properties per corpus case (QA-001). Keys must match build_all().
+#: Values are derived from what each fixture actually draws, so a mismatch means the
+#: pipeline lost text, pages, a table, or an image rather than that a number drifted.
+#: Scanned fixtures carry no drawn text: their recognition quality is measured through
+#: CER/WER against a reference transcript, not through keyword presence.
+CASE_EXPECTATIONS: Dict[str, Dict[str, object]] = {
+    "born_digital_english": {"page_count": 1, "keywords": ["mutual assent", "consideration"]},
+    "two_column_law": {"page_count": 1, "keywords": ["plaintiff", "jurisdiction"]},
+    "legal_footnotes": {"page_count": 1, "keywords": ["promissory estoppel"]},
+    "mixed_bidi": {"page_count": 1, "keywords": ["Civil Code No 131"]},
+    "images_captions": {"page_count": 1, "keywords": ["Patent Exhibit A"], "has_images": True},
+    "mixed_digital_scan": {"page_count": 2, "keywords": ["Digital cover page"]},
+    "page_numbering": {"page_count": 2, "keywords": ["Preface"]},
+    "scanned_table": {"has_table": True},
+    "malformed_pdf": {"expects_rejection": True},
+    "scanned_english": {"page_count": 1},
+    "arabic_scan": {"page_count": 1},
+    "rotated_page": {"page_count": 1},
+    "skewed_page": {"page_count": 1},
+    "low_res_scan": {"page_count": 1},
+    "docx_sample": {"page_count": 1},
+    "pptx_sample": {"page_count": 1},
+}

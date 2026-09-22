@@ -135,6 +135,54 @@ def _page_anchor_fidelity(doc: DocumentIR) -> float:
     return round(present / len(pages), 3)
 
 
+def _check_expectations(
+    case_name: str,
+    *,
+    page_count: int,
+    hyp_text: str,
+    metrics: Optional[EvaluationMetrics],
+    was_rejected: bool,
+) -> List[str]:
+    """Compare a measured case against CASE_EXPECTATIONS (QA-001).
+
+    The corpus is a gate, not a metric dump. A case that loses its text, its
+    pages, its table, or its images must be reported as a mismatch instead of
+    being counted as a pass, because "the conversion completed" is not a
+    statement about document fidelity (SPEC 2).
+    """
+    from .corpus_builder import CASE_EXPECTATIONS
+
+    expected = CASE_EXPECTATIONS.get(case_name)
+    if not expected:
+        return []
+
+    mismatches: List[str] = []
+
+    if expected.get("expects_rejection"):
+        if not was_rejected:
+            mismatches.append("fixture was expected to be rejected safely but it converted")
+        return mismatches
+
+    if was_rejected:
+        mismatches.append("fixture was rejected but was expected to convert")
+
+    if "page_count" in expected and page_count != expected["page_count"]:
+        mismatches.append(f"page count {page_count} != expected {expected['page_count']}")
+
+    lowered = hyp_text.lower()
+    for keyword in expected.get("keywords", ()):  # type: ignore[union-attr]
+        if str(keyword).lower() not in lowered:
+            mismatches.append(f"expected text is missing from the output: {keyword!r}")
+
+    if metrics is not None:
+        if expected.get("has_table") and metrics.table_score <= 0.0:
+            mismatches.append("a table was expected but no table structure was detected")
+        if expected.get("has_images") and metrics.image_retention <= 0.0:
+            mismatches.append("images were expected but none were retained")
+
+    return mismatches
+
+
 class BenchmarkCase(BaseModel):
     name: str
     file_path: str
@@ -156,6 +204,7 @@ class BenchmarkResult(BaseModel):
     error_message: Optional[str] = None
     measurement_notes: List[str] = Field(default_factory=list)
     peak_vram_mb: float | None = None
+    expectation_mismatches: List[str] = Field(default_factory=list)
 
 
 class BenchmarkReport(BaseModel):
@@ -170,6 +219,7 @@ class BenchmarkReport(BaseModel):
     average_wer: float | None = None
     average_speed_s_per_page: float = 0.0
     peak_ram_mb: float = 0.0
+    expectation_failures: int = 0
 
     def to_markdown_table(self) -> str:
         """Format benchmark results as a clean Markdown table (anti-slop, subject-grounded)."""
@@ -240,6 +290,9 @@ class BenchmarkRunner:
                     warning_count=1,
                     error_message=f"Safely caught: {failure}" if failure else "Malformed fixture was unexpectedly accepted.",
                     measurement_notes=["Rejection test; content fidelity metrics do not apply."],
+                    expectation_mismatches=_check_expectations(
+                        name, page_count=1, hyp_text="", metrics=None, was_rejected=failure is not None
+                    ),
                 )
                 continue
 
@@ -322,6 +375,9 @@ class BenchmarkRunner:
                         "RAM is the process lifetime peak; child processes and VRAM are not measured.",
                         "Conversion success is not a document-fidelity pass.",
                     ] + (["No reference transcript: CER and WER unavailable."] if ref_text is None else []),
+                    expectation_mismatches=_check_expectations(
+                        name, page_count=page_count, hyp_text=hyp_text, metrics=metrics, was_rejected=False
+                    ),
                 )
 
                 if cer is not None and wer is not None:
@@ -368,6 +424,7 @@ class BenchmarkRunner:
             average_wer=avg_wer,
             average_speed_s_per_page=avg_speed,
             peak_ram_mb=round(get_current_ram_mb(), 2),
+            expectation_failures=sum(1 for r in results.values() if r.expectation_mismatches),
         )
 
         return report

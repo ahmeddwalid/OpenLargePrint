@@ -117,3 +117,17 @@ def test_benchmark_runner_end_to_end(tmp_path: Path):
     assert "| Case Name | Format |" in md_table
     assert "born_digital_english" in md_table
     assert "PASS" in md_table
+def test_benchmark_reports_expectation_mismatches(tmp_path: Path):
+    """The corpus must gate document structure, not just report metrics (QA-001).
+
+    BenchmarkCase.expected_* existed but nothing read it, so a case could lose
+    pages, lose its table, or lose its text and still be reported as a pass.
+    """
+    runner = BenchmarkRunner(corpus_dir=tmp_path / "corpus")
+    report = runner.run_benchmark(out_dir=tmp_path / "results")
+
+    assert report.expectation_failures == 0, [
+        (name, result.expectation_mismatches)
+        for name, result in report.results.items()
+        if result.expectation_mismatches
+    ]

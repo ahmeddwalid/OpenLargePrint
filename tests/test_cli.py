@@ -82,3 +82,16 @@ def test_cli_handles_invalid_file(tmp_path: Path):
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode != 0
     assert "Error: File format not recognized" in res.stderr
+def test_cli_benchmark_gate_passes_on_the_default_corpus(tmp_path: Path):
+    """The benchmark must be runnable as a release gate (QA-001)."""
+    cmd = CLI_CMD + [
+        "benchmark",
+        "--corpus-dir", str(tmp_path / "corpus"),
+        "--out-dir", str(tmp_path / "out"),
+        "--fail-on-mismatch",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "| Case Name |" in result.stdout
+    assert "Expectation mismatches" not in result.stdout

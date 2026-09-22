@@ -36,6 +36,24 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
+  benchmark-gate:
+    name: Benchmark Corpus Gate (QA-001)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install Python 3.12
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --locked --dev --extra dev --python 3.12
+      # The corpus is a gate, not a metric dump: a case that loses text, pages,
+      # a table, or images fails the build instead of being reported as a pass.
+      - name: Compare the corpus against per-case expectations
+        run: uv run python -m openlargeprint.cli benchmark --fail-on-mismatch
+
   frontend-check:
     name: Frontend TypeScript Check
     runs-on: ubuntu-latest

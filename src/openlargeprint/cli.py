@@ -95,6 +95,24 @@ def main() -> int:
         "--json", action="store_true", help="Output raw DocumentIR JSON"
     )
 
+    # Benchmark command
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        help="Run the rights-safe benchmark corpus and report per-metric results (QA-001)",
+    )
+    benchmark_parser.add_argument(
+        "--corpus-dir", type=Path, default=None,
+        help="Directory to build the synthetic corpus in (default: a temporary directory)",
+    )
+    benchmark_parser.add_argument(
+        "--out-dir", type=Path, default=None,
+        help="Directory to write converted benchmark outputs to",
+    )
+    benchmark_parser.add_argument(
+        "--fail-on-mismatch", action="store_true",
+        help="Exit non-zero when a case disagrees with its expected structure or text",
+    )
+
     # Sidecar command
     subparsers.add_parser(
         "sidecar", help="Run the JSON-Lines sidecar protocol loop for desktop shell integration (DESIGN.md §9)"
@@ -161,6 +179,24 @@ def main() -> int:
                         f"rotation: {page.rotation}°)"
                     )
                 print(f"\nExtracted blocks: {len(doc_ir.blocks)}")
+            return 0
+
+        elif args.command == "benchmark":
+            from openlargeprint.qa import BenchmarkRunner
+
+            report = BenchmarkRunner(corpus_dir=args.corpus_dir).run_benchmark(out_dir=args.out_dir)
+            print(report.to_markdown_table())
+            print(
+                f"\nCases: {report.total_cases} | converted: {report.passed_cases} "
+                f"| conversion failures: {report.failed_cases}"
+            )
+            if report.expectation_failures:
+                print(f"Expectation mismatches: {report.expectation_failures}")
+                for case_name, case_result in report.results.items():
+                    for mismatch in case_result.expectation_mismatches:
+                        print(f"  - {case_name}: {mismatch}")
+            if args.fail_on_mismatch and report.expectation_failures:
+                return 1
             return 0
 
         elif args.command == "sidecar":
