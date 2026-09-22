@@ -25,6 +25,12 @@ On Windows 10 and Windows 11, code signing directly affects application distribu
      NSIS installer alone leaves the application blocked after it is installed.
   2. **The certificate must chain to a CA in the Microsoft Trusted Root Program.** A self-signed certificate does not
      satisfy Smart App Control, no matter how the machine's local trust store is configured.
+  3. **The NSIS-generated uninstaller is not covered by signing the installer.** `uninstall.exe` is produced by the
+     NSIS stub at install time and does not inherit the installer's signature, so on a machine with Smart App Control
+     enforced the entry in Settings > Apps cannot run (Code Integrity events 3033 and 3077 name
+     `%LOCALAPPDATA%\OpenLargePrint\uninstall.exe`). Removal then has to go through the installer's own uninstall
+     path or a manual deletion of the install directory. Fixing this needs an NSIS build hook that signs the generated
+     uninstaller during packaging; signing the installer does not address it.
 
   You can check the state on a machine with:
 
