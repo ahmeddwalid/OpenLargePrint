@@ -85,6 +85,14 @@ def main() -> int:
         action="store_true",
         help="Do not insert 'Original page N' transition markers",
     )
+    convert_parser.add_argument(
+        "--preserve-page-artwork",
+        action="store_true",
+        help=(
+            "Keep page-filling images instead of omitting them. Off by default: these are "
+            "usually the scanned page itself or a canvas background"
+        ),
+    )
 
     # Inspect command
     inspect_parser = subparsers.add_parser(
@@ -123,7 +131,10 @@ def main() -> int:
     try:
         if args.command == "convert":
             routing_mode = RoutingMode(args.mode)
-            orchestrator = PipelineOrchestrator(routing_mode=routing_mode)
+            orchestrator = PipelineOrchestrator(
+                routing_mode=routing_mode,
+                preserve_page_artwork=bool(getattr(args, "preserve_page_artwork", False)),
+            )
 
             preset_enum = PresetName(args.preset)
             paper_size_enum = PaperSize(args.paper_size)

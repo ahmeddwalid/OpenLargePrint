@@ -718,6 +718,10 @@ async fn start_conversion(
     let paper_size = settings.get("paperSize").and_then(|p| p.as_str()).unwrap_or("A4");
     let routing_mode = settings.get("routingMode").and_then(|m| m.as_str()).unwrap_or("automatic");
     let monochrome = settings.get("monochrome").and_then(|m| m.as_bool()).unwrap_or(false);
+    let preserve_page_artwork = settings
+        .get("preservePageArtwork")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let page_range = settings.get("pageRange").and_then(|r| r.as_str());
     let custom_body_pt = settings.get("customBodyPt").and_then(|v| v.as_f64());
     let custom_line_spacing = settings.get("customLineSpacing").and_then(|v| v.as_f64());
@@ -733,6 +737,7 @@ async fn start_conversion(
         "routing_mode": routing_mode,
         "include_page_markers": true,
         "monochrome": monochrome,
+        "preserve_page_artwork": preserve_page_artwork,
     });
 
     if let Some(r) = page_range {

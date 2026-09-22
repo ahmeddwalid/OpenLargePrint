@@ -155,6 +155,8 @@ const en: Record<string, string> = {
   // Export & Print options
   'export.monochrome_label': 'Monochrome output (for black-and-white laser printers)',
   'export.monochrome_desc': 'Converts all figures, charts, and colors to pure high-contrast black and white for clean laser printing without halftone dithering.',
+  'export.artwork_label': 'Keep page artwork (full-page backgrounds and scans)',
+  'export.artwork_desc': 'By default a picture that covers a whole page is left out, because it is usually the scanned page itself or a background. Turn this on to keep those pictures as figures in the converted document.',
 };
 
 export default en;

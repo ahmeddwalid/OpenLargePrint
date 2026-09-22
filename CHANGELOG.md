@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Page artwork retention (`IMG-001`, `UI-001`)**: an advanced option, off by default, keeps page-filling images (full-page backgrounds and scanned page images) as figures in the converted document for artwork-heavy material. It is off by default because those images are usually the scanned page itself or a canvas background, and carrying them into the output would turn the reflow back into screenshots of the original. Available as `--preserve-page-artwork` in the CLI and as "Keep page artwork" in the desktop advanced settings.
+- **Benchmark corpus gate (`QA-001`)**: each corpus case now declares the structure and text it must produce, and every run is compared against it, so a case that loses pages, text, a table, or its images fails instead of being reported as a pass. `python -m openlargeprint.cli benchmark --fail-on-mismatch` runs it, and a CI job (`benchmark-gate`) runs it on every push and pull request.
 - **Windows release signing (`PKG-001`, `SEC-006`)**: the packaging pipeline now signs the desktop shell and the engine sidecar *before* the NSIS installer is assembled, then signs the installer, because Windows 11 Smart App Control evaluates the installed executables rather than the installer and blocks unsigned ones with no override. `packaging/sign_windows.ps1` is the single signing entry point (SHA-256, RFC 3161 timestamp, post-sign verification, fails closed) and `packaging/verify_signatures.ps1` is a release gate that inspects real Authenticode state and can pin the expected publisher.
 
 ### Changed
@@ -18,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Native dialogs on Linux (`SEC-005`, `PKG-001`)**: the open/save file dialogs now use the Tauri dialog plugin outside Windows, so Linux builds no longer require manual path entry.
 - **Honest default routing (`UI-001`, `OCR-002`)**: "Automatic" is the default routing mode; the unavailable higher-accuracy pack is disabled in Advanced options instead of being presented as selectable.
 - **Removed demo fallbacks (`UI-005`)**: the frontend no longer synthesizes a mock document or progress loop when the desktop bridge is unavailable; it reports a plain-language error instead.
+- **Image recovery instead of image loss (`IMG-001`)**: images whose codec cannot be decoded by the lossless reader (JBIG2 without the `jbig2dec` helper, common in scanned books) are now re-decoded through the rendering engine's own decoder instead of being dropped. Recovered copies are normalised to PNG, dimension-bounded before decoding (`SEC-003`), never duplicated over images that decoded losslessly, and reported as re-decoded copies so the substitution stays visible.
+- **Trustworthy memory reporting (`PERF-002`)**: peak memory was reported as 0.0 MB on Windows because the process handle was passed to `GetProcessMemoryInfo` with default marshalling and silently truncated; every performance figure in the benchmark and acceptance reports was meaningless. The call now declares its argument and return types, and the value is asserted by a test.
 - **Vector figure retention (`IMG-002`)**: the vector-figure region fallback now also captures single-shape artwork while keeping the area and size guards that exclude rules and table hairlines.
 
 ## [0.2.0] - 2026-09-21

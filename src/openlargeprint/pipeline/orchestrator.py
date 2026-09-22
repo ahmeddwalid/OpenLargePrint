@@ -108,9 +108,16 @@ def parse_page_range(
 class PipelineOrchestrator:
     """Coordinates the document reconstruction pipeline across all input and output formats."""
 
-    def __init__(self, routing_mode: RoutingMode = RoutingMode.AUTOMATIC):
+    def __init__(
+        self,
+        routing_mode: RoutingMode = RoutingMode.AUTOMATIC,
+        preserve_page_artwork: bool = False,
+    ):
         self.routing_mode = routing_mode
-        self.pdf_importer = NativePdfImporter(routing_mode=routing_mode)
+        self.preserve_page_artwork = preserve_page_artwork
+        self.pdf_importer = NativePdfImporter(
+            routing_mode=routing_mode, preserve_page_artwork=preserve_page_artwork
+        )
         self.docx_importer = DocxImporter()
         self.pptx_importer = PptxImporter()
         self.legacy_bridge = LibreOfficeBridge()
@@ -347,7 +354,13 @@ class PipelineOrchestrator:
             clean_file, _ = sanitize_document(input_file, ws.path)
             # Use a fresh importer honouring the requested routing mode so the
             # retry actually re-runs extraction/OCR rather than returning cached blocks.
-            retry_importer = NativePdfImporter(routing_mode=routing_mode) if fmt == "pdf" else None
+            retry_importer = (
+                NativePdfImporter(
+                    routing_mode=routing_mode, preserve_page_artwork=self.preserve_page_artwork
+                )
+                if fmt == "pdf"
+                else None
+            )
             if retry_importer is not None:
                 import pypdfium2 as pdfium
                 with pdfium.PdfDocument(clean_file) as pdf:

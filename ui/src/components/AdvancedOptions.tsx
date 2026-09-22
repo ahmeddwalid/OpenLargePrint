@@ -15,6 +15,8 @@ interface AdvancedOptionsProps {
   onPageRangeChange: (range: string) => void;
   monochrome: boolean;
   onMonochromeChange: (val: boolean) => void;
+  preservePageArtwork: boolean;
+  onPreservePageArtworkChange: (val: boolean) => void;
 }
 
 export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
@@ -24,6 +26,8 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
   onPageRangeChange,
   monochrome,
   onMonochromeChange,
+  preservePageArtwork,
+  onPreservePageArtworkChange,
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -127,6 +131,26 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
                 </div>
                 <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
                   {t('export.monochrome_desc')}
+                </div>
+              </div>
+            </label>
+          </div>
+
+          {/* Page artwork retention */}
+          <div style={{ marginTop: '6px', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', minHeight: '48px', padding: '6px 0' }}>
+              <input
+                type="checkbox"
+                checked={preservePageArtwork}
+                onChange={(e) => onPreservePageArtworkChange(e.target.checked)}
+                style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer' }}
+              />
+              <div>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {t('export.artwork_label')}
+                </div>
+                <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  {t('export.artwork_desc')}
                 </div>
               </div>
             </label>

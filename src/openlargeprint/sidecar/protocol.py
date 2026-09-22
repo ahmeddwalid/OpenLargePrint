@@ -60,6 +60,9 @@ class ConvertCommand(BaseModel):
     monochrome: bool = False
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
+    # Advanced, off by default: carrying page-filling images into the output would
+    # turn the reflow back into screenshots of the original page (SPEC 2).
+    preserve_page_artwork: bool = False
 
 
 class ExportCommand(BaseModel):

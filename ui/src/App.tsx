@@ -80,6 +80,7 @@ export const App: React.FC = () => {
   const [routingMode, setRoutingMode] = useState<RoutingMode>('auto');
   const [pageRange, setPageRange] = useState<string>('');
   const [monochrome, setMonochrome] = useState<boolean>(false);
+  const [preservePageArtwork, setPreservePageArtwork] = useState<boolean>(false);
 
   // Workflow State
   const [viewMode, setViewMode] = useState<ViewMode>('home');
@@ -218,6 +219,7 @@ export const App: React.FC = () => {
       routingMode,
       pageRange,
       monochrome,
+      preservePageArtwork,
       outputPath: targetOutputPath,
     };
 
@@ -582,6 +584,8 @@ export const App: React.FC = () => {
               onPageRangeChange={setPageRange}
               monochrome={monochrome}
               onMonochromeChange={setMonochrome}
+              preservePageArtwork={preservePageArtwork}
+              onPreservePageArtworkChange={setPreservePageArtwork}
             />
 
             {/* Recent Documents Shelf (UI-001) */}

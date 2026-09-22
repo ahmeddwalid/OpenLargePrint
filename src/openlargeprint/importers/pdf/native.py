@@ -78,9 +78,15 @@ class NativePdfImporter(BaseImporter):
         ocr_engine: Optional[DocumentOcrEngine] = None,
         routing_mode: RoutingMode = RoutingMode.AUTOMATIC,
         ocr_dpi: float = 300.0,
+        preserve_page_artwork: bool = False,
     ):
         self.routing_mode = routing_mode
         self.ocr_dpi = ocr_dpi
+        # Off by default: page-filling images are usually the scanned page itself
+        # or a canvas wallpaper, and carrying those into the output would turn the
+        # reflow back into screenshots of the original (SPEC 2). Turning it on is an
+        # explicit request to keep the artwork.
+        self.preserve_page_artwork = preserve_page_artwork
         self._router = OcrRouter()
         self.ocr_engine = ocr_engine or self._router.get_engine(routing_mode)
         self.scanned_extractor = ScannedPageExtractor(self.ocr_engine, dpi=ocr_dpi)
@@ -204,7 +210,7 @@ class NativePdfImporter(BaseImporter):
                             )
                         )
 
-                        if is_background_canvas:
+                        if is_background_canvas and not self.preserve_page_artwork:
                             page_image_warnings.append(
                                 f"Page {page_num}: a full-page background image was omitted from the reflowed output"
                             )
