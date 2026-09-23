@@ -17,6 +17,11 @@ from openlargeprint.pipeline import PipelineOrchestrator
 
 
 def main() -> int:
+    if sys.stdin and hasattr(sys.stdin, "reconfigure"):
+        try:
+            sys.stdin.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     # Ensure UTF-8 output across Windows and all platforms
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
         try:

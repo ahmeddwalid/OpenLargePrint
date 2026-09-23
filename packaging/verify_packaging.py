@@ -21,7 +21,7 @@ def verify_conversion(sidecar_bin: Path) -> bool:
 
     with tempfile.TemporaryDirectory(prefix="olp-packaged-") as directory:
         root = Path(directory)
-        source = root / "Three pages with spaces.pdf"
+        source = root / "قراءة three pages.pdf"
         scan = Image.new("RGB", (900, 350), "white")
         ImageDraw.Draw(scan).text((40, 80), "Judicial Review in Administrative Law", fill="black", font_size=36)
         scan_path = root / "scan.png"
@@ -44,7 +44,7 @@ def verify_conversion(sidecar_bin: Path) -> bool:
                     "page_range": "2-3" if paper == "A3" else None,
                 }
                 run = subprocess.run(
-                    [str(sidecar_bin), "sidecar"], input=json.dumps(command) + "\n",
+                    [str(sidecar_bin), "sidecar"], input=json.dumps(command, ensure_ascii=False) + "\n",
                     capture_output=True, text=True, encoding="utf-8",
                     timeout=PACKAGED_CONVERSION_TIMEOUT_SECONDS, check=True,
                 )

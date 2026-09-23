@@ -82,6 +82,24 @@ def test_cli_handles_invalid_file(tmp_path: Path):
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode != 0
     assert "Error: File format not recognized" in res.stderr
+
+
+def test_sidecar_accepts_utf8_paths_with_windows_code_page(tmp_path: Path):
+    import os
+
+    source = tmp_path / "قراءة.pdf"
+    create_minimal_pdf(source)
+    payload = json.dumps({"command": "inspect", "file_path": str(source)}, ensure_ascii=False)
+    result = subprocess.run(
+        CLI_CMD + ["sidecar"], input=(payload + "\n").encode("utf-8"),
+        capture_output=True, timeout=30,
+        env={**os.environ, "PYTHONIOENCODING": "cp1252"},
+    )
+    assert result.returncode == 0
+    event = json.loads(result.stdout.decode("utf-8"))
+    assert event["type"] == "inspect_result"
+    assert event["file_name"] == source.name
+
 def test_cli_benchmark_gate_passes_on_the_default_corpus(tmp_path: Path):
     """The benchmark must be runnable as a release gate (QA-001)."""
     cmd = CLI_CMD + [
