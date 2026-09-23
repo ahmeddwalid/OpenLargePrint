@@ -31,7 +31,7 @@ class MockTableOcrEngine(DocumentOcrEngine):
     def is_available(self) -> bool:
         return True
 
-    def analyze_page(self, pil_image: Image.Image, page_num: int = 1) -> EnginePageResult:
+    def analyze_page(self, pil_image: Image.Image, page_num: int = 1, *, cancellation=None) -> EnginePageResult:
         scale = 200.0 / 72.0
         # Invert helper: PDF y_pt -> pixel Y
         def y_to_px(y_pt: float) -> float:

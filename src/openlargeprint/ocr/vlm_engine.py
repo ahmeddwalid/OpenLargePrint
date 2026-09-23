@@ -16,6 +16,9 @@ class PaddleOcrVlEngine:
         capabilities.engine_name += " (maximum-accuracy fallback)"
         return capabilities
 
+    def close(self) -> None:
+        self._fallback.close()
+
     def analyze_page(
         self,
         image: Image.Image,

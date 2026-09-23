@@ -10,6 +10,7 @@ import tempfile
 from typing import List, Optional, Tuple
 import uuid
 import pypdfium2 as pdfium
+from PIL import ImageDraw
 
 from openlargeprint.ir.models import (
     Block,
@@ -21,7 +22,8 @@ from openlargeprint.ir.models import (
     TableStructure,
     TextDirection,
 )
-from openlargeprint.ocr.base import DocumentOcrEngine, OcrDetectedLine
+from openlargeprint.ocr.base import CancellationToken, DocumentOcrEngine
+from openlargeprint.importers.base import CancelCheck
 from openlargeprint.security.isolation import log_safe_info
 from openlargeprint.text.direction import detect_language, detect_text_direction
 
@@ -54,6 +56,8 @@ class ScannedPageExtractor:
         page_num: int,
         start_block_idx: int,
         assets_dir: Optional[Path] = None,
+        cancel_check: Optional[CancelCheck] = None,
+        native_regions: Optional[List[Tuple[float, float, float, float]]] = None,
     ) -> List[Block]:
         """Render page, perform OCR recognition, reconstruct columns, and form semantic blocks."""
         page_w_pt, page_h_pt = page.get_size()
@@ -64,13 +68,27 @@ class ScannedPageExtractor:
         pil_img = bitmap.to_pil()
 
         try:
+            if native_regions:
+                draw = ImageDraw.Draw(pil_img)
+                for left, bottom, right, top in native_regions:
+                    draw.rectangle(
+                        (left * scale, (page_h_pt - top) * scale,
+                         right * scale, (page_h_pt - bottom) * scale),
+                        fill="white",
+                    )
             # 2. Run OCR recognition (OCR-001, OCR-002, OCR-006)
-            ocr_res = self.ocr_engine.analyze_page(pil_img, page_num=page_num)
+            ocr_res = self.ocr_engine.analyze_page(
+                pil_img, page_num=page_num, cancellation=CancellationToken(cancel_check)
+            )
+            if ocr_res.cancelled or (cancel_check and cancel_check()):
+                raise InterruptedError("Conversion cancelled.")
             log_safe_info(
                 f"Page {page_num} OCR recognized {len(ocr_res.lines)} lines in {ocr_res.elapse_seconds:.2f}s"
             )
 
             if not ocr_res.lines:
+                if native_regions:
+                    return []
                 # Handle empty page detection (OCR-005)
                 return [
                     Block(

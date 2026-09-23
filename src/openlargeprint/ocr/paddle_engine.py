@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 from PIL import Image
 from openlargeprint.security.isolation import log_safe_info
 from .base import CancellationToken, EngineCapabilities, EnginePageResult, OcrDetectedLine
+from .worker import OcrWorker
 
 MAX_CPU_THREADS = 8
 INTER_OP_THREADS = 1
@@ -17,6 +18,10 @@ class PaddleRapidOcrEngine:
     def __init__(self, use_gpu: bool = False):
         self._engine = None
         self.use_gpu = use_gpu
+        self._worker = OcrWorker(use_gpu)
+
+    def close(self) -> None:
+        self._worker.close()
 
     def _get_engine(self):
         """Lazy-initialize OCR engine on first use with optimal GPU/CPU acceleration."""
@@ -77,6 +82,18 @@ class PaddleRapidOcrEngine:
         )
 
     def analyze_page(
+        self,
+        image: Image.Image,
+        *,
+        page_num: int,
+        language_hints: Tuple[str, ...] = ("en",),
+        cancellation: Optional[CancellationToken] = None,
+    ) -> EnginePageResult:
+        return self._worker.analyze_page(
+            image, page_num=page_num, language_hints=language_hints, cancellation=cancellation
+        )
+
+    def _analyze_page(
         self,
         image: Image.Image,
         *,

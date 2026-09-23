@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 import docx
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -15,7 +15,7 @@ from docx.shared import Emu, Inches, Mm, Pt, RGBColor
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, TableStructure, TextDirection
 from openlargeprint.layout.table import TableTier, evaluate_table_fit
 from openlargeprint.security.isolation import log_safe_info
-from .base import BaseExporter, ExportOptions, PaperSize, PresetName
+from .base import BaseExporter, ExportOptions, PaperSize
 
 _ILLEGAL_XML_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]")
 
@@ -44,6 +44,21 @@ class DocxExporter(BaseExporter):
 
         # 1. Physical page dimensions & margins (OUT-007..009)
         self._configure_page_geometry(section, options)
+        settings = document.settings.element
+        view = settings.find(qn("w:view"))
+        if view is None:
+            view = OxmlElement("w:view")
+            settings.insert(0, view)
+        view.set(qn("w:val"), "print")
+        footer = section.footer.paragraphs[0]
+        footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        footer.add_run("Page ")
+        for field_name, separator in (("PAGE", " of "), ("NUMPAGES", "")):
+            field = OxmlElement("w:fldSimple")
+            field.set(qn("w:instr"), field_name)
+            footer._p.append(field)
+            if separator:
+                footer.add_run(separator)
 
         # 2. Add print reminder notice (OUT-009)
         core_props = document.core_properties

@@ -237,3 +237,80 @@ def test_non_object_ipc_input_is_rejected():
         runner = SidecarRunner(out_stream=output)
         runner.execute_command_str(payload)
         assert json.loads(output.getvalue())["code"] == "INVALID_COMMAND"
+
+
+def _stalled_recognizer(receiver, sender, use_gpu):
+    import time
+
+    receiver.recv()
+    time.sleep(60)
+
+
+def test_ocr_timeout_terminates_worker_and_can_restart(monkeypatch):
+    from PIL import Image, ImageDraw
+    from openlargeprint.ocr import worker
+
+    original = worker._recognize
+    monkeypatch.setattr(worker, "_recognize", _stalled_recognizer)
+    engine = worker.OcrWorker(False, timeout_seconds=0.2)
+    image = Image.new("RGB", (500, 120), "white")
+    ImageDraw.Draw(image).text((30, 40), "Judicial Review in Administrative Law", fill="black")
+    with pytest.raises(TimeoutError):
+        engine.analyze_page(image, page_num=2, language_hints=("en",), cancellation=None)
+    assert engine._process is None
+    monkeypatch.setattr(worker, "_recognize", original)
+    engine.timeout_seconds = 30
+    try:
+        result = engine.analyze_page(image, page_num=3, language_hints=("en",), cancellation=None)
+        assert result.lines
+    finally:
+        engine.close()
+
+
+def test_cancellation_interrupts_stalled_ocr(monkeypatch):
+    import time
+    from PIL import Image
+    from openlargeprint.ocr import worker
+    from openlargeprint.ocr.base import CancellationToken
+
+    monkeypatch.setattr(worker, "_recognize", _stalled_recognizer)
+    engine = worker.OcrWorker(False)
+    started = time.monotonic()
+    token = CancellationToken(lambda: time.monotonic() - started > 0.2)
+    result = engine.analyze_page(
+        Image.new("RGB", (100, 100)), page_num=2, language_hints=("en",), cancellation=token
+    )
+    assert result.cancelled
+    assert engine._process is None
+    assert time.monotonic() - started < 5
+
+
+def test_failed_second_page_preserves_original_and_continues(tmp_path, monkeypatch):
+    from PIL import Image, ImageDraw
+    from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
+    from openlargeprint.ir.models import BlockType
+
+    scan = Image.new("RGB", (500, 300), "white")
+    ImageDraw.Draw(scan).text((30, 40), "Retain this page", fill="black")
+    image_path = tmp_path / "scan.png"
+    scan.save(image_path)
+    source = tmp_path / "three_pages.pdf"
+    pdf = canvas.Canvas(str(source))
+    pdf.drawString(72, 700, "First native page must remain exact.")
+    pdf.showPage()
+    pdf.drawImage(str(image_path), 0, 0, width=595, height=842)
+    pdf.showPage()
+    pdf.drawString(72, 700, "Third native page must still be processed.")
+    pdf.showPage()
+    pdf.save()
+
+    def fail(*args, **kwargs):
+        raise TimeoutError("Recognition timed out")
+
+    monkeypatch.setattr(PaddleRapidOcrEngine, "analyze_page", fail)
+    result = PipelineOrchestrator().convert(source, tmp_path / "result.pdf")
+    assert len(result.document_ir.pages) == 3
+    retained = [block for block in result.document_ir.blocks if block.source_page == 2 and block.type == BlockType.IMAGE]
+    assert retained and retained[0].warnings
+    assert Path(retained[0].image_asset.file_path).is_file()
+    assert any(block.source_page == 3 and "Third native" in (block.text or "") for block in result.document_ir.blocks)

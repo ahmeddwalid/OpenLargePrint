@@ -7,8 +7,8 @@ from typing import List, Optional
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A3, A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch, mm
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
@@ -24,10 +24,12 @@ from openlargeprint.ir.models import Block, BlockType, DocumentIR, TableStructur
 from openlargeprint.layout.table import TableTier, evaluate_table_fit
 from openlargeprint.security.isolation import log_safe_info
 from openlargeprint.text.bidi import reorder_bidi_for_display
-from .base import BaseExporter, ExportOptions, PaperSize, PresetName
+from .base import BaseExporter, ExportOptions, PaperSize
 from .fonts import ensure_arabic_font as _ensure_arabic_font
 from .fonts import resolve_reportlab_family
 
+FRAME_PADDING_PT = 6.0
+IMAGE_HEIGHT_FRACTION = 0.92
 
 class NumberedCanvas(canvas.Canvas):
     """Two-pass canvas to dynamically compute and render total page count and print reminder (OUT-009)."""
@@ -98,8 +100,8 @@ class PdfExporter(BaseExporter):
 
         # 3. Build Story Flowables
         story: List[object] = []
-        usable_width = doc_template.width
-        usable_height = doc_template.height
+        usable_width = doc_template.width - 2 * FRAME_PADDING_PT
+        usable_height = doc_template.height - 2 * FRAME_PADDING_PT
 
         for block in doc.blocks:
             flowables = self._block_to_flowables(block, options, styles, usable_width, usable_height)
@@ -461,7 +463,7 @@ class PdfExporter(BaseExporter):
 
         # Handle tables (TBL-001, TBL-002, FN-002)
         if block.type == BlockType.TABLE and block.table_structure:
-            return self._render_pdf_table(block, options, styles, usable_width, is_rtl)
+            return self._render_pdf_table(block, options, styles, usable_width, is_rtl, usable_height)
 
         # Handle images (IMG-001, IMG-003)
         if block.type == BlockType.IMAGE and block.image_asset:
@@ -472,7 +474,7 @@ class PdfExporter(BaseExporter):
                 display_w = min(usable_width, float(asset.width * 72.0 / 96.0))
                 display_h = display_w / aspect
                 # Leave headroom for the frame's own padding so the flowable always fits.
-                max_h = (usable_height * 0.92) if usable_height and usable_height > 0 else None
+                max_h = (usable_height * IMAGE_HEIGHT_FRACTION) if usable_height and usable_height > 0 else None
                 if max_h is not None and display_h > max_h:
                     display_h = max_h
                     display_w = display_h * aspect
@@ -501,6 +503,7 @@ class PdfExporter(BaseExporter):
         styles: dict[str, ParagraphStyle],
         usable_width: float,
         is_rtl: bool,
+        usable_height: float = 0.0,
     ) -> List[object]:
         """Render table with large-print scaling, fallback cascade, and RTL support (TBL-001, TBL-002, FN-002)."""
         table_struct = block.table_structure
@@ -533,6 +536,9 @@ class PdfExporter(BaseExporter):
                 aspect = asset.width / max(1.0, asset.height)
                 disp_w = min(usable_width, float(asset.width * 72.0 / 96.0))
                 disp_h = disp_w / aspect
+                if usable_height > 0 and disp_h > usable_height * IMAGE_HEIGHT_FRACTION:
+                    disp_h = usable_height * IMAGE_HEIGHT_FRACTION
+                    disp_w = disp_h * aspect
                 retained_path = asset.file_path
                 if options.monochrome:
                     retained_path = self._get_or_create_monochrome_image(asset.file_path)

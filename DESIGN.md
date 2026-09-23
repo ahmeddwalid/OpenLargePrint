@@ -243,7 +243,9 @@ Python processing sidecar
         └── exporters
 ```
 
-The sidecar reads cancellation and health commands while a single worker processes a document, keeping PDFium work serialized. Other commands during active processing receive a busy response. Output events are serialized with a lock. Durable crash-resume checkpoints remain unimplemented; current checkpoints are progress/review events. Jobs checkpoint per page or in small chunks (`UI-003`): a failed page is marked for review and preserved in its original form; the rest of the document is not discarded.
+The sidecar reads cancellation and health commands while a single worker processes a document, keeping PDFium work serialized. Other commands during active processing receive a busy response. Output events are serialized with a lock. CPU recognition runs in a separate spawned process, reused across pages and closed after import. A 120-second recognition deadline includes model initialization; cancellation is checked every 100 ms. A timed-out or failed recognition worker is terminated and recreated for the next page. This isolates native OCR hangs from the command loop and works with Windows spawn and the frozen sidecar entry point. Raster input travels through a disposable local PNG and results through local pipes, with no network transport. Mixed pages mask native text regions before recognition; recognition failures retain native text and an original-page image for review (`PDF-002..004`, `UI-002..003`, `SEC-008`).
+
+Durable crash-resume checkpoints remain unimplemented; current checkpoints are progress/review events. Jobs checkpoint per page or in small chunks (`UI-003`): a failed page is marked for review and preserved in its original form; the rest of the document is not discarded. Native PDF parsing and rendering are not yet isolated behind per-page deadlines.
 
 ## 10. Threat model and security boundaries
 

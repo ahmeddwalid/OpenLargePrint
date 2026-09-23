@@ -9,7 +9,7 @@ import pypdfium2 as pdfium
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 
-from openlargeprint.ocr.base import DocumentOcrEngine
+from openlargeprint.ocr.base import CancellationToken, DocumentOcrEngine
 from openlargeprint.security.validator import bounded_pdf_scale
 from .fonts import ensure_arabic_font
 
@@ -54,7 +54,9 @@ def build_searchable_pdf(
                 bitmap = page.render(scale=scale)
                 try:
                     image = bitmap.to_pil()
-                    result = ocr_engine.analyze_page(image, page_num=index + 1)
+                    result = ocr_engine.analyze_page(
+                        image, page_num=index + 1, cancellation=CancellationToken(cancel_check)
+                    )
                 finally:
                     bitmap.close()
                 if result.cancelled or (cancel_check and cancel_check()):
@@ -113,6 +115,11 @@ class SearchablePdfExporter:
         selected_pages: set[int] | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> Path:
-        return build_searchable_pdf(
-            source_pdf, output_path, ocr_engine, dpi, selected_pages, cancel_check
-        )
+        try:
+            return build_searchable_pdf(
+                source_pdf, output_path, ocr_engine, dpi, selected_pages, cancel_check
+            )
+        finally:
+            close_engine = getattr(ocr_engine, "close", None)
+            if callable(close_engine):
+                close_engine()

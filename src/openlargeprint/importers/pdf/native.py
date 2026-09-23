@@ -9,7 +9,7 @@ import pikepdf
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 
-from openlargeprint.importers.base import BaseImporter
+from openlargeprint.importers.base import BaseImporter, CancelCheck, CheckpointCallback, ProgressCallback
 from openlargeprint.ir.models import (
     Block,
     BlockType,
@@ -132,7 +132,7 @@ class NativePdfImporter(BaseImporter):
 
                 # Send real-time progress event (UI-002)
                 if progress_callback:
-                    stage = "ocr" if page_meta.classification in (PageClassification.SCANNED, PageClassification.BROKEN_DIGITAL) else "extracting"
+                    stage = "ocr" if page_meta.classification != PageClassification.NATIVE else "extracting"
                     msg = (
                         f"Recognizing scanned text — page {page_num} of {page_count}"
                         if stage == "ocr"
@@ -244,7 +244,7 @@ class NativePdfImporter(BaseImporter):
                             f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
                         )
                         extracted = self.scanned_extractor.extract_page(
-                            page, page_num, block_counter, assets_dir=workspace.assets_dir
+                            page, page_num, block_counter, assets_dir=workspace.assets_dir, cancel_check=cancel_check
                         )
                         block_counter += len(extracted)
 
@@ -252,7 +252,7 @@ class NativePdfImporter(BaseImporter):
                         # Mixed page reconciliation path (PDF-004)
                         log_safe_info(f"Page {page_num} routed to mixed reconciliation (PDF-004)")
                         extracted = self._reconcile_mixed_page(
-                            page, page_num, block_counter, page_meta, assets_dir=workspace.assets_dir
+                            page, page_num, block_counter, page_meta, assets_dir=workspace.assets_dir, cancel_check=cancel_check
                         )
                         block_counter += len(extracted)
 
@@ -290,7 +290,9 @@ class NativePdfImporter(BaseImporter):
                             )
                             block_counter += 1
 
-                    if not extracted or all(b.confidence == 0 for b in extracted):
+                    if page_meta.details.get("ocr_failed"):
+                        image_blocks.append(self._preserve_page(page, page_num, workspace))
+                    elif not extracted or all(b.confidence == 0 for b in extracted):
                         image_blocks = [self._preserve_page(page, page_num, workspace)]
 
                     # 5. Contextually interleave images with content blocks in reading order
@@ -337,6 +339,9 @@ class NativePdfImporter(BaseImporter):
         finally:
             pike_doc.close()
             pdf.close()
+            close_engine = getattr(self.ocr_engine, "close", None)
+            if callable(close_engine):
+                close_engine()
 
         metadata = DocumentMetadata(
             title=file_path.stem.replace("_", " "),
@@ -358,16 +363,32 @@ class NativePdfImporter(BaseImporter):
         start_idx: int,
         page_meta: PageMetadata,
         assets_dir: Optional[Path] = None,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> List[Block]:
         """Reconcile native text with selective OCR of regions lacking native text, deduplicating overlaps (PDF-004)."""
         # 1. Native text extraction
         native_blocks = self._extract_native_text(page, page_num, start_idx, page_meta)
         idx_after_native = start_idx + len(native_blocks)
 
-        # 2. Run OCR over entire page
-        ocr_blocks = self.scanned_extractor.extract_page(
-            page, page_num, idx_after_native, assets_dir=assets_dir
-        )
+        textpage = page.get_textpage()
+        try:
+            native_regions = [textpage.get_rect(index) for index in range(textpage.count_rects())]
+        finally:
+            textpage.close()
+        try:
+            ocr_blocks = self.scanned_extractor.extract_page(
+                page, page_num, idx_after_native, assets_dir=assets_dir,
+                cancel_check=cancel_check, native_regions=native_regions,
+            )
+        except InterruptedError:
+            raise
+        except Exception:
+            if not native_blocks:
+                raise
+            page_meta.details["ocr_failed"] = True
+            for block in native_blocks:
+                block.warnings.append(f"Page {page_num}: scanned regions could not be recognized. Native text and original images have been retained for review.")
+            return native_blocks
 
         # 3. Deduplicate: keep only OCR blocks that DO NOT overlap native text (Principle 1)
         accepted_ocr_blocks: List[Block] = []

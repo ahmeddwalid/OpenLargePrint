@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import sys
 from pathlib import Path
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
 
 from openlargeprint.exporters import ExportOptions, PaperSize, PresetName
 from openlargeprint.ir.serialization import document_to_json

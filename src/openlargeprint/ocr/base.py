@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Callable, List, Optional, Protocol, Tuple, runtime_checkable
 from PIL import Image
 
 
@@ -61,17 +61,18 @@ class EnginePageResult:
 class CancellationToken:
     """Cooperative cancellation flag for long OCR work (UI-002, DESIGN.md §4)."""
 
-    def __init__(self):
+    def __init__(self, check: Callable[[], bool] | None = None):
         self._cancelled = False
+        self._check = check
 
     def cancel(self) -> None:
         self._cancelled = True
 
     def is_cancelled(self) -> bool:
-        return self._cancelled
+        return self._cancelled or (self._check is not None and self._check())
 
     def __bool__(self) -> bool:
-        return self._cancelled
+        return self.is_cancelled()
 
 
 @runtime_checkable
