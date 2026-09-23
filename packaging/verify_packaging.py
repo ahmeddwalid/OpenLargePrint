@@ -6,7 +6,85 @@ from pathlib import Path
 import sys
 import subprocess
 import platform
+import tempfile
 from build_sidecar import get_target_triple
+
+PACKAGED_CONVERSION_TIMEOUT_SECONDS = 180
+
+
+def verify_conversion(sidecar_bin: Path) -> bool:
+    import docx
+    import pypdfium2 as pdfium
+    from PIL import Image, ImageDraw
+    from reportlab.lib.pagesizes import A3, A4
+    from reportlab.pdfgen import canvas
+
+    with tempfile.TemporaryDirectory(prefix="olp-packaged-") as directory:
+        root = Path(directory)
+        source = root / "Three pages with spaces.pdf"
+        scan = Image.new("RGB", (900, 350), "white")
+        ImageDraw.Draw(scan).text((40, 80), "Judicial Review in Administrative Law", fill="black", font_size=36)
+        scan_path = root / "scan.png"
+        scan.save(scan_path)
+        pdf = canvas.Canvas(str(source), pagesize=A4)
+        for index in range(1, 4):
+            if index == 2:
+                pdf.drawImage(str(scan_path), 40, 300, width=500, height=195)
+            else:
+                pdf.drawString(72, 700, f"Native acceptance page {index} preserves exact text.")
+            pdf.showPage()
+        pdf.save()
+        for paper, dimensions in (("A4", A4), ("A3", A3)):
+            for output_format in ("pdf", "docx"):
+                output = root / f"Output {paper}.{output_format}"
+                command = {
+                    "command": "convert", "id": f"smoke-{paper}-{output_format}",
+                    "file_path": str(source), "output_path": str(output),
+                    "export_format": output_format, "paper_size": paper,
+                    "page_range": "2-3" if paper == "A3" else None,
+                }
+                run = subprocess.run(
+                    [str(sidecar_bin), "sidecar"], input=json.dumps(command) + "\n",
+                    capture_output=True, text=True, encoding="utf-8",
+                    timeout=PACKAGED_CONVERSION_TIMEOUT_SECONDS, check=True,
+                )
+                events = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
+                success = next((event for event in events if event.get("type") == "success"), None)
+                if success is None or not output.is_file():
+                    return False
+                if output_format == "pdf":
+                    with pdfium.PdfDocument(output) as document:
+                        if not len(document):
+                            return False
+                        texts = []
+                        for index in range(len(document)):
+                            page = document[index]
+                            try:
+                                if any(abs(actual - expected) > 1 for actual, expected in zip(page.get_size(), dimensions)):
+                                    return False
+                                textpage = page.get_textpage()
+                                try:
+                                    texts.append(textpage.get_text_range())
+                                finally:
+                                    textpage.close()
+                                bitmap = page.render(scale=0.5)
+                                bitmap.close()
+                            finally:
+                                page.close()
+                        text = " ".join(texts)
+                else:
+                    document = docx.Document(output)
+                    section = document.sections[0]
+                    if any(abs(actual - expected) > 1 for actual, expected in zip(
+                        (section.page_width.pt, section.page_height.pt), dimensions
+                    )):
+                        return False
+                    text = " ".join(paragraph.text for paragraph in document.paragraphs)
+                if "Judicial Review" not in text or "Native acceptance page 3" not in text:
+                    return False
+                if ("Native acceptance page 1" in text) != (paper == "A4"):
+                    return False
+    return True
 
 
 def verify_packaging() -> bool:
@@ -71,6 +149,9 @@ def verify_packaging() -> bool:
         if not any(event.get("type") == "health" and event.get("status") == "ready" for event in events):
             print("Error: packaged sidecar did not report ready.")
             return False
+        if not verify_conversion(sidecar_bin):
+            print("Error: packaged conversion failed OCR, page rendering, text retention, selection, or paper dimensions.")
+            return False
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         print(f"Error: packaged sidecar smoke test failed ({type(error).__name__}).")
         return False
@@ -87,7 +168,7 @@ def verify_packaging() -> bool:
         print("Error: ui/dist/index.html not built yet. Run 'npm run build' in ui/.")
         return False
 
-    print("Packaging smoke test passed: configuration, standalone sidecar health, icons, and frontend assets.")
+    print("Packaging smoke test passed: native/scanned multi-page conversion, A4/A3 PDF and DOCX, selected pages, icons, and frontend assets.")
     return True
 
 

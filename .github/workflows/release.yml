@@ -45,7 +45,9 @@ jobs:
       - name: Validate engine and frontend
         run: |
           uv run pytest tests/ -q
+          if ($LASTEXITCODE -ne 0) { throw "Engine tests failed" }
           npm --prefix ui test -- --run
+          if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed" }
       - name: Package standalone Python engine sidecar
         run: uv run python packaging/build_sidecar.py
 

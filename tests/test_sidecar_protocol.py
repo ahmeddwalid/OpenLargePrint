@@ -376,7 +376,7 @@ def test_export_applies_review_edits_and_rejects_invalid_targets(tmp_path: Path)
                "output_path": str(tmp_path / "edited.html"), "export_format": "html",
                "text_edits": {block.id: "A reviewed correction survives export."}}
     runner.execute_command_str(json.dumps(command))
-    assert "A reviewed correction survives export." in (tmp_path / "edited.html").read_text()
+    assert "A reviewed correction survives export." in (tmp_path / "edited.html").read_text(encoding="utf-8")
     for changes in [{"output_path": str(source)}, {"text_edits": {"missing": "replacement"}},
                     {"export_format": "invalid"}, {"text_edits": {block.id: ["invalid"]}}]:
         runner.out_stream = io.StringIO()

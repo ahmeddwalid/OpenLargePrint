@@ -79,6 +79,11 @@ jobs:
         os: [ubuntu-22.04, windows-latest]
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Build required engine resource
+        run: |
+          uv sync --locked --dev --extra dev --python 3.12
+          uv run python packaging/build_sidecar.py
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:

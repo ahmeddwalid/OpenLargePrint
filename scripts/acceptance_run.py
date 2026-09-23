@@ -35,6 +35,7 @@ from reportlab.lib.pagesizes import A3, A4                            # noqa: E4
 
 from openlargeprint.ir.models import BlockType                        # noqa: E402
 from openlargeprint.pipeline import PipelineOrchestrator              # noqa: E402
+from openlargeprint.exporters import DocxExporter, ExportOptions, PaperSize  # noqa: E402
 from openlargeprint.qa.benchmark import get_current_ram_mb            # noqa: E402
 
 PAPER = {"A4": A4, "A3": A3}
@@ -73,7 +74,9 @@ def main() -> int:
 
     run_dir = args.out_dir / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
-    page_range = (1, args.max_pages) if args.max_pages else None
+    if args.max_pages is not None and args.max_pages < 1:
+        parser.error("--max-pages must be positive")
+    options = ExportOptions(paper_size=PaperSize(args.paper_size))
     expected_width, expected_height = PAPER[args.paper_size]
 
     documents = sorted(args.input_dir.glob("*.pdf"))
@@ -89,9 +92,12 @@ def main() -> int:
         row: dict[str, Any] = {"document": source.name}
 
         try:
+            total_source_pages = source_page_count(source)
+            considered_pages = min(total_source_pages, args.max_pages) if args.max_pages else total_source_pages
+            page_range = (1, considered_pages) if args.max_pages else None
             out_pdf = run_dir / f"{source.stem}_large.pdf"
             result = PipelineOrchestrator().convert(
-                source, out_pdf, export_format="pdf", page_range=page_range
+                source, out_pdf, options=options, export_format="pdf", page_range=page_range
             )
             elapsed = time.perf_counter() - started
 
@@ -146,9 +152,7 @@ def main() -> int:
 
             if args.docx_too:
                 out_docx = run_dir / f"{source.stem}_large.docx"
-                PipelineOrchestrator().convert(
-                    source, out_docx, export_format="docx", page_range=page_range
-                )
+                DocxExporter().export(result.document_ir, out_docx, options)
                 row["docx_mb"] = round(out_docx.stat().st_size / 1048576, 2)
 
         except Exception as error:  # noqa: BLE001 - the harness records every failure
