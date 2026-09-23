@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-23
+
+### Fixed
+
+- Recognition now runs in a reusable spawned worker with a 120-second page timeout and cancellation polling. Failed pages retain their original image, and subsequent pages continue. The frozen entry point supports Windows process spawning (`UI-002..003`, `SEC-008`).
+- Mixed PDF pages exclude native text regions from OCR. Progress identifies recognition work correctly, and failed recognition preserves native text and an original-page image (`PDF-002..004`).
+- PDF images and tables use the actual text-frame dimensions; tall retained table images fit within the page. DOCX opens in print layout with page-number fields (`OUT-001`, `OUT-003`, `OUT-007..009`).
+- Packaged-engine verification now converts a three-page native/scanned document into A4/A3 PDF and DOCX, checks selected-page content, and renders every PDF page. The acceptance harness now applies the requested paper size (`PKG-001..002`, `OUT-010`).
+- Windows tests read UTF-8 output explicitly. Rust CI builds the required sidecar resource, and Windows releases stop on engine-test failure.
+
+### Validation and limitations
+
+- A 318-page sample converted in 533 seconds to 1,444 A4 PDF pages and DOCX, with all source-page anchors retained and all PDF dimensions valid. Its 1,058 review warnings still require assessment; this is completion evidence, not a fidelity guarantee.
+- The 16-case synthetic corpus completed. Arabic OCR and complex scanned tables remain below release-quality accuracy; maximum-accuracy recognition and durable crash recovery remain unimplemented. Native PDF parsing/rendering still lacks process-isolated deadlines.
+
 ## [0.3.0] - 2026-09-22
 
 ### Added
