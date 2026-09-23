@@ -96,5 +96,20 @@ PINNED_MODELS = ModelCatalog(
             is_default=True,
             description="CPU-optimized Chinese/English text recognition engine",
         ),
+        "arabic_PP-OCRv3_rec": ModelArtifact(
+            key="arabic_PP-OCRv3_rec",
+            name="PP-OCRv3 Arabic Text Recognition (ONNX)",
+            task=ModelTask.RECOGNITION,
+            framework=ModelFramework.ONNX,
+            version="v3.0.0",
+            sha256="7982d371612785238fd99080cff36354deaec84fdc6ff7da9c82af4243fa0c9a",
+            file_size_bytes=8978664,
+            code_license="Apache-2.0",
+            weight_license="Apache-2.0",
+            download_url="https://github.com/monkt/paddleocr-onnx",
+            is_default=False,
+            description="Optional on-device Arabic text recognition model (PaddleOCR v3 ONNX)",
+        ),
     }
 )
+

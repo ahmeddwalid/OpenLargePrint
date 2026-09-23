@@ -151,6 +151,15 @@ OpenLargePrint includes an opt-in update checker that communicates with GitHub R
 
 The packaging pipeline produces the standalone installer executable in `src-tauri/target/release/bundle/nsis/` and release assets in `packaging/dist/`.
 
+For day-to-day development on Windows (hot reload, dependency sync, sidecar setup):
+```powershell
+.\dev_windows.ps1
+```
+Or to run all test suites on Windows:
+```powershell
+.\dev_windows.ps1 -Test
+```
+
 ### Fedora/Linux build
 
 Install the native desktop build prerequisites, then use the same locked Python and frontend setup above:

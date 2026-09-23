@@ -154,7 +154,15 @@ if ($env:OLP_CODESIGN_THUMBPRINT) {
 Write-Host "Assembling NSIS installer from the signed binaries..." -ForegroundColor Green
 Push-Location "$RepoRoot\src-tauri"
 try {
-    npx -y @tauri-apps/cli@2 bundle --bundles nsis
+    if ($env:OLP_CODESIGN_THUMBPRINT) {
+        # Tauri's signCommand hook automatically signs the generated uninstaller (uninstall.exe)
+        # during the NSIS build process, ensuring Smart App Control does not block uninstallation (PKG-001).
+        $signCmd = ('signtool.exe sign /sha1 {0} /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 "%1"' -f $env:OLP_CODESIGN_THUMBPRINT)
+        $bundleConfig = (@{ bundle = @{ windows = @{ signCommand = $signCmd } } } | ConvertTo-Json -Compress)
+        npx -y @tauri-apps/cli@2 bundle --bundles nsis --config "$bundleConfig"
+    } else {
+        npx -y @tauri-apps/cli@2 bundle --bundles nsis
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Tauri bundle step failed."
     }

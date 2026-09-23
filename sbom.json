@@ -223,6 +223,19 @@
       "parses_untrusted_content": true,
       "purpose": "Chinese/English text recognition on CPU",
       "distribution": "Bundled in rapidocr-onnxruntime 1.4.4; hash verified before inference"
+    },
+    {
+      "model_key": "arabic_PP-OCRv3_rec",
+      "version": "v3.0.0",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "7982d371612785238fd99080cff36354deaec84fdc6ff7da9c82af4243fa0c9a",
+      "download_source": "https://github.com/monkt/paddleocr-onnx",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Optional on-device Arabic text recognition model (PaddleOCR v3 ONNX)",
+      "distribution": "Optional download; not bundled in base installer (OCR-003)"
     }
   ],
   "excluded_candidates": [

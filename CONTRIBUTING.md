@@ -29,6 +29,24 @@ Install the following development tools:
 
 ### Setup Instructions
 
+#### Windows (Automated)
+
+Run the development helper script in PowerShell:
+
+```powershell
+.\dev_windows.ps1
+```
+
+This verifies prerequisites, synchronizes dependencies with `uv`, builds the development sidecar into `src-tauri/binaries/` if missing, and launches the desktop app in development mode.
+
+To run the full test suite on Windows instead of launching the app:
+
+```powershell
+.\dev_windows.ps1 -Test
+```
+
+#### Manual Setup (Linux and Windows)
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/ahmeddwalid/OpenLargePrint.git
@@ -37,10 +55,15 @@ Install the following development tools:
 
 2. Initialize the Python environment and install project dependencies:
    ```bash
-   uv sync
+   uv sync --locked --dev --extra dev --python 3.12
    ```
 
-3. Install frontend dependencies:
+3. Build the development sidecar binary required by Tauri:
+   ```bash
+   uv run python packaging/build_sidecar.py
+   ```
+
+4. Install frontend dependencies:
    ```bash
    cd ui
    npm install

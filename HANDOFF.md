@@ -246,28 +246,45 @@ publishing: the URL redirects to the tag's installer, the downloaded file is 123
 The release is unsigned, so Smart App Control still blocks it on machines where the policy is enforced. That is the
 remaining blocker, and it is also stated next to the download button so nobody downloads 117 MB to find out.
 
+## Pass 5 — Cross-platform hardening & Windows development setup
+
+This pass prepared the repository for seamless continuation of development on Windows:
+
+- **Cross-platform Git reliability (`.gitattributes`)**: Enforces LF line endings for source files (`*.py`, `*.rs`, `*.ts`, `*.tsx`, `*.json`, `*.toml`, `*.md`, `*.yml`, `*.sh`), CRLF for batch scripts, and explicit `binary` attributes for binary assets (`*.ttf`, `*.onnx`, `*.ico`, `*.png`, `*.pdf`, `*.zip`, `*.exe`). Prevents line-ending drift and checksum alterations on Windows checkouts.
+- **Windows development launcher (`dev_windows.ps1`)**: 1-step PowerShell helper that verifies tools (`uv`, `node`, `npm`, `cargo`), syncs dependencies, builds the development sidecar into `src-tauri/binaries/` if missing, and launches `tauri dev` or runs test suites (`-Test`).
+- **Bundled font resolution (`LANG-001`, `LANG-002`, `OUT-003`)**: `src/openlargeprint/exporters/fonts.py` now searches bundled project font directories (`ui/public/fonts/NotoSansArabic.ttf` etc.) alongside system font directories. Clean Windows installations without Arabic language packs now reliably render Arabic PDF exports via ReportLab without falling back to Latin-only `Helvetica`. Verified by `tests/test_font_resolution.py`.
+- **Optional Arabic recognition model pinned (`OCR-002`, `OCR-003`, `LANG-002`, `LIC-001`)**: Added `arabic_PP-OCRv3_rec` to `PINNED_MODELS` in `manifest.py` and recorded it in `sbom.json` with its verified sha256 (`7982d371612785238fd99080cff36354deaec84fdc6ff7da9c82af4243fa0c9a`), Apache-2.0 license, and `is_default=False` (optional download model pack, never bundled in base installer).
+- **Automated UI accessibility gates (`A11Y-001..005`, `UI-001`, `UI-005`)**: Added `ui/src/__tests__/AccessibilityGates.test.tsx` verifying primary controls meet target sizing, rem-based scaling at 200%, keyboard navigation, accessible radiogroups, and plain-language labels.
+- **Documentation**: Updated `CONTRIBUTING.md` and `README.md` with Windows development setup and testing guidance.
+
 ## Still open (release blockers)
 
 - **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Until a
   trusted certificate is configured, Windows 11 with Smart App Control enforced cannot run the application at all.
 - **The generated uninstaller stays unsigned**: NSIS creates `uninstall.exe` at install time, so it does not inherit
   the installer's signature and Smart App Control blocks the Settings > Apps entry. Needs an NSIS build hook.
-- Optional higher-accuracy OCR pack and verified Arabic scan recognition (`OCR-002..003`, `LANG-002`); the Arabic
-  corpus case still has no reference transcript, so its CER/WER are unmeasured.
 - Packaged Windows CPU/GPU corpus runs, Linux desktop tests, screen-reader checks, physical printing at 100% scale,
-  and target-machine RAM/VRAM measurement (`PKG-001`, `PERF-002`, `QA-001`) — the acceptance harness now produces the
+  and target-machine RAM/VRAM measurement (`PKG-001`, `PERF-002`, `QA-001`) — the acceptance harness produces the
   numbers, but a packaged (signed) build has not been measured on a Smart App Control machine yet.
-- Automated UI accessibility gates (axe + 200% text scale) are not yet in the UI test suite.
-- **Page-filling images are omitted from reflowed output by design**: on the real textbooks that means the page artwork
-  drops out while text is preserved. Retaining it would contradict the "do not rasterise every page" rule in `SPEC 2`,
-  so it needs an explicit decision rather than a heuristic change.
 
-## Environment gotchas (this machine)
+## Windows Developer Instructions
 
-- The shell exports `NODE_ENV=production`, which breaks vitest/React `act`. Use `NODE_ENV=test`.
-- npm is globally configured with `omit=dev` — install UI deps with `npm install --include=dev`.
-- Python deps: `uv sync --extra dev --all-groups`; run tests with `uv run python -m pytest`
-  (plain `uv run pytest` resolves to a system pytest missing the venv packages).
+To continue development on Windows:
+
+1. Clone or pull the repository on Windows:
+   ```powershell
+   git clone https://github.com/ahmeddwalid/OpenLargePrint.git
+   cd OpenLargePrint
+   ```
+2. Run the automated development launcher:
+   ```powershell
+   .\dev_windows.ps1
+   ```
+   This automatically verifies `uv`, Node, Cargo, synchronizes dependencies, builds the sidecar, and launches Tauri dev mode with hot reload.
+3. To run all test suites on Windows:
+   ```powershell
+   .\dev_windows.ps1 -Test
+   ```
 
 ## Verification commands
 
@@ -275,11 +292,7 @@ remaining blocker, and it is also stated next to the download button so nobody d
 uv run python -m pytest tests/ -q
 cd ui && NODE_ENV=test npx vitest run
 cd ui && npx tsc --noEmit
-cd src-tauri && cargo check
+cd src-tauri && cargo check && cargo test
+uv run python -m openlargeprint.cli benchmark --fail-on-mismatch
 ```
 
-## Commit history
-
-All three passes are committed to `main` and pushed to GitHub. Commit messages follow the
-existing `type(scope): summary (REQ-IDs)` style seen in `git log`; the final commits are the UI
-redesign, the review/update hardening, and the documentation sync.

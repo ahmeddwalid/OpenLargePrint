@@ -56,11 +56,46 @@ _registered: Dict[str, str] = {}
 _arabic_font_name: Optional[str] = None
 
 
+def _bundled_font_dirs() -> List[Path]:
+    """Return directories containing bundled project fonts (e.g. ui/public/fonts)."""
+    dirs: List[Path] = []
+    # 1. Search relative to this file within the repository checkout
+    here = Path(__file__).resolve()
+    for parent in (here, *here.parents):
+        for sub in (
+            Path("ui") / "public" / "fonts",
+            Path("ui") / "dist" / "fonts",
+            Path("fonts"),
+        ):
+            cand = parent / sub
+            if cand.is_dir() and cand not in dirs:
+                dirs.append(cand)
+
+    # 2. PyInstaller onefile/onedir bundle paths
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        meipass_fonts = Path(meipass) / "fonts"
+        if meipass_fonts.is_dir() and meipass_fonts not in dirs:
+            dirs.append(meipass_fonts)
+
+    # 3. Check adjacent to the running Python / sidecar executable
+    exe_dir = Path(sys.executable).parent
+    for sub in ("fonts", "ui/public/fonts", "ui/dist/fonts"):
+        cand = exe_dir / sub
+        if cand.is_dir() and cand not in dirs:
+            dirs.append(cand)
+
+    return dirs
+
+
 def _candidate_font_dirs() -> List[Path]:
     """Return platform-appropriate font directories to search."""
     dirs: List[str] = [
         os.environ.get("OPENLARGEPRINT_FONTS_DIR", ""),
     ]
+    for b in _bundled_font_dirs():
+        dirs.append(str(b))
+
     if os.name == "nt":
         windir = os.environ.get("WINDIR", r"C:\Windows")
         local = os.environ.get("LOCALAPPDATA", "")
@@ -84,6 +119,7 @@ def _candidate_font_dirs() -> List[Path]:
         ]
 
     return [Path(d) for d in dirs if d and Path(d).is_dir()]
+
 
 
 def _normalize(name: str) -> str:
@@ -187,6 +223,16 @@ def ensure_arabic_font() -> str:
     if _arabic_font_name is not None:
         return _arabic_font_name
 
+    # 1. Prefer bundled NotoSansArabic font from the project distribution
+    for directory in _bundled_font_dirs():
+        bundled_arabic = directory / "NotoSansArabic.ttf"
+        if bundled_arabic.is_file():
+            registered = register_reportlab_font(bundled_arabic, "OpenLargePrintArabic")
+            if registered:
+                _arabic_font_name = registered
+                return registered
+
+    # 2. Host candidate paths
     for path in _ARABIC_CANDIDATES:
         if not os.path.exists(path):
             continue
@@ -195,7 +241,7 @@ def ensure_arabic_font() -> str:
             _arabic_font_name = registered
             return registered
 
-    # Last resort: search directory listings for an Arabic-capable family.
+    # 3. Last resort: search directory listings for an Arabic-capable family.
     for family in ("NotoSansArabic", "Amiri", "Scheherazade", "DejaVuSans"):
         font_file = find_font_file(family)
         if font_file is not None:
