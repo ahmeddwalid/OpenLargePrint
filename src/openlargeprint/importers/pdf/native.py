@@ -787,7 +787,11 @@ class NativePdfImporter(BaseImporter):
             if char_idx is not None and char_idx >= 0:
                 text_obj = textpage.get_textobj(char_idx)
                 if text_obj:
-                    font_size = float(text_obj.get_font_size())
+                    obj_fs = float(text_obj.get_font_size())
+                    if obj_fs >= 4.0:
+                        font_size = obj_fs
+                    else:
+                        font_size = max(font_size, rect[3] - rect[1])
                     font = text_obj.get_font()
                     if font:
                         font_name = font.get_base_name()
@@ -887,7 +891,8 @@ class NativePdfImporter(BaseImporter):
                         prev_f = run[i - 1]
                         gap = f.x0 - prev_f.x1
                         avg_font = (f.font_size + prev_f.font_size) / 2.0
-                        space_threshold = max(2.5, 0.22 * avg_font)
+                        effective_font = max(avg_font, f.height, prev_f.height)
+                        space_threshold = max(2.5, 0.22 * effective_font)
                         prev_ends_space = merged_parts[-1].endswith(" ")
                         curr_starts_space = t.startswith(" ")
 
