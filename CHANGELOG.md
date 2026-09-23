@@ -4,9 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.1] - 2026-09-23
+## [0.3.2] - 2026-09-23
 
 ### Fixed
+
+- Sidecar input uses UTF-8 on Windows, preserving Arabic and other Unicode filenames even under legacy system code pages (`LANG-001`, `SEC-005`).
 
 - Recognition now runs in a reusable spawned worker with a 120-second page timeout and cancellation polling. Failed pages retain their original image, and subsequent pages continue. The frozen entry point supports Windows process spawning (`UI-002..003`, `SEC-008`).
 - Mixed PDF pages exclude native text regions from OCR. Progress identifies recognition work correctly, and failed recognition preserves native text and an original-page image (`PDF-002..004`).

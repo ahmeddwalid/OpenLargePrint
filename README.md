@@ -63,19 +63,16 @@ Quality reports distinguish measured text error from missing reference transcrip
 
 Pre-compiled packages for Windows 10 and 11 (64-bit) are available on the [GitHub Releases](https://github.com/ahmeddwalid/OpenLargePrint/releases) page.
 
-### Current Release: v0.3.0
+### Current Release: v0.3.2
 
 | Package | Format | File Size | Description |
 |---|---|---|---|
 | [`OpenLargePrint-Setup-x64.exe`](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/OpenLargePrint-Setup-x64.exe) | NSIS Installer | ~117 MB | Standard Windows installer with start menu and context menu integration. This link always fetches the newest stable release |
-| [`OpenLargePrint_0.3.0_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.3.0/OpenLargePrint_0.3.0_windows_x64_portable.zip) | Portable Archive | ~117 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
+| [`OpenLargePrint_0.3.2_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.3.2/OpenLargePrint_0.3.2_windows_x64_portable.zip) | Portable Archive | ~117 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
 
 ### Checksums (SHA-256)
 
-```text
-dda30cfc9d28ced67107d5f3c7fe5a5cc7b862f5962186b27c3da9beba33898f  OpenLargePrint-Setup-x64.exe
-3ab45a755ebe32c3ba30750a3fa0e0aa218587387e7c1b440b229150b7c86e90  OpenLargePrint_0.3.0_windows_x64_portable.zip
-```
+Download [SHA256SUMS.txt](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/SHA256SUMS.txt) from the same release as the installer.
 
 The installer keeps one name across releases so the download link above stays valid; the release tag carries the version.
 
