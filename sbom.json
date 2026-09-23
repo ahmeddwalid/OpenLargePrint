@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "OpenLargePrint",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "project_license": "GPL-3.0-or-later",
   "description": "Software Bill of Materials (SBOM) and license inventory as mandated by LIC-001 and LIC-002",
   "dependencies": [

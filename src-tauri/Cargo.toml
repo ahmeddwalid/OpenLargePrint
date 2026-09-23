@@ -1,6 +1,6 @@
 [package]
 name = "openlargeprint-desktop"
-version = "0.3.2"
+version = "0.4.0"
 description = "OpenLargePrint Accessible Document Desktop Shell"
 authors = ["OpenLargePrint Contributors"]
 license = "GPL-3.0-or-later"

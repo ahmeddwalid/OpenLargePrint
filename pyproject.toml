@@ -1,6 +1,6 @@
 [project]
 name = "openlargeprint"
-version = "0.3.2"
+version = "0.4.0"
 description = "Accessible, structure-preserving document reconstruction and large-print conversion engine"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"

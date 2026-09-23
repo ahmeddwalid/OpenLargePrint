@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-23
+
+### Added
+
+- **Multi-format evaluation generator (`OUT-001..011`)**: `scripts/generate_evaluation_samples.py` supports single-pass generation of A4 PDF, A3 PDF, DOCX, Reader HTML, and Searchable PDF across test corpora, saving artifacts and markdown summaries under `test-documents/outputs/`.
+- **Semantic outline recognition (`OUT-001..003`)**: numbered list patterns (e.g. `1 Present continuous`, `1.1 Section`) are recognized and rendered cleanly without redundant bullet points (`• 1.`).
+
+### Fixed
+
+- **CropBox coordinate normalization and bleed filtering (`PDF-001..007`)**: text rectangles and image bounding boxes are clipped to the visible crop box and normalized to the CropBox origin. Printer crop marks, registration crosshairs, and color calibration bars are excluded, and multi-column ordering functions correctly on documents with offset crop coordinates.
+- **Typography-aware kerning and word spacing (`PDF-002`, `OUT-002`)**: dynamic font-proportional spacing prevents false space insertion inside large title words (such as `ENGLISH`, `GRAMMAR`, and `Raymond Murphy`).
+- **Matrix-scaled font visual height preservation (`PDF-002`, `OUT-002`)**: when PDF text objects report nominal unit font sizes (`1.0pt`) due to transformation matrices, the visual bounding box height is preserved as the font size.
+- **Custom font ligature normalization (`PDF-002`)**: custom embedded font control characters (`\x0b`–`\x1f`) are normalized to standard ASCII character sequences (`ff`, `fi`, `fl`, `ffi`, `ffl`, `ft`, `st`).
+- **Table linearization disambiguation (`TBL-001`)**: multi-column prose, tables of contents, and exercise lists are disambiguated from structured data tables based on line length, maximum width ratio, and row consistency.
+- **Paragraph flow and footnote classification (`PDF-002`, `FN-001`)**: paragraph line aggregation checks terminal punctuation and indentation to prevent arbitrary carriage returns. Footnote detection requires smaller font size thresholds to avoid misclassifying TOC lines at the bottom of pages.
+- **Lossless image recovery fallback (`IMG-001..002`)**: dual extraction from pikepdf and pdfium page objects ensures embedded figures and logos are preserved with matched bounding boxes.
+- **Searchable PDF stability (`OUT-004`, `SPEC §2`)**: blank flyleaf pages are safely preserved without raising validation errors, and coordinate arguments for scanned page overlays are unpacked properly.
+
 ## [0.3.2] - 2026-09-23
 
 ### Fixed

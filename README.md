@@ -8,11 +8,15 @@
 
 <p align="center">
   <a href="https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/OpenLargePrint-Setup-x64.exe">
-    <img src="https://img.shields.io/badge/Download_installer-Windows_11-5f7340?style=for-the-badge" alt="Download the latest OpenLargePrint installer for Windows">
+    <img src="https://img.shields.io/badge/Download_Installer-Windows_x64-5f7340?style=for-the-badge" alt="Download the OpenLargePrint Windows Installer">
+  </a>
+  &nbsp;
+  <a href="https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.4.0/OpenLargePrint_0.4.0_windows_x64_portable.zip">
+    <img src="https://img.shields.io/badge/Download_Portable-ZIP_Archive-3d4a2d?style=for-the-badge" alt="Download the OpenLargePrint Portable ZIP package">
   </a>
 </p>
 
-<p align="center">Installs on Windows 11 and does not need Python or a terminal. The <a href="https://github.com/ahmeddwalid/OpenLargePrint/releases">releases page</a> also carries the portable archive, its SHA-256 checksums, and older versions.</p>
+<p align="center">Runs locally on Windows 10 and 11 without requiring Python, Node.js, or terminal commands.<br>Visit the <a href="https://github.com/ahmeddwalid/OpenLargePrint/releases/latest">latest release page</a> for release notes, checksums, and previous versions.</p>
 
 <p align="center"><sub>Windows 11 Smart App Control refuses unsigned applications. Until a signing certificate is configured, installs on a machine with Smart App Control enforced need the steps in <a href="SIGNING.md">SIGNING.md</a>.</sub></p>
 
@@ -63,12 +67,12 @@ Quality reports distinguish measured text error from missing reference transcrip
 
 Pre-compiled packages for Windows 10 and 11 (64-bit) are available on the [GitHub Releases](https://github.com/ahmeddwalid/OpenLargePrint/releases) page.
 
-### Current Release: v0.3.2
+### Current Release: v0.4.0
 
 | Package | Format | File Size | Description |
 |---|---|---|---|
 | [`OpenLargePrint-Setup-x64.exe`](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/OpenLargePrint-Setup-x64.exe) | NSIS Installer | ~117 MB | Standard Windows installer with start menu and context menu integration. This link always fetches the newest stable release |
-| [`OpenLargePrint_0.3.2_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.3.2/OpenLargePrint_0.3.2_windows_x64_portable.zip) | Portable Archive | ~117 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
+| [`OpenLargePrint_0.4.0_windows_x64_portable.zip`](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.4.0/OpenLargePrint_0.4.0_windows_x64_portable.zip) | Portable Archive | ~117 MB | Standalone folder; extract and run `OpenLargePrint.exe` without installation |
 
 ### Checksums (SHA-256)
 
