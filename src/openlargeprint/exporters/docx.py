@@ -171,11 +171,16 @@ class DocxExporter(BaseExporter):
 
         # Handle lists
         if block.type == BlockType.LIST:
-            p = document.add_paragraph(style="List Bullet")
+            raw_text = safe_text.strip()
+            is_numbered = bool(re.match(r"^(?:\d{1,4}(?:\.\d{1,4})*[\.\)]?|[a-zA-Z][\.\)]|\([0-9a-zA-Z]+\))\s+", raw_text))
+            if is_numbered:
+                p = document.add_paragraph()
+                p.paragraph_format.left_indent = Inches(0.25)
+            else:
+                p = document.add_paragraph(style="List Bullet")
+                raw_text = raw_text.lstrip("•-* \t")
             p.paragraph_format.line_spacing = options.line_spacing
             p.paragraph_format.space_after = Pt(options.body_pt * 0.3)
-            # Strip initial bullet if text already has one
-            raw_text = safe_text.lstrip("•-* \t")
             run = p.add_run(raw_text)
             run.font.name = options.font_family
             run.font.size = Pt(options.body_pt)

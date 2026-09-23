@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import html
 from pathlib import Path
+import re
 from typing import Optional
 
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, TextDirection
@@ -252,6 +253,12 @@ class ReaderExporter(BaseExporter):
       margin-bottom: 0.4em;
     }}
 
+    .list-numbered {{
+      margin-left: 1.6em;
+      text-indent: -1.6em;
+      margin-bottom: 0.4em;
+    }}
+
     blockquote {{
       border-left: 4px solid var(--border-color);
       padding-left: 16px;
@@ -496,10 +503,17 @@ class ReaderExporter(BaseExporter):
 
         # Lists
         if block.type == BlockType.LIST:
-            raw_text = (block.text or "").lstrip("•-* \t")
-            safe_text = html.escape(raw_text)
-            list_class = ' class="rtl"' if is_rtl else ""
-            return f"<ul{list_class}{dir_attr}><li>{safe_text}</li></ul>", None
+            raw_text = (block.text or "").strip()
+            is_numbered = bool(re.match(r"^(?:\d{1,4}(?:\.\d{1,4})*[\.\)]?|[a-zA-Z][\.\)]|\([0-9a-zA-Z]+\))\s+", raw_text))
+            if is_numbered:
+                safe_text = html.escape(raw_text)
+                p_class = ' class="list-item list-numbered rtl"' if is_rtl else ' class="list-item list-numbered"'
+                return f'<p{p_class}{dir_attr}>{safe_text}</p>', None
+            else:
+                raw_text = raw_text.lstrip("•-* \t")
+                safe_text = html.escape(raw_text)
+                list_class = ' class="rtl"' if is_rtl else ""
+                return f"<ul{list_class}{dir_attr}><li>{safe_text}</li></ul>", None
 
         # Quotes
         if block.type == BlockType.QUOTE:

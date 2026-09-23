@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import List, Optional
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
@@ -412,15 +413,22 @@ class PdfExporter(BaseExporter):
 
         # Handle lists
         if block.type == BlockType.LIST:
-            raw_text = (block.text or "").lstrip("•-* \t")
+            raw_text = (block.text or "").strip()
+            is_numbered = bool(re.match(r"^(?:\d{1,4}(?:\.\d{1,4})*[\.\)]?|[a-zA-Z][\.\)]|\([0-9a-zA-Z]+\))\s+", raw_text))
+            if not is_numbered:
+                raw_text = raw_text.lstrip("•-* \t")
             reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL) if is_rtl else raw_text
             # Escape text first, then add the bullet with numeric entities so the
             # entity is not itself escaped (renders a real bullet, not "&nbsp;").
             safe_text = reordered.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            if is_rtl:
-                flowables.append(Paragraph(f"{safe_text}&nbsp;&nbsp;&#8226;", styles["list_rtl"]))
+            if is_numbered:
+                style_key = "list_rtl" if is_rtl else "list"
+                flowables.append(Paragraph(safe_text, styles[style_key]))
             else:
-                flowables.append(Paragraph(f"&#8226;&nbsp;&nbsp;{safe_text}", styles["list"]))
+                if is_rtl:
+                    flowables.append(Paragraph(f"{safe_text}&nbsp;&nbsp;&#8226;", styles["list_rtl"]))
+                else:
+                    flowables.append(Paragraph(f"&#8226;&nbsp;&nbsp;{safe_text}", styles["list"]))
             return flowables
 
         # Handle quotes

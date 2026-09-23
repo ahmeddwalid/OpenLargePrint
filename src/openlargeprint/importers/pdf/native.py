@@ -39,6 +39,32 @@ from .images import extract_lossless_images_for_page
 from .scanned import ScannedPageExtractor
 from .vector_figures import extract_vector_figure_region
 
+LIGATURE_MAP = {
+    "\x0b": "ff",
+    "\x0c": "fi",
+    "\x0d": "fl",
+    "\x0e": "ffi",
+    "\x0f": "ffl",
+    "\x11": "ft",
+    "\x12": "st",
+    "\x1f": "ft",
+    "\ufb00": "ff",
+    "\ufb01": "fi",
+    "\ufb02": "fl",
+    "\ufb03": "ffi",
+    "\ufb04": "ffl",
+    "\ufb05": "ft",
+    "\ufb06": "st",
+}
+
+
+def clean_ligatures(text: str) -> str:
+    """Normalize custom and Unicode font ligature code points to plain ASCII characters."""
+    for k, v in LIGATURE_MAP.items():
+        if k in text:
+            text = text.replace(k, v)
+    return text
+
 
 @dataclass
 class TextLine:
@@ -64,6 +90,10 @@ class TextLine:
     @property
     def y1(self) -> float:
         return self.rect[3]
+
+    @property
+    def width(self) -> float:
+        return abs(self.x1 - self.x0)
 
     @property
     def height(self) -> float:
@@ -173,15 +203,26 @@ class NativePdfImporter(BaseImporter):
                     except Exception:
                         fig_objs = list(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]))
 
+                    cb_x0, cb_y0, cb_x1, cb_y1 = page.get_cropbox()
                     candidate_bboxes: List[Optional[BoundingBox]] = []
+                    candidate_objs: List[Any] = []
                     for obj in fig_objs:
                         try:
                             l, b, r, t = obj.get_bounds()
+                            # Discard figures completely outside visible cropbox
+                            if r <= cb_x0 or l >= cb_x1 or t <= cb_y0 or b >= cb_y1:
+                                continue
+                            ix0 = max(0.0, float(l) - cb_x0)
+                            iy0 = max(0.0, float(b) - cb_y0)
+                            ix1 = min(page_meta.width, float(r) - cb_x0)
+                            iy1 = min(page_meta.height, float(t) - cb_y0)
                             candidate_bboxes.append(
-                                BoundingBox(x0=float(l), y0=float(b), x1=float(r), y1=float(t))
+                                BoundingBox(x0=ix0, y0=iy0, x1=ix1, y1=iy1)
                             )
+                            candidate_objs.append(obj)
                         except Exception:
                             candidate_bboxes.append(None)
+                            candidate_objs.append(None)
 
                     if images and candidate_bboxes and len(images) != len(candidate_bboxes):
                         page_image_warnings.append(
@@ -192,7 +233,19 @@ class NativePdfImporter(BaseImporter):
                     page_area = max(1.0, page_meta.width * page_meta.height)
 
                     for idx, img in enumerate(images):
-                        bbox = candidate_bboxes[idx] if idx < len(candidate_bboxes) else None
+                        bbox = None
+                        # Try to match candidate bbox by pixel size
+                        for c_idx, c_obj in enumerate(candidate_objs):
+                            if c_obj is not None:
+                                try:
+                                    if hasattr(c_obj, "get_px_size") and c_obj.get_px_size() == (img.width, img.height):
+                                        bbox = candidate_bboxes[c_idx]
+                                        break
+                                except Exception:
+                                    pass
+                        if bbox is None:
+                            bbox = candidate_bboxes[idx] if idx < len(candidate_bboxes) else None
+
                         if bbox is None and candidate_bboxes:
                             page_image_warnings.append(
                                 f"Page {page_num}: a figure's position could not be determined and may be misplaced"
@@ -496,9 +549,12 @@ class NativePdfImporter(BaseImporter):
         page_meta: PageMetadata,
     ) -> List[Block]:
         """Extract native text spans, order columns, and form semantic blocks."""
+        cropbox = page.get_cropbox()
         textpage = page.get_textpage()
         try:
-            raw_lines = self._extract_raw_lines(textpage, page_num)
+            raw_lines = self._extract_raw_lines(
+                textpage, page_num, cropbox=cropbox, page_width=page_meta.width, page_height=page_meta.height
+            )
         finally:
             textpage.close()
 
@@ -514,7 +570,7 @@ class NativePdfImporter(BaseImporter):
 
         # 3. Form semantic blocks (headings, paragraphs, lists, footnotes, captions)
         text_blocks = self._form_semantic_blocks(
-            ordered_lines, page_num, idx_after_tables, page_meta.height
+            ordered_lines, page_num, idx_after_tables, page_meta.height, page_meta.width
         )
 
         # 4. If table blocks were extracted, insert them in reading order without
@@ -616,14 +672,25 @@ class NativePdfImporter(BaseImporter):
             if len(col_anchors) < 2:
                 continue
 
-            # Invariant: Disambiguate 2-column page layout from a table.
-            # If there are only 2 columns, and both columns span wide portions of the page (> 30% page width each)
-            # or lines are long (> 35 chars average), it is a 2-column page layout, NOT a table!
-            if len(col_anchors) == 2:
-                avg_len = sum(len(l.text) for r in cluster for l in r) / max(1, sum(len(r) for r in cluster))
-                max_w = max((l.x1 - l.x0) for r in cluster for l in r)
-                if avg_len > 35 or max_w > 0.30 * page_meta.width:
-                    continue
+            # Invariant: Disambiguate multi-column page layout, TOCs, and outlines from a table.
+            # A true table has structured, concise data cells arranged in a grid across columns.
+            total_cluster_lines = sum(len(r) for r in cluster)
+            avg_len = sum(len(l.text) for r in cluster for l in r) / max(1, total_cluster_lines)
+            max_w = max((l.x1 - l.x0) for r in cluster for l in r)
+
+            # If any line spans more than 40% of the page width, or average line length is long prose (> 32 chars),
+            # this is multi-column text, TOC entries, or section blocks — NOT a table!
+            if avg_len > 32 or max_w > 0.40 * page_meta.width:
+                continue
+
+            # Tables must have at least 3 rows, or 2 rows with strictly short data (<= 20 chars avg)
+            if len(cluster) < 3 and avg_len > 20:
+                continue
+
+            # Require each row in the cluster to have at least 2 distinct non-overlapping cells
+            valid_rows = sum(1 for r in cluster if len(r) >= 2)
+            if valid_rows < 2 or (valid_rows / len(cluster) < 0.60):
+                continue
 
             grid: List[List[TableCell]] = []
             all_cluster_lines: List[TextLine] = []
@@ -643,7 +710,7 @@ class NativePdfImporter(BaseImporter):
                             min_dist = dist
                             best_c = c_idx
                     existing = row_cells[best_c].text
-                    row_cells[best_c].text = (existing + " " + line.text).strip() if existing else line.text
+                    row_cells[best_c].text = (existing + " " + line.text).strip() if existing else line.text.strip()
 
                 grid.append(row_cells)
 
@@ -680,18 +747,33 @@ class NativePdfImporter(BaseImporter):
         remaining_lines = [l for l in lines if id(l) not in consumed_line_ids]
         return remaining_lines, table_blocks
 
-    def _extract_raw_lines(self, textpage: pdfium.PdfTextPage, page_num: int) -> List[TextLine]:
+    def _extract_raw_lines(
+        self,
+        textpage: pdfium.PdfTextPage,
+        page_num: int,
+        cropbox: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        page_width: float = 0.0,
+        page_height: float = 0.0,
+    ) -> List[TextLine]:
         """Extract text rectangles with font metrics and coordinates from textpage."""
         rect_count = textpage.count_rects()
         raw_frags: List[TextLine] = []
+        cb_x0, cb_y0, cb_x1, cb_y1 = cropbox if len(cropbox) == 4 else (0.0, 0.0, 0.0, 0.0)
+        has_cb = (cb_x1 > cb_x0 and cb_y1 > cb_y0)
 
         for i in range(rect_count):
             rect = textpage.get_rect(i)
-            text = textpage.get_text_bounded(*rect).strip()
-            if not text:
+            # Clip and filter rects outside the visible cropbox (bleed, printer marks)
+            if has_cb:
+                if rect[2] <= cb_x0 or rect[0] >= cb_x1 or rect[3] <= cb_y0 or rect[1] >= cb_y1:
+                    continue
+
+            text = textpage.get_text_bounded(*rect)
+            if not text.strip():
                 continue
 
-            # Normalize visual-order Arabic if needed
+            # Normalize visual-order Arabic and ligatures
+            text = clean_ligatures(text)
             text = normalize_arabic_logical_order(text)
 
             mid_x = (rect[0] + rect[2]) / 2.0
@@ -711,10 +793,19 @@ class NativePdfImporter(BaseImporter):
                         font_name = font.get_base_name()
                         is_bold = "bold" in font_name.lower() or font.get_weight() > 500
 
+            if has_cb:
+                nx0 = max(0.0, rect[0] - cb_x0)
+                ny0 = max(0.0, rect[1] - cb_y0)
+                nx1 = min(page_width, rect[2] - cb_x0) if page_width > 0 else (rect[2] - cb_x0)
+                ny1 = min(page_height, rect[3] - cb_y0) if page_height > 0 else (rect[3] - cb_y0)
+                norm_rect = (nx0, ny0, nx1, ny1)
+            else:
+                norm_rect = rect
+
             raw_frags.append(
                 TextLine(
                     text=text,
-                    rect=rect,
+                    rect=norm_rect,
                     font_size=font_size,
                     font_name=font_name,
                     is_bold=is_bold,
@@ -738,16 +829,21 @@ class NativePdfImporter(BaseImporter):
             f_mid_y = (f.y0 + f.y1) / 2.0
             for band in bands:
                 rep = band[0]
+                # Disallow grouping fragments with vastly different font sizes into the same line (e.g. 100pt title vs 12pt subtitle)
+                font_ratio = max(f.font_size, rep.font_size) / max(1.0, min(f.font_size, rep.font_size))
+                if font_ratio > 1.8:
+                    continue
                 rep_mid_y = (rep.y0 + rep.y1) / 2.0
                 vert_overlap = max(0.0, min(f.y1, rep.y1) - max(f.y0, rep.y0))
                 min_h = max(1.0, min(f.height, rep.height))
-                if abs(f_mid_y - rep_mid_y) <= 3.5 or (vert_overlap / min_h >= 0.45):
+                if abs(f_mid_y - rep_mid_y) <= 4.0 or (vert_overlap / min_h >= 0.45):
                     band.append(f)
                     placed = True
                     break
             if not placed:
                 bands.append([f])
 
+        bands.sort(key=lambda b: -max(f.y1 for f in b))
         aggregated_lines: List[TextLine] = []
 
         for band in bands:
@@ -764,8 +860,9 @@ class NativePdfImporter(BaseImporter):
                 else:
                     prev_f = curr_run[-1]
                     gap = f.x0 - prev_f.x1
-                    # Merge if adjacent or separated by normal intra-line gap (<= 20pt)
-                    if -4.0 <= gap <= 20.0:
+                    max_gap = max(18.0, 1.2 * max(f.font_size, prev_f.font_size))
+                    # Merge if adjacent or separated by normal intra-line gap
+                    if -4.0 <= gap <= max_gap:
                         curr_run.append(f)
                     else:
                         runs.append(curr_run)
@@ -778,21 +875,28 @@ class NativePdfImporter(BaseImporter):
                     aggregated_lines.append(run[0])
                     continue
 
-                # Combine text with appropriate spacing
+                # Combine text with appropriate font-proportional spacing
                 merged_parts: List[str] = []
                 for i, f in enumerate(run):
-                    t = f.text.strip()
-                    if not t:
+                    t = f.text
+                    if not t.strip():
                         continue
-                    if i == 0:
+                    if not merged_parts:
                         merged_parts.append(t)
                     else:
                         prev_f = run[i - 1]
                         gap = f.x0 - prev_f.x1
-                        if gap <= 1.2:
-                            merged_parts.append(t)
+                        avg_font = (f.font_size + prev_f.font_size) / 2.0
+                        space_threshold = max(2.5, 0.22 * avg_font)
+                        prev_ends_space = merged_parts[-1].endswith(" ")
+                        curr_starts_space = t.startswith(" ")
+
+                        if prev_ends_space or curr_starts_space:
+                            merged_parts.append(t.lstrip() if prev_ends_space else t)
+                        elif gap > space_threshold:
+                            merged_parts.append(" " + t.lstrip())
                         else:
-                            merged_parts.append(" " + t)
+                            merged_parts.append(t)
 
                 merged_text = "".join(merged_parts).strip()
                 if not merged_text:
@@ -878,6 +982,7 @@ class NativePdfImporter(BaseImporter):
         page_num: int,
         start_idx: int,
         page_height: float = 792.0,
+        page_width: float = 612.0,
     ) -> List[Block]:
         """Cluster ordered lines into paragraphs, headings, lists, footnotes, and captions."""
         if not lines:
@@ -985,17 +1090,30 @@ class NativePdfImporter(BaseImporter):
             current_type = BlockType.PARAGRAPH
             current_level = None
 
+        outline_pattern = re.compile(
+            r"^(?:"
+            r"[-*•◦–—▪▫◆◇·]\s+"
+            r"|\d{1,4}(?:\.\d{1,4})*[\.\)]\s+"
+            r"|\d{1,4}\s+[A-Za-z\(]"
+            r"|[a-zA-Z][\.\)]\s+"
+            r"|(?:[ivxlcdm]+|[IVXLCDM]+)[\.\)]\s+"
+            r"|\(\d{1,3}\)\s+"
+            r"|\([a-zA-Z]\)\s+"
+            r")"
+        )
+
         for line in lines:
             txt = line.text.strip()
 
             # 1. Footnote detection (FN-001, FN-002)
+            # Invariant: Footnotes must be at the bottom of the page AND have a distinctly smaller font size (< 0.90 * body).
             is_at_page_bottom = line.y1 <= 0.28 * page_height
-            is_smaller_font = line.font_size <= 0.92 * body_font_size
+            is_smaller_font = line.font_size <= 0.90 * body_font_size
             starts_with_fn_marker = bool(
-                re.match(r"^(?:\[\d+\]|\d+[\.\)]|\*|¹|²|³|†|‡|\d+\s+)", txt)
+                re.match(r"^(?:\[\d+\]|\*|¹|²|³|†|‡|\d+[\.\)]|\d+\s+)", txt)
             )
-            is_footnote = is_at_page_bottom and (
-                starts_with_fn_marker or (is_smaller_font and current_type == BlockType.FOOTNOTE)
+            is_footnote = is_at_page_bottom and is_smaller_font and (
+                starts_with_fn_marker or (current_type == BlockType.FOOTNOTE)
             )
 
             # 2. Caption detection
@@ -1007,9 +1125,7 @@ class NativePdfImporter(BaseImporter):
                 )
             )
 
-            is_list_item = txt.startswith(("- ", "* ", "• ", "\u2022 ", "\u25e6 ", "o ", "O ")) or (
-                len(txt) > 3 and txt[0].isdigit() and txt[1:3] in (". ", ") ")
-            )
+            is_list_item = bool(outline_pattern.match(txt))
 
             is_heading = False
             heading_level = None
@@ -1056,8 +1172,12 @@ class NativePdfImporter(BaseImporter):
                     min_w = min(prev.x1 - prev.x0, line.x1 - line.x0)
                     same_column = (horiz_overlap > 0.25 * min_w) or (abs(prev.x0 - line.x0) < 36.0)
 
-                    # Normal paragraph break if gap is large or different column
-                    if gap > 1.75 * max_h or not same_column:
+                    # Sentence and indent detection for clean paragraph boundaries
+                    prev_ended = prev.text.rstrip().endswith((".", "!", "?", '."', '!"', '?"', ":"))
+                    prev_is_short = (prev.width < 0.70 * page_width) and (prev.x1 < line.x1 - 25.0)
+                    is_indented = (line.x0 > prev.x0 + 12.0)
+
+                    if gap > 1.4 * max_h or not same_column or (prev_ended and (gap > 0.8 * max_h or prev_is_short or is_indented)):
                         flush_block()
 
                 current_lines.append(line)

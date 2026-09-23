@@ -27,6 +27,7 @@ def _recover_images_with_pdfium(
     assets_dir: Path,
     failed_sizes: List[Tuple[int, int]],
     _warn: Callable[[str], None],
+    existing_sizes: Optional[List[Tuple[int, int]]] = None,
 ) -> List[ImageAsset]:
     """Decode images pikepdf could not read, using pdfium's own decoders (IMG-001).
 
@@ -40,9 +41,11 @@ def _recover_images_with_pdfium(
     substituted without a trace.
     """
     recovered: List[ImageAsset] = []
-    pending = list(failed_sizes)
-    if not pending:
+    if pdfium_page is None:
         return recovered
+
+    known_sizes = set(existing_sizes or [])
+    pending = list(failed_sizes)
 
     try:
         from pypdfium2 import raw as pdfium_c
@@ -52,14 +55,21 @@ def _recover_images_with_pdfium(
         _warn(f"Page {page_num} images could not be re-read for recovery ({type(exc).__name__})")
         return recovered
 
+    if not objects:
+        return recovered
+
     for index, obj in enumerate(objects):
         try:
             px_size = obj.get_px_size()
             size: Tuple[int, int] = (int(px_size[0]), int(px_size[1]))
         except Exception:
             continue
-        if size not in pending:
+        if size in known_sizes:
             # Decoded losslessly already: never add a second copy of the same figure.
+            continue
+
+        # If we have explicit pending failures, prioritize those; otherwise recover missing objects
+        if pending and size not in pending:
             continue
 
         width, height = size
@@ -96,7 +106,9 @@ def _recover_images_with_pdfium(
                 alt_text=f"Figure from page {page_num}",
             )
         )
-        pending.remove(size)
+        known_sizes.add(size)
+        if size in pending:
+            pending.remove(size)
         _warn(
             f"Image on page {page_num} was re-decoded because the embedded copy could not be read"
             " (the reflowed output carries the decoded copy)"
@@ -140,46 +152,67 @@ def extract_lossless_images_for_page(
             page_images = getattr(pike_page, "images", None)
     except Exception as exc:
         _warn(f"Could not enumerate images on page {page_num}: {type(exc).__name__}")
-        return images
 
+    # Fallback to direct page Resources XObjects if get_images() found nothing
     if not page_images:
-        return images
-
-    for name, raw_img in page_images.items():
-        safe_name = hashlib.sha256(str(name).encode("utf-8")).hexdigest()[:16]
-        width = 0
-        height = 0
         try:
-            pdf_img = _coerce_pdf_image(raw_img)
-            width = int(pdf_img.width)
-            height = int(pdf_img.height)
+            res = getattr(pike_page, "Resources", None)
+            if res and "/XObject" in res:
+                direct_images = {}
+                for k, v in res.XObject.items():
+                    if getattr(v, "Subtype", None) == "/Image":
+                        direct_images[k] = v
+                if direct_images:
+                    page_images = direct_images
+        except Exception:
+            pass
 
-            # Enforce dimension safety bounds (SEC-003)
-            validate_image_dimensions(width, height)
+    if page_images:
+        for name, raw_img in page_images.items():
+            safe_name = hashlib.sha256(str(name).encode("utf-8")).hexdigest()[:16]
+            width = 0
+            height = 0
+            try:
+                pdf_img = _coerce_pdf_image(raw_img)
+                width = int(pdf_img.width)
+                height = int(pdf_img.height)
 
-            asset_id = f"p{page_num}_{safe_name}"
-            out_path = assets_dir / f"{asset_id}.png"
+                # Enforce dimension safety bounds (SEC-003)
+                validate_image_dimensions(width, height)
 
-            # Convert to PIL image and save losslessly
-            pil_img = pdf_img.as_pil_image()
-            pil_img.save(out_path, format="PNG")
+                asset_id = f"p{page_num}_{safe_name}"
+                out_path = assets_dir / f"{asset_id}.png"
 
-            images.append(
-                ImageAsset(
-                    asset_id=asset_id,
-                    file_path=str(out_path),
-                    mime_type="image/png",
-                    width=width,
-                    height=height,
-                    alt_text=f"Figure from page {page_num}",
+                # Convert to PIL image and save losslessly
+                pil_img = pdf_img.as_pil_image()
+                pil_img.save(out_path, format="PNG")
+
+                images.append(
+                    ImageAsset(
+                        asset_id=asset_id,
+                        file_path=str(out_path),
+                        mime_type="image/png",
+                        width=width,
+                        height=height,
+                        alt_text=f"Figure from page {page_num}",
+                    )
                 )
-            )
-        except Exception as exc:
-            # Preserve other content, but never lose the failure silently (IMG-001).
-            _warn(f"Image on page {page_num} could not be extracted ({type(exc).__name__}); it may be missing from the output")
-            if width > 0 and height > 0:
-                failed_sizes.append((width, height))
+            except Exception as exc:
+                # Preserve other content, but never lose the failure silently (IMG-001).
+                _warn(f"Image on page {page_num} could not be extracted ({type(exc).__name__}); it may be missing from the output")
+                if width > 0 and height > 0:
+                    failed_sizes.append((width, height))
 
-    images.extend(_recover_images_with_pdfium(pdfium_page, page_num, assets_dir, failed_sizes, _warn))
+    existing_sizes = [(img.width, img.height) for img in images]
+    images.extend(
+        _recover_images_with_pdfium(
+            pdfium_page,
+            page_num,
+            assets_dir,
+            failed_sizes,
+            _warn,
+            existing_sizes=existing_sizes,
+        )
+    )
 
     return images

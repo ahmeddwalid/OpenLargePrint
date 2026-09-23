@@ -405,3 +405,103 @@ def test_every_source_page_keeps_its_anchor(tmp_path: Path):
     assert result.success is True
     assert source_pages == {1, 2, 3, 4, 5, 6}
     assert source_pages <= marked_pages, f"pages without an anchor: {sorted(source_pages - marked_pages)}"
+
+
+def test_cropbox_filters_bleed_and_normalizes_coordinates(tmp_path: Path):
+    """CropBox must exclude bleed/registration marks and normalize coordinates to 0-based page (PDF-001..007)."""
+    src = tmp_path / "cropbox_test.pdf"
+    c = canvas.Canvas(str(src), pagesize=(1000, 1000))
+    # Bleed text outside cropbox (x < 500)
+    c.setFont("Helvetica", 10)
+    c.drawString(100, 500, "PRINTER COLOR BAR / REGISTRATION MARK")
+    # Content text inside cropbox (x=600, y=500)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(600, 500, "Visible Chapter Content Inside CropBox")
+    c.showPage()
+    c.save()
+
+    # Set CropBox to (500, 100, 900, 800) using pikepdf
+    with pikepdf.open(src, allow_overwriting_input=True) as pike:
+        pike.pages[0].CropBox = pikepdf.Array([500, 100, 900, 800])
+        pike.save(src)
+
+    from openlargeprint.importers.pdf.native import NativePdfImporter
+    from openlargeprint.security.isolation import JobWorkspace
+
+    importer = NativePdfImporter()
+    with JobWorkspace() as ws:
+        ir = importer.import_document(src, ws)
+
+    # 1. Bleed text must be completely omitted
+    all_text = " ".join(b.text or "" for b in ir.blocks)
+    assert "PRINTER COLOR BAR" not in all_text
+    assert "Visible Chapter Content" in all_text
+
+    # 2. Coordinates of content block must be normalized relative to CropBox (x ~ 100, not x ~ 600)
+    content_blocks = [b for b in ir.blocks if b.type != BlockType.PAGE_MARKER and b.text and "Visible Chapter" in b.text]
+    assert content_blocks
+    cb_box = content_blocks[0].source_bounding_box
+    assert cb_box is not None
+    # 600 - 500 = 100
+    assert 90.0 <= cb_box.x0 <= 110.0, f"Expected normalized x0 near 100, got {cb_box.x0}"
+
+
+def test_font_proportional_spacing_preserves_large_titles():
+    """Font-proportional spacing must prevent split words in titles while separating real words."""
+    from openlargeprint.importers.pdf.native import NativePdfImporter, TextLine
+
+    importer = NativePdfImporter()
+    # 72pt font: normal kerning between 'GR' and 'AMMAR' is ~3.5pt (< 0.22 * 72 = 15.8pt)
+    frags = [
+        TextLine(text="GR", rect=(50.0, 500.0, 120.0, 570.0), font_size=72.0, font_name="Helvetica-Bold", is_bold=True, page_num=1),
+        TextLine(text="AMMAR", rect=(123.5, 500.0, 300.0, 570.0), font_size=72.0, font_name="Helvetica-Bold", is_bold=True, page_num=1),
+        # Distinct word separated by 25pt gap (> 15.8pt)
+        TextLine(text="BOOK", rect=(325.0, 500.0, 450.0, 570.0), font_size=72.0, font_name="Helvetica-Bold", is_bold=True, page_num=1),
+    ]
+
+    lines = importer._aggregate_fragments_into_lines(frags, 1)
+    assert len(lines) == 1
+    assert lines[0].text == "GRAMMAR BOOK"
+
+
+def test_numbered_outlines_do_not_render_bullets_in_exporters(tmp_path: Path):
+    """Numbered outlines and TOC entries must retain clean numbering without prepended bullet symbols."""
+    ir = DocumentIR(
+        metadata=DocumentMetadata(title="Outline Test", page_count=1),
+        pages=[PageMetadata(page_number=1, width=595, height=842, classification=PageClassification.NATIVE)],
+        blocks=[
+            Block(id="p1_l1", type=BlockType.LIST, text="1. Present continuous (I am doing)", source_page=1),
+            Block(id="p1_l2", type=BlockType.LIST, text="• Regular bulleted item", source_page=1),
+        ],
+    )
+
+    pdf_out = tmp_path / "out.pdf"
+    PdfExporter().export(ir, pdf_out, ExportOptions())
+    page = pdfium.PdfDocument(pdf_out)[0]
+    pdf_text = page.get_textpage().get_text_range()
+
+    # Numbered item must NOT have prepended bullet
+    assert "•  1." not in pdf_text and "• 1." not in pdf_text
+    assert "1. Present continuous" in pdf_text
+
+    # Bulleted item must have bullet
+    assert "•  Regular bulleted item" in pdf_text or "• Regular bulleted item" in pdf_text
+
+    # DOCX export check
+    docx_out = tmp_path / "out.docx"
+    from openlargeprint.exporters import DocxExporter
+    DocxExporter().export(ir, docx_out, ExportOptions())
+    doc = docx.Document(docx_out)
+    paragraphs = [p for p in doc.paragraphs if p.text]
+    p1 = [p for p in paragraphs if "Present continuous" in p.text][0]
+    p2 = [p for p in paragraphs if "Regular bulleted" in p.text][0]
+    assert p1.style.name != "List Bullet", "Numbered outline must not use List Bullet style"
+    assert p2.style.name == "List Bullet", "Bulleted item should use List Bullet style"
+
+    # HTML Reader check
+    html_out = tmp_path / "out.html"
+    ReaderExporter().export(ir, html_out, ExportOptions())
+    html_content = html_out.read_text(encoding="utf-8")
+    assert '<p class="list-item list-numbered">1. Present continuous' in html_content
+    assert '<ul><li>Regular bulleted item</li></ul>' in html_content
+
