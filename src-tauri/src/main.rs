@@ -400,7 +400,7 @@ async fn open_file_dialog(app: AppHandle) -> Result<Option<serde_json::Value>, S
                     "size": file_size,
                 })));
             }
-            return Ok(None);
+            Ok(None)
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -441,7 +441,7 @@ async fn choose_save_dialog(
             ) {
                 return Ok(Some(path.to_string_lossy().to_string()));
             }
-            return Ok(None);
+            Ok(None)
         }
 
         #[cfg(not(target_os = "windows"))]
