@@ -20,6 +20,14 @@
 
 <p align="center"><sub>Windows 11 Smart App Control refuses unsigned applications. Until a signing certificate is configured, installs on a machine with Smart App Control enforced need the steps in <a href="SIGNING.md">SIGNING.md</a>.</sub></p>
 
+### Quick Download (Windows 64-bit)
+
+| Edition | Direct Download Link | Description |
+|---|---|---|
+| **Standard Installer** | [**OpenLargePrint-Setup-x64.exe**](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/OpenLargePrint-Setup-x64.exe) | Recommended installer for Windows 10 & 11 with Start menu integration |
+| **Portable Package** | [**OpenLargePrint_0.4.0_windows_x64_portable.zip**](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.4.0/OpenLargePrint_0.4.0_windows_x64_portable.zip) | Standalone archive; extract and run without installation |
+| **Release Manifest** | [**SHA256SUMS.txt**](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/SHA256SUMS.txt) | SHA-256 checksums for cryptographic artifact verification |
+
 ## Overview
 
 When low-vision readers encounter materials with dense layouts (such as two-column law textbooks, academic papers, and scanned legal documents), basic magnification tools like standard PDF zoom fail. Fixed-layout pages clip text, require constant horizontal scrolling, and overlap columns when magnified.
