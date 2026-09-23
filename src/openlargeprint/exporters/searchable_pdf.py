@@ -62,7 +62,7 @@ def build_searchable_pdf(
                 if result.cancelled or (cancel_check and cancel_check()):
                     raise InterruptedError("Conversion cancelled.")
                 if not result.lines:
-                    raise ValueError(f"Page {index + 1} could not be made searchable. The original file is unchanged.")
+                    continue
                 box = [float(v) for v in target.cropbox]
                 crop_width, crop_height = box[2] - box[0], box[3] - box[1]
                 overlay_bytes = io.BytesIO()
@@ -92,7 +92,7 @@ def build_searchable_pdf(
                 overlay.save()
                 overlay_bytes.seek(0)
                 with pikepdf.open(overlay_bytes) as layer:
-                    target.add_overlay(layer.pages[0], pikepdf.Rectangle(box))
+                    target.add_overlay(layer.pages[0], pikepdf.Rectangle(*box))
             finally:
                 page.close()
         if cancel_check and cancel_check():

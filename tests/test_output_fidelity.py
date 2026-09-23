@@ -248,6 +248,64 @@ def test_searchable_pdf_preserves_layout_and_adds_text(tmp_path: Path):
     assert "clause 7.2" in page.get_textpage().get_text_range()
 
 
+def test_searchable_pdf_succeeds_on_blank_or_textless_pages(tmp_path: Path):
+    """Searchable export must not crash when a document contains a blank or textless page (OUT-004, SPEC §2)."""
+    pdf_path = tmp_path / "with_blank.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=letter)
+    c.setFont("Helvetica", 12)
+    c.drawString(72, 700, "Page 1 heading")
+    c.showPage()
+    # Page 2: intentionally blank
+    c.showPage()
+    # Page 3: more text
+    c.drawString(72, 700, "Page 3 body")
+    c.showPage()
+    c.save()
+
+    out = tmp_path / "searchable_with_blank.pdf"
+    result = PipelineOrchestrator().convert(
+        pdf_path, out, ExportOptions(), export_format="searchable_pdf"
+    )
+    assert result.format == "searchable_pdf"
+    assert out.exists()
+
+    with pdfium.PdfDocument(out) as doc:
+        assert len(doc) == 3
+        assert "Page 1 heading" in doc[0].get_textpage().get_text_range()
+        assert "Page 3 body" in doc[2].get_textpage().get_text_range()
+
+
+def test_searchable_pdf_overlays_text_on_scanned_page(tmp_path: Path):
+    """Searchable export must successfully overlay text onto a scanned/raster-only page (OUT-004)."""
+    from PIL import Image, ImageDraw
+
+    # Create a scanned-like image with text rendered as pixels
+    img = Image.new("RGB", (600, 200), color="white")
+    draw = ImageDraw.Draw(img)
+    draw.text((20, 50), "Scanned clause 9.4", fill="black")
+    img_path = tmp_path / "page_raster.png"
+    img.save(img_path)
+
+    # Put this raster image into a PDF without native text
+    pdf_path = tmp_path / "scanned_doc.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=(600, 200))
+    c.drawImage(str(img_path), 0, 0, width=600, height=200)
+    c.showPage()
+    c.save()
+
+    out = tmp_path / "searchable_scanned.pdf"
+    result = PipelineOrchestrator().convert(
+        pdf_path, out, ExportOptions(), export_format="searchable_pdf"
+    )
+    assert result.format == "searchable_pdf"
+    assert out.exists()
+
+    with pdfium.PdfDocument(out) as doc:
+        assert len(doc) == 1
+        text = doc[0].get_textpage().get_text_range()
+        assert "clause" in text.lower() or "scanned" in text.lower()
+
+
 def test_docx_section_break_advances_page(tmp_path: Path):
     """A Word section break must produce a new source page (OFF-001, PDF-006)."""
     from docx.enum.section import WD_SECTION
