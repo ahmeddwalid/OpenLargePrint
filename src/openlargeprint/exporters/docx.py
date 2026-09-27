@@ -131,11 +131,14 @@ class DocxExporter(BaseExporter):
         # Handle page markers (OUT-005)
         if block.type == BlockType.PAGE_MARKER:
             if options.include_page_markers and block.page_marker is not None:
+                if getattr(options, "page_break_on_source_page", False) and block.page_marker > 1:
+                    document.add_page_break()
                 p = document.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.space_before = Pt(options.body_pt * 0.8)
                 p.paragraph_format.space_after = Pt(options.body_pt * 0.5)
-                run = p.add_run(f"— Original Page {block.page_marker} —")
+                p.paragraph_format.keep_with_next = True
+                run = p.add_run(f"-- Original Page {block.page_marker} --")
                 run.font.name = options.font_family
                 run.font.size = Pt(max(12.0, options.body_pt * 0.7))
                 run.font.bold = True

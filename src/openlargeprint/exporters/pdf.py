@@ -14,6 +14,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
     Image as PlatypusImage,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -395,8 +396,10 @@ class PdfExporter(BaseExporter):
         # Handle page markers (OUT-005)
         if block.type == BlockType.PAGE_MARKER:
             if options.include_page_markers and block.page_marker is not None:
+                if getattr(options, "page_break_on_source_page", False) and block.page_marker > 1:
+                    flowables.append(PageBreak())
                 flowables.append(
-                    Paragraph(f"— Original Page {block.page_marker} —", styles["page_marker"])
+                    Paragraph(f"-- Original Page {block.page_marker} --", styles["page_marker"])
                 )
             return flowables
 

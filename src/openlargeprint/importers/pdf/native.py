@@ -66,6 +66,19 @@ def clean_ligatures(text: str) -> str:
     return text
 
 
+def normalize_tracked_text(text: str) -> str:
+    """Normalize artificially tracked/letter-spaced words like 'C a m b r i d g e' -> 'Cambridge'."""
+    if not text or len(text) < 5 or " " not in text:
+        return text
+
+    def _collapse_match(m: re.Match) -> str:
+        return m.group(0).replace(" ", "")
+
+    # Match single letters separated by exactly one space (multi-spaces represent word breaks)
+    pattern = re.compile(r"\b[A-Za-z](?: [A-Za-z]){2,}\b")
+    return pattern.sub(_collapse_match, text)
+
+
 @dataclass
 class TextLine:
     text: str
@@ -119,7 +132,7 @@ class NativePdfImporter(BaseImporter):
         self.preserve_page_artwork = preserve_page_artwork
         self._router = OcrRouter()
         self.ocr_engine = ocr_engine or self._router.get_engine(routing_mode)
-        self.scanned_extractor = ScannedPageExtractor(self.ocr_engine, dpi=ocr_dpi)
+        self.scanned_extractor = ScannedPageExtractor(self.ocr_engine, dpi=ocr_dpi, ocr_router=self._router)
 
     def import_document(
         self,
@@ -296,8 +309,18 @@ class NativePdfImporter(BaseImporter):
                         log_safe_info(
                             f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
                         )
+                        page_lang_hints = ("ar",) if (
+                            "arabic" in file_path.name.lower()
+                            or any("\u0600" <= c <= "\u06ff" for c in file_path.stem)
+                            or any("\u0600" <= c <= "\u06ff" for c in str(page_meta.details.get("clean_text", "")))
+                        ) else ("en",)
                         extracted = self.scanned_extractor.extract_page(
-                            page, page_num, block_counter, assets_dir=workspace.assets_dir, cancel_check=cancel_check
+                            page,
+                            page_num,
+                            block_counter,
+                            assets_dir=workspace.assets_dir,
+                            cancel_check=cancel_check,
+                            language_hints=page_lang_hints,
                         )
                         block_counter += len(extracted)
 
@@ -354,6 +377,23 @@ class NativePdfImporter(BaseImporter):
                         # Surface image issues on the page's first block (never drop silently).
                         target = page_blocks[0] if page_blocks else marker_block
                         target.warnings.extend(page_image_warnings)
+
+                    # De-hyphenate broken word across page boundary (e.g. "pa-" at end of previous page + "rticle" at start of new page)
+                    if all_blocks and page_blocks:
+                        last_prev = next((b for b in reversed(all_blocks) if b.type == BlockType.PARAGRAPH and b.text), None)
+                        first_new = next((b for b in page_blocks if b.type == BlockType.PARAGRAPH and b.text), None)
+                        if last_prev and first_new and last_prev.text and first_new.text:
+                            txt_prev = last_prev.text.rstrip()
+                            hyphen_match = re.search(r"([A-Za-z]{2,})-$", txt_prev)
+                            if hyphen_match:
+                                suffix_match = re.match(r"^([a-z]{2,})\b(.*)", first_new.text, re.DOTALL)
+                                if suffix_match:
+                                    prefix = hyphen_match.group(1)
+                                    suffix = suffix_match.group(1)
+                                    rest = suffix_match.group(2)
+                                    last_prev.text = txt_prev[:-len(prefix)-1] + prefix + suffix
+                                    first_new.text = rest.lstrip()
+
                     all_blocks.extend(page_blocks)
 
                     # 5. Checkpoint callback per page (UI-003)
@@ -429,9 +469,11 @@ class NativePdfImporter(BaseImporter):
         finally:
             textpage.close()
         try:
+            page_lang_hints = ("ar",) if any("\u0600" <= c <= "\u06ff" for c in str(page_meta.details.get("clean_text", ""))) else ("en",)
             ocr_blocks = self.scanned_extractor.extract_page(
                 page, page_num, idx_after_native, assets_dir=assets_dir,
                 cancel_check=cancel_check, native_regions=native_regions,
+                language_hints=page_lang_hints,
             )
         except InterruptedError:
             raise
@@ -541,6 +583,64 @@ class NativePdfImporter(BaseImporter):
             warnings=[f"Page {page_num} needs review. The original page image has been retained."],
         )
 
+    def _filter_running_headers_and_footers(
+        self,
+        lines: List[TextLine],
+        page_num: int,
+        page_width: float,
+        page_height: float,
+    ) -> List[TextLine]:
+        """Filter out running headers, running footers, and isolated page numbers from original layout."""
+        if len(lines) <= 2:
+            return lines
+
+        font_sizes = sorted(l.font_size for l in lines)
+        body_font_size = font_sizes[len(font_sizes) // 2]
+
+        top_boundary = 0.90 * page_height
+        bottom_boundary = 0.08 * page_height
+
+        kept: List[TextLine] = []
+        for line in lines:
+            txt = line.text.strip()
+            if not txt:
+                continue
+
+            line.text = normalize_tracked_text(line.text)
+            txt = line.text.strip()
+
+            is_top = (line.y0 >= top_boundary)
+            is_bottom = (line.y1 <= bottom_boundary)
+
+            if not is_top and not is_bottom:
+                kept.append(line)
+                continue
+
+            # 1. Lone page numbers or roman numerals
+            if re.match(r"^(?:page\s+)?(?:\d{1,4}|[ivxlcdm]{1,8})(?:\s+(?:of|/|-)\s+\d{1,4})?$", txt, re.IGNORECASE):
+                continue
+
+            # 2. Number + title / Title + number header/footer (e.g. "4 English Phrasal Verbs in Use", "English Phrasal Verbs in Use 5")
+            if re.match(r"^(?:\d{1,4}\s+[A-Za-z\s]{2,50}|[A-Za-z\s]{2,50}\s+\d{1,4})$", txt):
+                if line.font_size <= 1.25 * body_font_size:
+                    continue
+
+            # 3. Running headers at top of page (for page > 1)
+            if is_top and page_num > 1:
+                if line.font_size <= 1.15 * body_font_size and len(txt) <= 70 and not txt.endswith((".", "!", "?", ":")):
+                    if not re.match(r"^(?:\d+[\.\)]|[-*•])\s+", txt):
+                        continue
+
+            # 4. Running footer at bottom of page
+            if is_bottom:
+                if line.font_size <= 1.05 * body_font_size and len(txt) <= 65:
+                    if txt.startswith("©") or "all rights reserved" in txt.lower() or txt.startswith("http"):
+                        continue
+
+            kept.append(line)
+
+        return kept if kept else lines
+
     def _extract_native_text(
         self,
         page: pdfium.PdfPage,
@@ -561,8 +661,13 @@ class NativePdfImporter(BaseImporter):
         if not raw_lines:
             return []
 
+        # Filter running headers and footers from original page layout
+        clean_lines = self._filter_running_headers_and_footers(
+            raw_lines, page_num, page_meta.width, page_meta.height
+        )
+
         # 1. Detect and extract tables before column ordering (TBL-001)
-        non_table_lines, table_blocks = self._extract_tables(raw_lines, page_num, start_idx, page_meta)
+        non_table_lines, table_blocks = self._extract_tables(clean_lines, page_num, start_idx, page_meta)
         idx_after_tables = start_idx + len(table_blocks)
 
         # 2. Reconstruct column order for regular text
@@ -934,51 +1039,117 @@ class NativePdfImporter(BaseImporter):
     def _order_lines_by_layout(
         self, lines: List[TextLine], page_width: float, page_height: float
     ) -> List[TextLine]:
-        """Reconstruct proper reading order for multi-column or single-column pages."""
+        """Reconstruct proper reading order for multi-column or single-column pages using adaptive gutters and vertical banding."""
         if len(lines) <= 2:
             return sorted(lines, key=lambda l: -l.y1)
 
-        mid_x = page_width / 2.0
-        left_col: List[TextLine] = []
-        right_col: List[TextLine] = []
-        full_width: List[TextLine] = []
+        # 1. Adaptive Gutter Detection
+        body_lines = [l for l in lines if l.width < 0.65 * page_width and len(l.text.strip()) > 0]
+        split_x = page_width / 2.0
+        is_multi_col = False
 
-        for line in lines:
-            if line.x0 < mid_x * 0.85 and line.x1 > mid_x * 1.15:
-                full_width.append(line)
-            elif line.x1 <= mid_x + 15:
-                left_col.append(line)
-            elif line.x0 >= mid_x - 15:
-                right_col.append(line)
-            else:
-                full_width.append(line)
+        if len(body_lines) >= 4:
+            start_x = int(0.25 * page_width)
+            end_x = int(0.75 * page_width)
+            best_gutter_center = page_width / 2.0
+            best_gutter_width = 0.0
+            current_gutter_start = None
 
-        is_two_column = len(left_col) >= 2 and len(right_col) >= 2
-        if not is_two_column:
+            for x in range(start_x, end_x, 2):
+                crossing = sum(1 for l in body_lines if l.x0 <= x <= l.x1)
+                if crossing == 0:
+                    if current_gutter_start is None:
+                        current_gutter_start = x
+                else:
+                    if current_gutter_start is not None:
+                        gutter_w = x - current_gutter_start
+                        if gutter_w > best_gutter_width:
+                            best_gutter_width = gutter_w
+                            best_gutter_center = (current_gutter_start + x) / 2.0
+                        current_gutter_start = None
+
+            if current_gutter_start is not None:
+                gutter_w = end_x - current_gutter_start
+                if gutter_w > best_gutter_width:
+                    best_gutter_width = gutter_w
+                    best_gutter_center = (current_gutter_start + end_x) / 2.0
+
+            if best_gutter_width >= 8.0:
+                left_count = sum(1 for l in body_lines if l.x1 <= best_gutter_center + 10)
+                right_count = sum(1 for l in body_lines if l.x0 >= best_gutter_center - 10)
+                if left_count >= 2 and right_count >= 2:
+                    split_x = best_gutter_center
+                    is_multi_col = True
+
+        if not is_multi_col:
+            # Fallback to midpoint test
+            left_count = sum(1 for l in body_lines if l.x1 <= (page_width / 2.0) + 15)
+            right_count = sum(1 for l in body_lines if l.x0 >= (page_width / 2.0) - 15)
+            if left_count >= 2 and right_count >= 2:
+                split_x = page_width / 2.0
+                is_multi_col = True
+
+        if not is_multi_col:
             return sorted(lines, key=lambda l: -l.y1)
 
-        # Detect page text direction for multi-column ordering (PDF-003, LANG-002)
+        # 2. Multi-column classification
         sample_text = " ".join(l.text for l in lines)
         page_dir = detect_text_direction(sample_text)
 
-        col_top = max(max(l.y1 for l in left_col), max(l.y1 for l in right_col))
-        col_bottom = min(min(l.y0 for l in left_col), min(l.y0 for l in right_col))
+        left_lines: List[TextLine] = []
+        right_lines: List[TextLine] = []
+        full_width_breaks: List[TextLine] = []
 
-        top_headers = [l for l in full_width if l.y0 >= col_top - 5]
-        bottom_footers = [l for l in full_width if l.y1 <= col_bottom + 5]
-        middle_full = [l for l in full_width if l not in top_headers and l not in bottom_footers]
+        for line in lines:
+            if line.x0 < split_x * 0.85 and line.x1 > split_x * 1.15:
+                full_width_breaks.append(line)
+            elif line.x1 <= split_x + 15:
+                left_lines.append(line)
+            elif line.x0 >= split_x - 15:
+                right_lines.append(line)
+            else:
+                full_width_breaks.append(line)
 
+        full_width_breaks.sort(key=lambda l: -l.y1)
+
+        # 3. Vertical banding: full-width lines act as section dividers
         ordered: List[TextLine] = []
-        ordered.extend(sorted(top_headers, key=lambda l: -l.y1))
+        if not full_width_breaks:
+            if page_dir == TextDirection.RTL:
+                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
+                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
+            else:
+                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
+                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
+            return ordered
+
+        remaining_left = list(left_lines)
+        remaining_right = list(right_lines)
+
+        for fw in full_width_breaks:
+            fw_bottom = fw.y0
+            band_left = [l for l in remaining_left if l.y0 >= fw_bottom - 4.0]
+            band_right = [l for l in remaining_right if l.y0 >= fw_bottom - 4.0]
+
+            remaining_left = [l for l in remaining_left if l not in band_left]
+            remaining_right = [l for l in remaining_right if l not in band_right]
+
+            if page_dir == TextDirection.RTL:
+                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
+                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
+            else:
+                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
+                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
+
+            ordered.append(fw)
+
         if page_dir == TextDirection.RTL:
-            # In RTL scripts (Arabic), Column 1 is on the RIGHT, Column 2 is on the LEFT (LANG-002)
-            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
-            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
         else:
-            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
-            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
-        ordered.extend(sorted(middle_full, key=lambda l: -l.y1))
-        ordered.extend(sorted(bottom_footers, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
+
         return ordered
 
     def _form_semantic_blocks(
@@ -1067,7 +1238,9 @@ class NativePdfImporter(BaseImporter):
                 current_level = None
                 return
 
-            normalized_text = normalize_arabic_logical_order(text_content)
+            # Normalize letter-spaced tracking and Arabic logical order
+            cleaned_text = normalize_tracked_text(text_content)
+            normalized_text = normalize_arabic_logical_order(cleaned_text)
             blk_lang = detect_language(normalized_text)
             blk_dir = detect_text_direction(normalized_text)
 
@@ -1076,6 +1249,38 @@ class NativePdfImporter(BaseImporter):
             max_x = max(l.x1 for l in current_lines)
             max_y = max(l.y1 for l in current_lines)
             bbox = BoundingBox(x0=min_x, y0=min_y, x1=max_x, y1=max_y)
+
+            # De-duplicate drop-shadow / vector text layers
+            if blocks:
+                prev_b = blocks[-1]
+                # 1. Exact duplicate heading text (e.g. drop shadow)
+                if (
+                    current_type in (BlockType.HEADING, BlockType.TITLE)
+                    and prev_b.type in (BlockType.HEADING, BlockType.TITLE)
+                    and normalized_text.strip().lower() == (prev_b.text or "").strip().lower()
+                ):
+                    current_lines = []
+                    current_type = BlockType.PARAGRAPH
+                    current_level = None
+                    return
+
+                # 2. High spatial overlap on the same page (shadow or layered text)
+                if prev_b.source_page == page_num and prev_b.source_bounding_box and bbox:
+                    pb = prev_b.source_bounding_box
+                    x_overlap = max(0.0, min(pb.x1, bbox.x1) - max(pb.x0, bbox.x0))
+                    y_overlap = max(0.0, min(pb.y1, bbox.y1) - max(pb.y0, bbox.y0))
+                    min_area = min(pb.width * pb.height, bbox.width * bbox.height)
+                    if min_area > 0 and (x_overlap * y_overlap / min_area) > 0.65:
+                        t1 = (prev_b.text or "").strip().lower()
+                        t2 = normalized_text.strip().lower()
+                        if t1 == t2 or t1 in t2 or t2 in t1:
+                            if len(normalized_text) > len(prev_b.text or ""):
+                                prev_b.text = normalized_text
+                                prev_b.source_bounding_box = bbox
+                            current_lines = []
+                            current_type = BlockType.PARAGRAPH
+                            current_level = None
+                            return
 
             blk = Block(
                 id=f"p{page_num}_b{idx}",

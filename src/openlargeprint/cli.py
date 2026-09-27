@@ -95,6 +95,11 @@ def main() -> int:
         help="Do not insert 'Original page N' transition markers",
     )
     convert_parser.add_argument(
+        "--page-break-on-source-page",
+        action="store_true",
+        help="Start each original source page on a new physical sheet",
+    )
+    convert_parser.add_argument(
         "--preserve-page-artwork",
         action="store_true",
         help=(
@@ -153,6 +158,7 @@ def main() -> int:
                 include_page_markers=not args.no_page_markers,
                 custom_body_pt=args.body_pt,
                 custom_line_spacing=args.line_spacing,
+                page_break_on_source_page=bool(getattr(args, "page_break_on_source_page", False)),
             )
 
             page_range = tuple(args.page_range) if args.page_range else None

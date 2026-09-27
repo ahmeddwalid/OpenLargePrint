@@ -57,6 +57,7 @@ class ExportOptions:
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
     monochrome: bool = False
+    page_break_on_source_page: bool = False
 
     def __post_init__(self) -> None:
         self.preset = PresetName(self.preset)
