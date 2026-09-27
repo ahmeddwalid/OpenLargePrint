@@ -15,10 +15,24 @@ INTER_OP_THREADS = 1
 class PaddleRapidOcrEngine:
     """CPU-friendly PaddleOCR engine adapter running on-device via ONNX Runtime."""
 
-    def __init__(self, use_gpu: bool = False):
+    def __init__(
+        self,
+        use_gpu: bool = False,
+        rec_model_path: Optional[str] = None,
+        rec_keys_path: Optional[str] = None,
+        language: str = "en",
+    ):
         self._engine = None
         self.use_gpu = use_gpu
-        self._worker = OcrWorker(use_gpu)
+        self.rec_model_path = rec_model_path
+        self.rec_keys_path = rec_keys_path
+        self.language = language
+        self._worker = OcrWorker(
+            use_gpu=use_gpu,
+            rec_model_path=self.rec_model_path,
+            rec_keys_path=self.rec_keys_path,
+            language=self.language,
+        )
 
     def close(self) -> None:
         self._worker.close()
@@ -35,12 +49,29 @@ class PaddleRapidOcrEngine:
 
             model_root = Path(rapidocr_onnxruntime.__file__).parent / "models"
             model_paths = {}
-            for stage, key in (("det", "ch_PP-OCRv4_det"), ("cls", "ch_ppocr_mobile_v2.0_cls"), ("rec", "ch_PP-OCRv4_rec")):
+            for stage, key in (("det", "ch_PP-OCRv4_det"), ("cls", "ch_ppocr_mobile_v2.0_cls")):
                 path = model_root / f"{key}_infer.onnx"
                 artifact = PINNED_MODELS.models[key]
                 if ModelManager.compute_sha256(path) != artifact.sha256:
                     raise ModelIntegrityError("The bundled recognition model failed integrity verification. Reinstall the application.")
                 model_paths[f"{stage}_model_path"] = str(path)
+
+            if self.rec_model_path:
+                rec_path = Path(self.rec_model_path)
+                if self.language == "ar":
+                    artifact = PINNED_MODELS.models.get("arabic_PP-OCRv3_rec")
+                    if artifact and ModelManager.compute_sha256(rec_path) != artifact.sha256:
+                        raise ModelIntegrityError("Arabic recognition model failed integrity verification.")
+                model_paths["rec_model_path"] = str(rec_path)
+                if self.rec_keys_path:
+                    model_paths["rec_keys_path"] = str(self.rec_keys_path)
+            else:
+                key = "ch_PP-OCRv4_rec"
+                path = model_root / f"{key}_infer.onnx"
+                artifact = PINNED_MODELS.models[key]
+                if ModelManager.compute_sha256(path) != artifact.sha256:
+                    raise ModelIntegrityError("The bundled recognition model failed integrity verification. Reinstall the application.")
+                model_paths["rec_model_path"] = str(path)
 
             available_providers = onnxruntime.get_available_providers()
             has_cuda = "CUDAExecutionProvider" in available_providers
@@ -72,12 +103,13 @@ class PaddleRapidOcrEngine:
         import onnxruntime
         providers = onnxruntime.get_available_providers()
         is_gpu = self.use_gpu and any(p in providers for p in ("CUDAExecutionProvider", "DmlExecutionProvider"))
+        supported_langs = ["ar"] if self.language == "ar" else ["en", "zh"]
 
         return EngineCapabilities(
-            engine_name="PP-OCRv4 (RapidOCR)",
+            engine_name="PP-OCRv3 Arabic (RapidOCR)" if self.language == "ar" else "PP-OCRv4 (RapidOCR)",
             supports_layout=False,
             supports_confidence=True,
-            supported_languages=["en", "zh"],
+            supported_languages=supported_langs,
             is_gpu_accelerated=is_gpu,
         )
 

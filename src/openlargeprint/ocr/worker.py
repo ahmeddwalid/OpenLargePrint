@@ -29,10 +29,22 @@ def _stop_worker(process: BaseProcess, sender: Connection, receiver: Connection)
     process.close()
 
 
-def _recognize(receiver: Connection, sender: Connection, use_gpu: bool) -> None:
+def _recognize(
+    receiver: Connection,
+    sender: Connection,
+    use_gpu: bool,
+    rec_model_path: str | None = None,
+    rec_keys_path: str | None = None,
+    language: str = "en",
+) -> None:
     from .paddle_engine import PaddleRapidOcrEngine
 
-    engine = PaddleRapidOcrEngine(use_gpu=use_gpu)
+    engine = PaddleRapidOcrEngine(
+        use_gpu=use_gpu,
+        rec_model_path=rec_model_path,
+        rec_keys_path=rec_keys_path,
+        language=language,
+    )
     try:
         while True:
             try:
@@ -53,9 +65,19 @@ def _recognize(receiver: Connection, sender: Connection, use_gpu: bool) -> None:
 
 
 class OcrWorker:
-    def __init__(self, use_gpu: bool, timeout_seconds: float = OCR_PAGE_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        use_gpu: bool,
+        timeout_seconds: float = OCR_PAGE_TIMEOUT_SECONDS,
+        rec_model_path: str | None = None,
+        rec_keys_path: str | None = None,
+        language: str = "en",
+    ):
         self.use_gpu = use_gpu
         self.timeout_seconds = timeout_seconds
+        self.rec_model_path = rec_model_path
+        self.rec_keys_path = rec_keys_path
+        self.language = language
         self._process: BaseProcess | None = None
         self._connection: Connection | None = None
         self._sender: Connection | None = None
@@ -83,7 +105,18 @@ class OcrWorker:
             context = multiprocessing.get_context("spawn")
             child_reader, parent_writer = context.Pipe(duplex=False)
             parent_reader, child_writer = context.Pipe(duplex=False)
-            process = context.Process(target=_recognize, args=(child_reader, child_writer, self.use_gpu), daemon=True)
+            process = context.Process(
+                target=_recognize,
+                args=(
+                    child_reader,
+                    child_writer,
+                    self.use_gpu,
+                    self.rec_model_path,
+                    self.rec_keys_path,
+                    self.language,
+                ),
+                daemon=True,
+            )
             try:
                 process.start()
             except BaseException:

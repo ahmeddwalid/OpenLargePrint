@@ -1,6 +1,7 @@
 """Tests for scanned PDF table and footnote extraction with crop retention (TBL-001, FN-001)."""
 
 from pathlib import Path
+from typing import Tuple
 from PIL import Image, ImageDraw, ImageFont
 import pypdfium2 as pdfium
 import pytest
@@ -31,7 +32,15 @@ class MockTableOcrEngine(DocumentOcrEngine):
     def is_available(self) -> bool:
         return True
 
-    def analyze_page(self, pil_image: Image.Image, page_num: int = 1, *, cancellation=None) -> EnginePageResult:
+    def analyze_page(
+        self,
+        pil_image: Image.Image,
+        page_num: int = 1,
+        *,
+        language_hints: Tuple[str, ...] = ("en",),
+        cancellation=None,
+        **kwargs,
+    ) -> EnginePageResult:
         scale = 200.0 / 72.0
         # Invert helper: PDF y_pt -> pixel Y
         def y_to_px(y_pt: float) -> float:

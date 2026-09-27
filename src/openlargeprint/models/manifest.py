@@ -106,7 +106,7 @@ PINNED_MODELS = ModelCatalog(
             file_size_bytes=8978664,
             code_license="Apache-2.0",
             weight_license="Apache-2.0",
-            download_url="https://github.com/monkt/paddleocr-onnx",
+            download_url="https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/rec.onnx",
             is_default=False,
             description="Optional on-device Arabic text recognition model (PaddleOCR v3 ONNX)",
         ),

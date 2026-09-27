@@ -7,7 +7,7 @@ from pathlib import Path
 from openlargeprint.security.validator import bounded_pdf_scale
 import re
 import tempfile
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import uuid
 import pypdfium2 as pdfium
 from PIL import ImageDraw
@@ -46,9 +46,15 @@ class OcrPointLine:
 class ScannedPageExtractor:
     """Renders scanned PDF pages, invokes OCR, reconstructs columns, and yields DocumentIR blocks."""
 
-    def __init__(self, ocr_engine: DocumentOcrEngine, dpi: float = 300.0):
+    def __init__(
+        self,
+        ocr_engine: DocumentOcrEngine,
+        dpi: float = 300.0,
+        ocr_router: Optional[Any] = None,
+    ):
         self.ocr_engine = ocr_engine
         self.dpi = dpi
+        self.ocr_router = ocr_router
 
     def extract_page(
         self,
@@ -58,6 +64,7 @@ class ScannedPageExtractor:
         assets_dir: Optional[Path] = None,
         cancel_check: Optional[CancelCheck] = None,
         native_regions: Optional[List[Tuple[float, float, float, float]]] = None,
+        language_hints: Tuple[str, ...] = ("en",),
     ) -> List[Block]:
         """Render page, perform OCR recognition, reconstruct columns, and form semantic blocks."""
         page_w_pt, page_h_pt = page.get_size()
@@ -77,9 +84,17 @@ class ScannedPageExtractor:
                         fill="white",
                     )
             # 2. Run OCR recognition (OCR-001, OCR-002, OCR-006)
-            ocr_res = self.ocr_engine.analyze_page(
-                pil_img, page_num=page_num, cancellation=CancellationToken(cancel_check)
-            )
+            engine = self.ocr_engine
+            import inspect
+            sig = inspect.signature(engine.analyze_page)
+            analyze_kwargs = {
+                "page_num": page_num,
+                "cancellation": CancellationToken(cancel_check),
+            }
+            if "language_hints" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                analyze_kwargs["language_hints"] = language_hints
+
+            ocr_res = engine.analyze_page(pil_img, **analyze_kwargs)
             if ocr_res.cancelled or (cancel_check and cancel_check()):
                 raise InterruptedError("Conversion cancelled.")
             log_safe_info(
@@ -166,53 +181,117 @@ class ScannedPageExtractor:
     def _order_lines_by_columns(
         self, lines: List[OcrPointLine], page_w: float, page_h: float
     ) -> List[OcrPointLine]:
-        """Reconstruct proper reading order for single- or multi-column scanned pages."""
+        """Reconstruct proper reading order for single- or multi-column scanned pages using adaptive gutters and vertical banding."""
         if len(lines) <= 2:
             return sorted(lines, key=lambda l: -l.y1)
 
-        mid_x = page_w / 2.0
-        left_col: List[OcrPointLine] = []
-        right_col: List[OcrPointLine] = []
-        full_width: List[OcrPointLine] = []
+        # 1. Adaptive Gutter Detection
+        body_lines = [l for l in lines if (l.x1 - l.x0) < 0.65 * page_w and len(l.text.strip()) > 0]
+        split_x = page_w / 2.0
+        is_multi_col = False
 
-        for line in lines:
-            if line.x0 < mid_x * 0.85 and line.x1 > mid_x * 1.15:
-                # Spans across page center
-                full_width.append(line)
-            elif line.x1 <= mid_x + 20:
-                left_col.append(line)
-            elif line.x0 >= mid_x - 20:
-                right_col.append(line)
-            else:
-                full_width.append(line)
+        if len(body_lines) >= 4:
+            start_x = int(0.25 * page_w)
+            end_x = int(0.75 * page_w)
+            best_gutter_center = page_w / 2.0
+            best_gutter_width = 0.0
+            current_gutter_start = None
 
-        is_two_column = len(left_col) >= 2 and len(right_col) >= 2
-        if not is_two_column:
-            # Single-column: sort top-to-bottom
+            for x in range(start_x, end_x, 2):
+                crossing = sum(1 for l in body_lines if l.x0 <= x <= l.x1)
+                if crossing == 0:
+                    if current_gutter_start is None:
+                        current_gutter_start = x
+                else:
+                    if current_gutter_start is not None:
+                        gutter_w = x - current_gutter_start
+                        if gutter_w > best_gutter_width:
+                            best_gutter_width = gutter_w
+                            best_gutter_center = (current_gutter_start + x) / 2.0
+                        current_gutter_start = None
+
+            if current_gutter_start is not None:
+                gutter_w = end_x - current_gutter_start
+                if gutter_w > best_gutter_width:
+                    best_gutter_width = gutter_w
+                    best_gutter_center = (current_gutter_start + end_x) / 2.0
+
+            if best_gutter_width >= 8.0:
+                left_count = sum(1 for l in body_lines if l.x1 <= best_gutter_center + 10)
+                right_count = sum(1 for l in body_lines if l.x0 >= best_gutter_center - 10)
+                if left_count >= 2 and right_count >= 2:
+                    split_x = best_gutter_center
+                    is_multi_col = True
+
+        if not is_multi_col:
+            # Fallback to midpoint test
+            left_count = sum(1 for l in body_lines if l.x1 <= (page_w / 2.0) + 15)
+            right_count = sum(1 for l in body_lines if l.x0 >= (page_w / 2.0) - 15)
+            if left_count >= 2 and right_count >= 2:
+                split_x = page_w / 2.0
+                is_multi_col = True
+
+        if not is_multi_col:
             return sorted(lines, key=lambda l: -l.y1)
 
-        # Multi-column layout:
+        # 2. Multi-column classification
         sample_text = " ".join(l.text for l in lines)
         page_dir = detect_text_direction(sample_text)
 
-        col_top = max(max(l.y1 for l in left_col), max(l.y1 for l in right_col))
-        col_bottom = min(min(l.y0 for l in left_col), min(l.y0 for l in right_col))
+        left_lines: List[OcrPointLine] = []
+        right_lines: List[OcrPointLine] = []
+        full_width_breaks: List[OcrPointLine] = []
 
-        top_headers = [l for l in full_width if l.y0 >= col_top - 10]
-        bottom_footers = [l for l in full_width if l.y1 <= col_bottom + 10]
-        middle_full = [l for l in full_width if l not in top_headers and l not in bottom_footers]
+        for line in lines:
+            if line.x0 < split_x * 0.85 and line.x1 > split_x * 1.15:
+                full_width_breaks.append(line)
+            elif line.x1 <= split_x + 15:
+                left_lines.append(line)
+            elif line.x0 >= split_x - 15:
+                right_lines.append(line)
+            else:
+                full_width_breaks.append(line)
 
+        full_width_breaks.sort(key=lambda l: -l.y1)
+
+        # 3. Vertical banding: full-width lines act as section dividers
         ordered: List[OcrPointLine] = []
-        ordered.extend(sorted(top_headers, key=lambda l: -l.y1))
+        if not full_width_breaks:
+            if page_dir == TextDirection.RTL:
+                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
+                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
+            else:
+                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
+                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
+            return ordered
+
+        remaining_left = list(left_lines)
+        remaining_right = list(right_lines)
+
+        for fw in full_width_breaks:
+            fw_bottom = fw.y0
+            band_left = [l for l in remaining_left if l.y0 >= fw_bottom - 4.0]
+            band_right = [l for l in remaining_right if l.y0 >= fw_bottom - 4.0]
+
+            remaining_left = [l for l in remaining_left if l not in band_left]
+            remaining_right = [l for l in remaining_right if l not in band_right]
+
+            if page_dir == TextDirection.RTL:
+                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
+                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
+            else:
+                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
+                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
+
+            ordered.append(fw)
+
         if page_dir == TextDirection.RTL:
-            # In RTL scripts (Arabic), Column 1 is on the RIGHT, Column 2 is on the LEFT (LANG-002)
-            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
-            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
         else:
-            ordered.extend(sorted(left_col, key=lambda l: -l.y1))
-            ordered.extend(sorted(right_col, key=lambda l: -l.y1))
-        ordered.extend(sorted(middle_full, key=lambda l: -l.y1))
-        ordered.extend(sorted(bottom_footers, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
+            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
+
         return ordered
 
     def _extract_tables(
