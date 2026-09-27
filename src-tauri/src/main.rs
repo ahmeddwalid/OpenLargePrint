@@ -21,6 +21,7 @@ pub struct ConversionSettingsPayload {
     pub output_format: Option<String>,
     pub routing_mode: Option<String>,
     pub page_range: Option<String>,
+    pub page_break_on_source_page: Option<bool>,
 }
 
 #[derive(Default)]
@@ -722,6 +723,10 @@ async fn start_conversion(
         .get("preservePageArtwork")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let page_break_on_source_page = settings
+        .get("pageBreakOnSourcePage")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let page_range = settings.get("pageRange").and_then(|r| r.as_str());
     let custom_body_pt = settings.get("customBodyPt").and_then(|v| v.as_f64());
     let custom_line_spacing = settings.get("customLineSpacing").and_then(|v| v.as_f64());
@@ -738,6 +743,7 @@ async fn start_conversion(
         "include_page_markers": true,
         "monochrome": monochrome,
         "preserve_page_artwork": preserve_page_artwork,
+        "page_break_on_source_page": page_break_on_source_page,
     });
 
     if let Some(r) = page_range {
@@ -787,6 +793,10 @@ async fn export_from_ir(
     let preset = preset_from_settings(&settings);
     let paper_size = settings.get("paperSize").and_then(|p| p.as_str()).unwrap_or("A4");
     let monochrome = settings.get("monochrome").and_then(|m| m.as_bool()).unwrap_or(false);
+    let page_break_on_source_page = settings
+        .get("pageBreakOnSourcePage")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let page_range = settings.get("pageRange").and_then(|r| r.as_str());
     let custom_body_pt = settings.get("customBodyPt").and_then(|v| v.as_f64());
     let custom_line_spacing = settings.get("customLineSpacing").and_then(|v| v.as_f64());
@@ -801,6 +811,7 @@ async fn export_from_ir(
         "export_format": out_fmt,
         "include_page_markers": true,
         "monochrome": monochrome,
+        "page_break_on_source_page": page_break_on_source_page,
     });
 
     if let Some(r) = page_range {

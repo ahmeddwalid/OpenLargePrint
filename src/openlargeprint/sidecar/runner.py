@@ -237,6 +237,7 @@ class SidecarRunner:
             monochrome=monochrome,
             custom_body_pt=custom_body_pt,
             custom_line_spacing=custom_line_spacing,
+            page_break_on_source_page=bool(data.get("page_break_on_source_page", False)),
         )
 
         # "Automatic" genuinely means native-first with escalation, not Maximum accuracy.
@@ -432,6 +433,7 @@ class SidecarRunner:
             monochrome=bool(data.get("monochrome", False)),
             custom_body_pt=data.get("custom_body_pt"),
             custom_line_spacing=data.get("custom_line_spacing"),
+            page_break_on_source_page=bool(data.get("page_break_on_source_page", False)),
         )
 
         # Apply an optional source-page selection against the retained IR (OUT-010).

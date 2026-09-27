@@ -136,6 +136,20 @@ const en: Record<string, string> = {
   'reader.save_page': 'Save Page {page}',
   'reader.content_aria': 'Document Content',
   'reader.title_aria': 'Large-Print Reader',
+  'reader.contents': 'Contents',
+  'reader.contents_aria': 'Table of Contents',
+  'reader.search': 'Search',
+  'reader.search_placeholder': 'Search in document...',
+  'reader.search_prev': 'Previous match',
+  'reader.search_next': 'Next match',
+  'reader.search_close': 'Close search',
+  'reader.search_matches': '{current} of {total}',
+  'reader.search_no_matches': 'No matches found',
+  'reader.tts_read': 'Read aloud',
+  'reader.tts_pause': 'Pause reading',
+  'reader.tts_resume': 'Resume reading',
+  'reader.tts_stop': 'Stop reading',
+  'reader.tts_speed': 'Speed',
 
   // Recent documents
   'recent.title': 'Recent documents',
@@ -157,6 +171,8 @@ const en: Record<string, string> = {
   'export.monochrome_desc': 'Converts all figures, charts, and colors to pure high-contrast black and white for clean laser printing without halftone dithering.',
   'export.artwork_label': 'Keep page artwork (full-page backgrounds and scans)',
   'export.artwork_desc': 'By default a picture that covers a whole page is left out, because it is usually the scanned page itself or a background. Turn this on to keep those pictures as figures in the converted document.',
+  'export.page_break_label': 'Start each original page on a new sheet',
+  'export.page_break_desc': 'Inserts a page break before each original page marker in exported PDFs and Word documents, keeping pages isolated instead of flowing continuously.',
 };
 
 export default en;

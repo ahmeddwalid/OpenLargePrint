@@ -15,6 +15,8 @@ function renderOptions(overrides: Partial<React.ComponentProps<typeof AdvancedOp
     onMonochromeChange: vi.fn(),
     preservePageArtwork: false,
     onPreservePageArtworkChange: vi.fn(),
+    pageBreakOnSourcePage: false,
+    onPageBreakOnSourcePageChange: vi.fn(),
     ...overrides,
   };
   render(
@@ -53,6 +55,35 @@ describe('AdvancedOptions page artwork toggle', () => {
     await openAdvancedOptions();
 
     const label = screen.getByRole('checkbox', { name: /keep page artwork/i }).closest('label');
+    expect(label).not.toBeNull();
+    expect(label as HTMLElement).toHaveStyle({ minHeight: '48px' });
+  });
+});
+
+describe('AdvancedOptions page break on source page toggle', () => {
+  it('starts off and reports the change when toggled (UI-001)', async () => {
+    const props = renderOptions();
+    await openAdvancedOptions();
+
+    const toggle = screen.getByRole('checkbox', { name: /start each original page on a new sheet/i });
+    expect(toggle).not.toBeChecked();
+
+    await userEvent.click(toggle);
+    expect(props.onPageBreakOnSourcePageChange).toHaveBeenCalledWith(true);
+  });
+
+  it('reflects the current setting when active', async () => {
+    renderOptions({ pageBreakOnSourcePage: true });
+    await openAdvancedOptions();
+
+    expect(screen.getByRole('checkbox', { name: /start each original page on a new sheet/i })).toBeChecked();
+  });
+
+  it('offers a full-size touch target of at least 44-48px (A11Y-001)', async () => {
+    renderOptions();
+    await openAdvancedOptions();
+
+    const label = screen.getByRole('checkbox', { name: /start each original page on a new sheet/i }).closest('label');
     expect(label).not.toBeNull();
     expect(label as HTMLElement).toHaveStyle({ minHeight: '48px' });
   });

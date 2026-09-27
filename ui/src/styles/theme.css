@@ -530,6 +530,156 @@ button.secondary-btn {
   border-radius: var(--radius-md);
 }
 
+.reader-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  position: relative;
+}
+
+.reader-outline-drawer {
+  width: 280px;
+  flex-shrink: 0;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  position: sticky;
+  top: 16px;
+}
+
+.reader-outline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.reader-outline-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.reader-outline-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reader-outline-item-btn {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  min-height: 44px;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+[dir="rtl"] .reader-outline-item-btn {
+  text-align: right;
+}
+
+.reader-outline-item-btn:hover {
+  background-color: var(--bg-surface-raised);
+  color: var(--text-primary);
+}
+
+.reader-outline-item-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.reader-search-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  flex-wrap: wrap;
+}
+
+.reader-search-input {
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 1rem;
+  font-family: inherit;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  flex: 1;
+  min-width: 180px;
+}
+
+.reader-search-input:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.reader-search-count {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+mark.reader-search-highlight {
+  background-color: #f5dd90;
+  color: #1c1b18;
+  border-radius: 2px;
+  padding: 1px 3px;
+}
+
+[data-theme="dark"] mark.reader-search-highlight {
+  background-color: #635010;
+  color: #f5f4ef;
+}
+
+mark.reader-search-highlight-active {
+  background-color: #e6a817;
+  color: #1c1b18;
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+  border-radius: 2px;
+  padding: 1px 3px;
+  font-weight: 700;
+}
+
+[data-theme="dark"] mark.reader-search-highlight-active {
+  background-color: #947118;
+  color: #ffffff;
+  outline: 2px solid var(--border-focus);
+}
+
+.reader-block-speaking {
+  outline: 2px solid var(--accent-primary) !important;
+  outline-offset: 6px;
+  border-radius: var(--radius-sm);
+  background-color: rgba(72, 90, 52, 0.08);
+}
+
+[data-theme="dark"] .reader-block-speaking {
+  outline: 2px solid var(--accent-primary) !important;
+  background-color: rgba(188, 203, 160, 0.12);
+}
+
 .reader-body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
@@ -538,6 +688,8 @@ button.secondary-btn {
   font-size: var(--reading-size, 20px);
   line-height: var(--reading-line, 1.5);
   font-family: var(--font-serif);
+  flex: 1;
+  min-width: 0;
 }
 
 /* RTL Support (A11Y-005, LANG-001, LANG-002) */

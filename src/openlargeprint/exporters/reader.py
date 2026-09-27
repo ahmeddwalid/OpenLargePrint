@@ -61,39 +61,39 @@ class ReaderExporter(BaseExporter):
       --reading-width: 85ch;
       --reading-font-family: {css_font_stack(options.font_family, options.fallback_font)};
       --reading-font-arabic: "Amiri", "Scheherazade New", "Traditional Arabic", "Noto Sans Arabic", "Geeza Pro", "Arial", sans-serif;
-      --bg-color: #fcfbf9;
-      --surface-color: #ffffff;
-      --text-color: #1a1a1a;
+      --bg-color: #faf8f5;
+      --surface-color: #f1ede4;
+      --text-color: #1c1b18;
       --heading-color: #0d0d0d;
-      --muted-color: #666666;
-      --border-color: #e0ded8;
-      --focus-outline: #005fcc;
-      --button-bg: #f0eee9;
-      --button-hover: #e4e1d8;
+      --muted-color: #655d50;
+      --border-color: #cbbe9f;
+      --focus-outline: #485a34;
+      --button-bg: #e9e5d8;
+      --button-hover: #dddcca;
     }}
 
     [data-theme="dark"] {{
-      --bg-color: #121212;
-      --surface-color: #1e1e1e;
-      --text-color: #f4f4f4;
+      --bg-color: #161614;
+      --surface-color: #22221f;
+      --text-color: #f5f4ef;
       --heading-color: #ffffff;
-      --muted-color: #aaaaaa;
-      --border-color: #333333;
-      --focus-outline: #ffd700;
-      --button-bg: #2a2a2a;
-      --button-hover: #3a3a3a;
+      --muted-color: #9e9a8f;
+      --border-color: #47453e;
+      --focus-outline: #bccba0;
+      --button-bg: #2d2d29;
+      --button-hover: #47453e;
     }}
 
     [data-theme="sepia"] {{
-      --bg-color: #f5efe3;
-      --surface-color: #fcf8f0;
-      --text-color: #2b221a;
+      --bg-color: #f3efdf;
+      --surface-color: #e9e5d8;
+      --text-color: #2d261e;
       --heading-color: #1f1812;
-      --muted-color: #736353;
-      --border-color: #ded3bf;
-      --focus-outline: #8c531b;
-      --button-bg: #eadecd;
-      --button-hover: #decbb4;
+      --muted-color: #655d50;
+      --border-color: #cbbe9f;
+      --focus-outline: #485a34;
+      --button-bg: #dddcca;
+      --button-hover: #cbbe9f;
     }}
 
     * {{

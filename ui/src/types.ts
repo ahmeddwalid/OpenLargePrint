@@ -67,6 +67,7 @@ export interface ConversionSettings {
   outputPath?: string;
   monochrome?: boolean;
   preservePageArtwork?: boolean;
+  pageBreakOnSourcePage?: boolean;
 }
 
 export interface ProgressInfo {

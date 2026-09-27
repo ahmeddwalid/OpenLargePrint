@@ -62,7 +62,7 @@ const I18nContext = createContext<I18nContextValue>({
   locale: 'en',
   direction: 'ltr',
   setLocale: () => {},
-  t: (key) => key,
+  t: (key, vars) => translate('en', key, vars),
 });
 
 export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

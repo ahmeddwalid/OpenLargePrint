@@ -17,6 +17,8 @@ interface AdvancedOptionsProps {
   onMonochromeChange: (val: boolean) => void;
   preservePageArtwork: boolean;
   onPreservePageArtworkChange: (val: boolean) => void;
+  pageBreakOnSourcePage: boolean;
+  onPageBreakOnSourcePageChange: (val: boolean) => void;
 }
 
 export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
@@ -28,6 +30,8 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
   onMonochromeChange,
   preservePageArtwork,
   onPreservePageArtworkChange,
+  pageBreakOnSourcePage,
+  onPageBreakOnSourcePageChange,
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -151,6 +155,26 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
                 </div>
                 <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
                   {t('export.artwork_desc')}
+                </div>
+              </div>
+            </label>
+          </div>
+
+          {/* Page break on each original page */}
+          <div style={{ marginTop: '6px', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', minHeight: '48px', padding: '6px 0' }}>
+              <input
+                type="checkbox"
+                checked={pageBreakOnSourcePage}
+                onChange={(e) => onPageBreakOnSourcePageChange(e.target.checked)}
+                style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer' }}
+              />
+              <div>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {t('export.page_break_label')}
+                </div>
+                <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  {t('export.page_break_desc')}
                 </div>
               </div>
             </label>

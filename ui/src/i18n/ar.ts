@@ -136,6 +136,20 @@ const ar: Record<string, string> = {
   'reader.save_page': 'حفظ الصفحة {page}',
   'reader.content_aria': 'محتوى المستند',
   'reader.title_aria': 'قارئ الطباعة الكبيرة',
+  'reader.contents': 'المحتويات',
+  'reader.contents_aria': 'جدول المحتويات',
+  'reader.search': 'بحث',
+  'reader.search_placeholder': 'البحث في المستند...',
+  'reader.search_prev': 'المطابقة السابقة',
+  'reader.search_next': 'المطابقة التالية',
+  'reader.search_close': 'إغلاق البحث',
+  'reader.search_matches': '{current} من {total}',
+  'reader.search_no_matches': 'لم يتم العثور على نتائج',
+  'reader.tts_read': 'قراءة صوتية',
+  'reader.tts_pause': 'إيقاف مؤقت',
+  'reader.tts_resume': 'استئناف القراءة',
+  'reader.tts_stop': 'إيقاف القراءة',
+  'reader.tts_speed': 'السرعة',
 
   // Recent documents
   'recent.title': 'المستندات الأخيرة',
@@ -157,6 +171,8 @@ const ar: Record<string, string> = {
   'export.monochrome_desc': 'تحويل كافة الصور والعناصر لتباين أبيض وأسود نقي للطباعة بالليزر دون تدرجات ضبابية.',
   'export.artwork_label': 'الحفاظ على رسومات الصفحة (الخلفيات والمسح الكامل للصفحة)',
   'export.artwork_desc': 'افتراضياً تُحذف الصورة التي تغطي الصفحة بالكامل لأنها غالباً صفحة المسح نفسها أو خلفية. فعّل هذا الخيار للإبقاء على تلك الصور كعناصر في المستند المحوَّل.',
+  'export.page_break_label': 'بدء كل صفحة أصلية في ورقة جديدة',
+  'export.page_break_desc': 'إدراج فاصل صفحات قبل محدد كل صفحة أصلية في مستندات PDF و Word المصدرة، للحفاظ على الصفحات منفصلة بدلاً من التدفق المستمر.',
 };
 
 export default ar;
