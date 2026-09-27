@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-27
+
+### Added
+
+- **Configurable page-break pagination (`OUT-002`, `OUT-007..011`, `UI-001`)**: added `page_break_on_source_page` setting across `ExportOptions`, CLI (`--page-break-on-source-page`), sidecar IPC protocol, Rust supervisor, and UI advanced settings, allowing users who require strict original page isolation to start each source page on a new physical sheet.
+- **Reader reading tools (`OUT-002`, `A11Y-001..005`)**: in-reader text search with match cycling, horizontal reading ruler guide, and local text-to-speech read-aloud controls with speed adjustment.
+- **Arabic OCR routing support (`LANG-001..002`, `OCR-002`)**: bundled Arabic character dictionary (`dict.txt`) and wired language-hint routing through the OCR worker and router.
+
+### Fixed
+
+- **Running header and footer suppression (`PDF-002`, `PDF-003`, `OUT-002`)**: margin text located in the top 10% and bottom 8% page margins matching running titles or page numbers across multiple pages is excluded from polluting the body text stream.
+- **Letter-spacing normalization (`PDF-002`, `OUT-002`)**: single-space tracked sequences in titles (such as `C a m b r i d g e`) are normalized to unified words (`Cambridge`) while preserving multi-space word boundaries (`UNIVERSITY   PRESS`).
+- **Heading and shadow deduplication (`PDF-002`)**: duplicate headings produced by vector drop shadows and overlapping text fragments (>65% spatial overlap) are deduplicated.
+- **Cross-page hyphenation (`PDF-002`, `OUT-002`)**: hyphenated words split across source page boundaries are reunited prior to block formation.
+- **PDF page-marker glyph encoding (`OUT-002`)**: replaced Unicode em-dash delimiters in source page markers with ASCII `-- Original Page X --`, eliminating `\ufffd` tofu glyphs in ReportLab standard Type 1 Helvetica fonts.
+- **Orphan heading prevention (`OUT-002`, `OUT-007`)**: added `keepWithNext` to page markers and section headings in PDF and DOCX exporters to prevent isolated titles at page bottoms.
+- **Scanned table and footnote layout (`TBL-001`, `FN-001`)**: improved cell boundary extraction and footnote bounding box classification on scanned pages.
+
 ## [0.4.0] - 2026-09-23
 
 ### Added

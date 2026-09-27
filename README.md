@@ -25,7 +25,7 @@
 | Edition | Direct Download Link | Description |
 |---|---|---|
 | **Standard Installer** | [**OpenLargePrint-Setup-x64.exe**](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/OpenLargePrint-Setup-x64.exe) | Recommended installer for Windows 10 & 11 with Start menu integration |
-| **Portable Package** | [**OpenLargePrint_0.4.0_windows_x64_portable.zip**](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.4.0/OpenLargePrint_0.4.0_windows_x64_portable.zip) | Standalone archive; extract and run without installation |
+| **Portable Package** | [**OpenLargePrint_0.5.0_windows_x64_portable.zip**](https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v0.5.0/OpenLargePrint_0.5.0_windows_x64_portable.zip) | Standalone archive; extract and run without installation |
 | **Release Manifest** | [**SHA256SUMS.txt**](https://github.com/ahmeddwalid/OpenLargePrint/releases/latest/download/SHA256SUMS.txt) | SHA-256 checksums for cryptographic artifact verification |
 
 ## Overview

@@ -257,6 +257,19 @@ This pass prepared the repository for seamless continuation of development on Wi
 - **Automated UI accessibility gates (`A11Y-001..005`, `UI-001`, `UI-005`)**: Added `ui/src/__tests__/AccessibilityGates.test.tsx` verifying primary controls meet target sizing, rem-based scaling at 200%, keyboard navigation, accessible radiogroups, and plain-language labels.
 - **Documentation**: Updated `CONTRIBUTING.md` and `README.md` with Windows development setup and testing guidance.
 
+## Pass 6 — Release v0.5.0: Output Page Organization, Readability, and Reader Tools
+
+This pass resolved layout and page readability defects across multi-page textbook and complex PDF conversions:
+
+- **Running header/footer suppression (`PDF-002`, `PDF-003`, `OUT-002`)**: Margin text within top 10% and bottom 8% page margins repeating across pages or matching page numbering patterns is suppressed, preventing sentence fragmentation across pages.
+- **Letter-spacing normalization (`PDF-002`, `OUT-002`)**: Collapsed single-space tracked sequences (`C a m b r i d g e` -> `Cambridge`) while preserving multiple space word boundaries (`UNIVERSITY   PRESS`).
+- **Deduplication (`PDF-002`)**: Deduplicated identical headings produced by vector drop shadows and text blocks with >65% spatial overlap.
+- **Cross-page de-hyphenation (`PDF-002`, `OUT-002`)**: Reassembled hyphenated words split across source page boundaries.
+- **ReportLab PDF glyph fix (`OUT-002`)**: Replaced Unicode em-dash delimiters in source page markers with ASCII `-- Original Page X --`, resolving `\ufffd` tofu glyph corruption in ReportLab standard Type 1 Helvetica fonts.
+- **Orphan prevention & page breaks (`OUT-002`, `OUT-007..011`, `UI-001`)**: Added `keepWithNext` to page markers and headings. Added opt-in `page_break_on_source_page` setting across engine, CLI (`--page-break-on-source-page`), sidecar IPC protocol, Rust supervisor, and UI advanced options for 1:1 page boundary isolation.
+- **Reader tools & accessibility (`OUT-002`, `A11Y-001..005`)**: Added in-reader search with cycling, horizontal reading ruler guide, text-to-speech audio read-aloud controls, contiguous page export, and RTL/Arabic reading view enhancements.
+- **Arabic OCR routing (`LANG-001..002`, `OCR-002`)**: Added bundled Arabic character dictionary (`dict.txt`) and wired language-hint routing through the OCR worker and router.
+
 ## Still open (release blockers)
 
 - **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Until a
