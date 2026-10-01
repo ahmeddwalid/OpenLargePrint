@@ -118,7 +118,9 @@ def test_sidecar_convert_with_progress_and_checkpoint(tmp_path: Path):
     progress_events = [ev for ev in out_lines if ev["type"] == EventType.PROGRESS.value]
     assert len(progress_events) >= 1
     p_ev = progress_events[0]
-    assert "Importing Word document" in p_ev["message"] or "Extracting" in p_ev["message"]
+    assert p_ev["stage"] == "preparing"
+    assert all(ev["percent"] < 100 for ev in progress_events)
+    assert progress_events[-1]["stage"] == "exporting"
 
     # Check SuccessEvent
     success_ev = [ev for ev in out_lines if ev["type"] == EventType.SUCCESS.value][0]

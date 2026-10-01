@@ -1,3 +1,30 @@
+## Current implementation status (2026-10-02)
+
+The new implementation is on codex/faithful-conversion-windows. The earlier
+"complete on main" status below describes a previous pass and does not describe
+this task. Acceptance is still open; see packaging/verification/REPORT.md.
+
+The old 0.1.0 GUI/engine reached 306/306 on c1 and c2.pdf, then failed exporting
+an oversized retained table image (source page 294, output page 1640). This is an
+observed export failure, not a reproduced page-two OCR stall. Source 0.5.0 has
+frame-aware image bounds and a regression for that failure. A4/A3, OCR worker
+recovery, text preservation, merged cells and content-identity image placement
+have automated coverage. The frozen engine is rebuilt with source fingerprints.
+
+Public signing is mandatory and publication requires exact-artifact enforced SAC
+acceptance. No trusted identity is available. Fresh desktop/installer compilation
+is blocked by enforced application control on Rust build tools (error 4551,
+Code Integrity events). Do not disable protection or treat a development signer
+as acceptance. No rebuilt installer or full rebuilt-GUI corpus is accepted yet.
+
+Dependencies/SBOM unchanged. Structural decisions were added to DESIGN.md.
+Requirements touched: PDF-001..006, DOC-001..003, OCR-004..007, IMG-001..003,
+TBL-001..002, FN-001..002, OUT-001..003/005..010, UI-002..005,
+SEC-006..009, PERF-002, PKG-001..002. OCR fidelity and full release acceptance
+remain open, particularly Arabic and scanned-table recognition.
+
+---
+
 # OpenLargePrint — Handoff Notes
 
 Status: **complete and committed** on branch `main`, pushed to GitHub. This file summarizes
@@ -308,4 +335,3 @@ cd ui && npx tsc --noEmit
 cd src-tauri && cargo check && cargo test
 uv run python -m openlargeprint.cli benchmark --fail-on-mismatch
 ```
-

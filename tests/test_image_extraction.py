@@ -11,6 +11,28 @@ from openlargeprint.ir.models import BlockType
 from openlargeprint.security.isolation import JobWorkspace
 
 
+def test_distinct_same_sized_figures_keep_their_positions(tmp_path):
+    pdf_path = tmp_path / "two_figures.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=letter)
+    c.drawString(50, 730, "Two distinct figures with identical pixel dimensions")
+    for color, y in [("red", 500), ("green", 250)]:
+        path = tmp_path / f"{color}.png"
+        Image.new("RGB", (100, 100), color).save(path)
+        c.drawImage(str(path), 50, y, 100, 100)
+    c.showPage()
+    c.save()
+    with JobWorkspace() as workspace:
+        doc = NativePdfImporter().import_document(pdf_path, workspace)
+        figures = [b for b in doc.blocks if b.type == BlockType.IMAGE]
+        assert len(figures) == 2
+        by_color = {}
+        for figure in figures:
+            with Image.open(figure.image_asset.file_path) as image:
+                by_color[image.convert("RGB").getpixel((0, 0))] = figure.source_bounding_box.y0
+        assert by_color[(255, 0, 0)] == pytest.approx(500)
+        assert by_color[(0, 128, 0)] == pytest.approx(250)
+
+
 def test_lossless_image_extraction(tmp_path: Path):
     """Verify that embedded images are extracted losslessly with correct dimensions and aspect ratio."""
     # Create an image with known dimensions and distinctive aspect ratio (300 x 150 -> 2:1)

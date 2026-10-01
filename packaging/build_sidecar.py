@@ -8,6 +8,7 @@ following Tauri 2 external-binary naming conventions:
 """
 
 import os
+from sidecar_freshness import record_build, fingerprint
 import importlib.util
 import platform
 import shutil
@@ -39,6 +40,7 @@ def get_target_triple() -> str:
 
 def build_sidecar() -> Path:
     repo_root = Path(__file__).resolve().parent.parent
+    source_fingerprint = fingerprint(repo_root)
     dist_dir = repo_root / "packaging" / "dist"
     tauri_bin_dir = repo_root / "src-tauri" / "binaries"
     tauri_bin_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +71,7 @@ def build_sidecar() -> Path:
             "-m",
             "PyInstaller",
             "--clean",
+            "--noconfirm",
             "--distpath",
             str(dist_dir),
             "--workpath",
@@ -81,6 +84,7 @@ def build_sidecar() -> Path:
             "-m",
             "PyInstaller",
             "--clean",
+            "--noconfirm",
             "--noupx",
             bundle_flag,
             "--name",
@@ -151,19 +155,36 @@ def build_sidecar() -> Path:
             if not built_binary.is_file():
                 raise RuntimeError("The sidecar build did not produce its expected executable.")
             engine_dest = tauri_bin_dir / "engine"
+            if not engine_dest.resolve().is_relative_to(tauri_bin_dir.resolve()):
+                raise RuntimeError("Engine build directory escapes the binaries directory.")
             if engine_dest.exists():
                 shutil.rmtree(engine_dest)
             shutil.copytree(built_dir, engine_dest)
+            # The canonical externalBin must run by itself during development and
+            # packaging health checks, with native libraries beside the executable.
+            runtime_dest = tauri_bin_dir / "_internal"
+            if not runtime_dest.resolve().is_relative_to(tauri_bin_dir.resolve()):
+                raise RuntimeError("Runtime build directory escapes the binaries directory.")
+            if runtime_dest.exists():
+                shutil.rmtree(runtime_dest)
+            shutil.copytree(engine_dest / "_internal", runtime_dest)
             if built_binary.exists():
                 shutil.copy2(built_binary, final_binary_path)
             print(f"Successfully packaged onedir engine to: {engine_dest} and binary to {final_binary_path}")
+            if fingerprint(repo_root) != source_fingerprint:
+                raise RuntimeError("Processing sources changed during the build; rebuild the sidecar.")
+            record_build(repo_root, final_binary_path)
             return final_binary_path
         else:
             built_binary = dist_dir / f"openlargeprint-sidecar-{target_triple}{ext}"
-            if built_binary.exists():
-                shutil.copy2(built_binary, final_binary_path)
-                print(f"Successfully packaged and copied sidecar to: {final_binary_path}")
-                return final_binary_path
+            if not built_binary.is_file():
+                raise RuntimeError("The sidecar build did not produce its expected executable.")
+            shutil.copy2(built_binary, final_binary_path)
+            print(f"Successfully packaged and copied sidecar to: {final_binary_path}")
+            if fingerprint(repo_root) != source_fingerprint:
+                raise RuntimeError("Processing sources changed during the build; rebuild the sidecar.")
+            record_build(repo_root, final_binary_path)
+            return final_binary_path
     except ImportError as error:
         raise RuntimeError("PyInstaller is required to build a standalone release sidecar. Run uv sync --dev first.") from error
     raise RuntimeError("The sidecar build did not produce its expected executable.")

@@ -121,6 +121,7 @@ class ProgressEvent(BaseModel):
     current_page: int
     total_pages: int
     percent: float
+    elapsed_seconds: float = 0.0
     message: str  # e.g. "Recognizing scanned text — page 85 of 512" (UI-002)
 
 

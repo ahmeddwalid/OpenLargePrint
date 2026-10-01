@@ -146,8 +146,9 @@ def verify_packaging() -> bool:
             check=True,
         )
         events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-        if not any(event.get("type") == "health" and event.get("status") == "ready" for event in events):
-            print("Error: packaged sidecar did not report ready.")
+        if not any(event.get("type") == "health" and event.get("status") == "ready"
+                   and event.get("engine_version") == conf.get("version") for event in events):
+            print("Error: packaged sidecar did not report ready with the desktop's version.")
             return False
         if not verify_conversion(sidecar_bin):
             print("Error: packaged conversion failed OCR, page rendering, text retention, selection, or paper dimensions.")

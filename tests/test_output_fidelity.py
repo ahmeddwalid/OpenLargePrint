@@ -496,12 +496,12 @@ def test_numbered_outlines_do_not_render_bullets_in_exporters(tmp_path: Path):
     p1 = [p for p in paragraphs if "Present continuous" in p.text][0]
     p2 = [p for p in paragraphs if "Regular bulleted" in p.text][0]
     assert p1.style.name != "List Bullet", "Numbered outline must not use List Bullet style"
-    assert p2.style.name == "List Bullet", "Bulleted item should use List Bullet style"
+    assert p2.text == "• Regular bulleted item", "Keep the exact source marker without adding a second automatic bullet"
 
     # HTML Reader check
     html_out = tmp_path / "out.html"
     ReaderExporter().export(ir, html_out, ExportOptions())
     html_content = html_out.read_text(encoding="utf-8")
     assert '<p class="list-item list-numbered">1. Present continuous' in html_content
-    assert '<ul><li>Regular bulleted item</li></ul>' in html_content
+    assert '<p class="list-item list-numbered">• Regular bulleted item</p>' in html_content
 

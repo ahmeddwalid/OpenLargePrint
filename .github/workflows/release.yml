@@ -13,6 +13,9 @@ jobs:
   build-windows:
     name: Build Windows Release
     runs-on: windows-latest
+    env:
+      OLP_REQUIRE_SIGNING: '1'
+      OLP_CODESIGN_THUMBPRINT: ${{ vars.OLP_CODESIGN_THUMBPRINT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,6 +45,16 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Require provisioned trusted signing identity
+        shell: pwsh
+        run: |
+          if (-not $env:OLP_CODESIGN_THUMBPRINT) {
+            throw "Public Windows releases require a trusted signing identity. Provision the signing service/certificate on this runner and set OLP_CODESIGN_THUMBPRINT. See SIGNING.md."
+          }
+          if (-not (Test-Path "Cert:\CurrentUser\My\$env:OLP_CODESIGN_THUMBPRINT")) {
+            throw "The configured signing certificate is unavailable on the release runner."
+          }
+
       - name: Validate engine and frontend
         run: |
           uv run pytest tests/ -q
@@ -49,35 +62,30 @@ jobs:
           npm --prefix ui test -- --run
           if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed" }
       - name: Package standalone Python engine sidecar
-        run: uv run python packaging/build_sidecar.py
+        run: uv run python packaging/build_sidecar.py --onedir
 
       - name: Smoke-test packaged engine
         shell: pwsh
         run: |
-          '{"command":"health"}' | & .\src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe sidecar
+          '{"command":"health"}' | & .\src-tauri\binaries\engine\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe sidecar
           if ($LASTEXITCODE -ne 0) { throw "Packaged engine failed" }
       - name: Build Windows NSIS installer and portable package
         run: powershell -ExecutionPolicy Bypass -File packaging/build_windows_app.ps1 -SkipSidecarBuild
 
       # Windows 11 Smart App Control blocks unsigned executables outright. This gate
       # inspects the real Authenticode state of what is about to be published.
-      # It becomes mandatory the moment signing is configured (see SIGNING.md).
+      # Always mandatory. Missing credentials must never publish unsigned releases.
       - name: Verify Windows signatures (Smart App Control gate)
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
         shell: pwsh
         run: |
           $artifacts = @()
           $artifacts += Get-ChildItem "packaging/dist/OpenLargePrint_*_x64-setup.exe" | Select-Object -ExpandProperty FullName
           $artifacts += (Resolve-Path "src-tauri/target/release/openlargeprint-desktop.exe").Path
           $artifacts += (Resolve-Path "src-tauri/binaries/openlargeprint-sidecar-x86_64-pc-windows-msvc.exe").Path
+          $artifacts += Get-ChildItem "src-tauri/binaries/engine/_internal" -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll', '.pyd' } | Select-Object -ExpandProperty FullName
           powershell -ExecutionPolicy Bypass -File packaging/verify_signatures.ps1 `
-            -Path $artifacts -ExpectedPublisherMatch "SignPath Foundation"
-
-      - name: Flag unsigned artifacts
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID == '' }}
-        shell: pwsh
-        run: |
-          Write-Warning "No code signing is configured. Smart App Control on Windows 11 will block these artifacts for end users. See SIGNING.md section 3."
+            -Path $artifacts -RequirePublicTrust
+          if ($LASTEXITCODE -ne 0) { throw "Public Windows signature gate failed" }
 
       - name: Verify release artifacts exist
         shell: pwsh
@@ -105,9 +113,45 @@ jobs:
           Set-Content -Path $sums -Value (($kept + ("{0}  OpenLargePrint-Setup-x64.exe" -f $hash)) -join "`r`n") -Encoding ascii
           Write-Host ("Renamed {0} to the published name {1}" -f $versionedName, (Split-Path $stable -Leaf))
 
+      - name: Retain signed candidates for acceptance testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-candidates
+          if-no-files-found: error
+          path: |
+            packaging/dist/OpenLargePrint-Setup-x64.exe
+            packaging/dist/OpenLargePrint_*_windows_x64_portable.zip
+            packaging/dist/SHA256SUMS.txt
+
+  publish-windows:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    environment: windows-sac-accepted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release-candidates
+          path: packaging/dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require acceptance of these exact signed artifacts
+        shell: pwsh
+        env:
+          OLP_SAC_ACCEPTANCE_JSON: ${{ secrets.OLP_SAC_ACCEPTANCE_JSON }}
+          OLP_CODESIGN_THUMBPRINT: ${{ vars.OLP_CODESIGN_THUMBPRINT }}
+        run: |
+          if (-not $env:OLP_SAC_ACCEPTANCE_JSON) { throw "Enforced-mode installation, OCR, update, removal and full GUI corpus acceptance is missing." }
+          $evidence = Join-Path $env:RUNNER_TEMP 'sac-acceptance.json'
+          Set-Content -LiteralPath $evidence -Value $env:OLP_SAC_ACCEPTANCE_JSON -Encoding utf8
+          $portable = Get-ChildItem 'packaging/dist/OpenLargePrint_*_windows_x64_portable.zip' | Select-Object -First 1
+          if (-not $portable) { throw "Portable artifact is missing." }
+          python packaging/release_acceptance.py --acceptance $evidence --installer packaging/dist/OpenLargePrint-Setup-x64.exe --portable $portable.FullName --thumbprint $env:OLP_CODESIGN_THUMBPRINT
+          if ($LASTEXITCODE -ne 0) { throw "Exact-artifact acceptance verification failed." }
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ github.ref_name }}
           name: OpenLargePrint ${{ github.ref_name }}

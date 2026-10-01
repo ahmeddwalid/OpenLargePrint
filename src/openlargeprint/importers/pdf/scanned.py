@@ -150,49 +150,50 @@ class ScannedPageExtractor:
                 ordered_lines, page_num, idx_after_tables, ocr_res.warnings, page_h_pt
             )
 
-            if not table_blocks:
-                return text_blocks
-
-            all_blocks: List[Block] = []
-            tbl_idx = 0
-            sorted_tables = sorted(
-                table_blocks,
-                key=lambda b: -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
-            )
-            for tb in text_blocks:
-                tb_y = tb.source_bounding_box.y1 if tb.source_bounding_box else 0.0
-                while tbl_idx < len(sorted_tables):
-                    curr_tbl = sorted_tables[tbl_idx]
-                    tbl_y = curr_tbl.source_bounding_box.y1 if curr_tbl.source_bounding_box else 0.0
-                    if tbl_y >= tb_y:
-                        all_blocks.append(curr_tbl)
-                        tbl_idx += 1
-                    else:
+            # Keep content order from the column pass; insert graphics within
+            # the matching column rather than globally re-sorting the page.
+            graphic_blocks = []
+            if assets_dir is not None:
+                from .figures import extract_scanned_figures
+                occupied = [(line.x0, line.y0, line.x1, line.y1) for line in ocr_res.lines]
+                for table in table_blocks:
+                    box = table.source_bounding_box
+                    occupied.append((box.x0 * scale, (page_h_pt - box.y1) * scale,
+                                     box.x1 * scale, (page_h_pt - box.y0) * scale))
+                graphic_blocks = extract_scanned_figures(pil_img, occupied, page_num, scale, assets_dir)
+            merged = list(text_blocks)
+            for extra in sorted(table_blocks + graphic_blocks, key=lambda b: -b.source_bounding_box.y1):
+                box = extra.source_bounding_box
+                position = len(merged)
+                for index, block in enumerate(merged):
+                    other = block.source_bounding_box
+                    if other and min(box.x1, other.x1) > max(box.x0, other.x0) and box.y1 >= other.y1:
+                        position = index
                         break
-                all_blocks.append(tb)
-            while tbl_idx < len(sorted_tables):
-                all_blocks.append(sorted_tables[tbl_idx])
-                tbl_idx += 1
-            return all_blocks
+                merged.insert(position, extra)
+            return merged
         finally:
             pil_img.close()
             bitmap.close()
 
     def _order_lines_by_columns(
-        self, lines: List[OcrPointLine], page_w: float, page_h: float
+        self, lines: List[OcrPointLine], page_w: float, page_h: float, _depth: int = 0
     ) -> List[OcrPointLine]:
         """Reconstruct proper reading order for single- or multi-column scanned pages using adaptive gutters and vertical banding."""
-        if len(lines) <= 2:
+        if len(lines) <= 2 or _depth >= 16:
             return sorted(lines, key=lambda l: -l.y1)
 
         # 1. Adaptive Gutter Detection
         body_lines = [l for l in lines if (l.x1 - l.x0) < 0.65 * page_w and len(l.text.strip()) > 0]
-        split_x = page_w / 2.0
+        split_x = (min(l.x0 for l in lines) + max(l.x1 for l in lines)) / 2 if _depth else page_w / 2.0
         is_multi_col = False
 
         if len(body_lines) >= 4:
-            start_x = int(0.25 * page_w)
-            end_x = int(0.75 * page_w)
+            start_x = int(max(0.25 * page_w, min(l.x0 for l in body_lines) + 2))
+            end_x = int(min(0.75 * page_w, max(l.x1 for l in body_lines) - 2))
+            if _depth:
+                start_x = int(min(l.x0 for l in body_lines) + 2)
+                end_x = int(max(l.x1 for l in body_lines) - 2)
             best_gutter_center = page_w / 2.0
             best_gutter_width = 0.0
             current_gutter_start = None
@@ -225,10 +226,9 @@ class ScannedPageExtractor:
 
         if not is_multi_col:
             # Fallback to midpoint test
-            left_count = sum(1 for l in body_lines if l.x1 <= (page_w / 2.0) + 15)
-            right_count = sum(1 for l in body_lines if l.x0 >= (page_w / 2.0) - 15)
+            left_count = sum(1 for l in body_lines if l.x1 <= split_x + 15)
+            right_count = sum(1 for l in body_lines if l.x0 >= split_x - 15)
             if left_count >= 2 and right_count >= 2:
-                split_x = page_w / 2.0
                 is_multi_col = True
 
         if not is_multi_col:
@@ -258,11 +258,11 @@ class ScannedPageExtractor:
         ordered: List[OcrPointLine] = []
         if not full_width_breaks:
             if page_dir == TextDirection.RTL:
-                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
-                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_columns(right_lines, page_w, page_h, _depth + 1))
+                ordered.extend(self._order_lines_by_columns(left_lines, page_w, page_h, _depth + 1))
             else:
-                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
-                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_columns(left_lines, page_w, page_h, _depth + 1))
+                ordered.extend(self._order_lines_by_columns(right_lines, page_w, page_h, _depth + 1))
             return ordered
 
         remaining_left = list(left_lines)
@@ -277,20 +277,20 @@ class ScannedPageExtractor:
             remaining_right = [l for l in remaining_right if l not in band_right]
 
             if page_dir == TextDirection.RTL:
-                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
-                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_columns(band_right, page_w, page_h, _depth + 1))
+                ordered.extend(self._order_lines_by_columns(band_left, page_w, page_h, _depth + 1))
             else:
-                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
-                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_columns(band_left, page_w, page_h, _depth + 1))
+                ordered.extend(self._order_lines_by_columns(band_right, page_w, page_h, _depth + 1))
 
             ordered.append(fw)
 
         if page_dir == TextDirection.RTL:
-            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
-            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
+            ordered.extend(self._order_lines_by_columns(remaining_right, page_w, page_h, _depth + 1))
+            ordered.extend(self._order_lines_by_columns(remaining_left, page_w, page_h, _depth + 1))
         else:
-            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
-            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
+            ordered.extend(self._order_lines_by_columns(remaining_left, page_w, page_h, _depth + 1))
+            ordered.extend(self._order_lines_by_columns(remaining_right, page_w, page_h, _depth + 1))
 
         return ordered
 
@@ -365,6 +365,12 @@ class ScannedPageExtractor:
                     col_anchors.append(x)
 
             if len(col_anchors) < 2:
+                continue
+
+            if any(len(row) != len(col_anchors) for row in cluster):
+                continue
+            if any(abs(line.x0 - col_anchors[column]) > 12.0
+                   for row in cluster for column, line in enumerate(row)):
                 continue
 
             # Invariant: Disambiguate 2-column page layout from a table
@@ -446,7 +452,8 @@ class ScannedPageExtractor:
                 source_page=page_num,
                 source_bounding_box=bbox,
                 extraction_method=ExtractionMethod.OCR_FAST,
-                confidence=0.95,
+                confidence=min(0.8, min(line.confidence for line in all_cluster_lines)),
+                warnings=["Table structure was inferred from aligned text. Compare with the retained source table or original page."],
                 language=tbl_lang,
                 text_direction=tbl_dir,
             )
@@ -468,37 +475,6 @@ class ScannedPageExtractor:
         if not lines:
             return []
 
-        # Pre-pass: Normalize standalone bullet lines with subsequent text
-        normalized_lines: List[OcrPointLine] = []
-        i = 0
-        while i < len(lines):
-            l = lines[i]
-            txt = l.text.strip()
-            is_lone_bullet = len(txt) <= 2 and txt in ("o", "O", "•", "\u2022", "*", "-", "–", "—", "▪", "▫", "◆", "◇", "·")
-            if is_lone_bullet and (i + 1 < len(lines)):
-                next_l = lines[i + 1]
-                gap_y = abs(l.y1 - next_l.y1)
-                if gap_y <= 12.0 or (0.0 <= l.y0 - next_l.y1 <= 16.0):
-                    new_text = f"• {next_l.text.strip()}"
-                    normalized_lines.append(
-                        OcrPointLine(
-                            text=new_text,
-                            x0=min(l.x0, next_l.x0),
-                            y0=min(l.y0, next_l.y0),
-                            x1=max(l.x1, next_l.x1),
-                            y1=max(l.y1, next_l.y1),
-                            confidence=(l.confidence + next_l.confidence) / 2.0,
-                        )
-                    )
-                    i += 2
-                    continue
-            normalized_lines.append(l)
-            i += 1
-        lines = normalized_lines
-
-        if not lines:
-            return []
-
         sorted_heights = sorted(l.height for l in lines)
         body_height = sorted_heights[len(sorted_heights) // 2]
 
@@ -513,25 +489,9 @@ class ScannedPageExtractor:
             if not current_lines:
                 return
 
-            parts: List[str] = []
-            for j, l in enumerate(current_lines):
-                t = l.text.strip()
-                if not t:
-                    continue
-                if j == 0:
-                    parts.append(t)
-                else:
-                    prev_t = parts[-1]
-                    if prev_t.endswith("-") and len(prev_t) > 1 and prev_t[-2].isalpha() and t[0].isalpha():
-                        parts[-1] = prev_t[:-1] + t
-                    else:
-                        parts.append(" " + t)
-
-            text_content = "".join(parts).strip()
+            text_content = " ".join(l.text.strip() for l in current_lines if l.text.strip())
             if not text_content:
                 current_lines = []
-                current_type = BlockType.PARAGRAPH
-                current_level = None
                 return
 
             avg_confidence = sum(l.confidence for l in current_lines) / len(current_lines)

@@ -35,7 +35,8 @@ from openlargeprint.text.direction import (
     normalize_arabic_logical_order,
 )
 from .classifier import classify_pdf_page
-from .images import extract_lossless_images_for_page
+from .images import extract_lossless_images_for_page, image_digest
+from PIL import Image
 from .scanned import ScannedPageExtractor
 from .vector_figures import extract_vector_figure_region
 
@@ -193,6 +194,11 @@ class NativePdfImporter(BaseImporter):
                     confidence=1.0,
                 )
                 all_blocks.append(marker_block)
+                if page_meta.details.get("is_blank"):
+                    if checkpoint_callback:
+                        checkpoint_callback(page_num, page_meta.classification, False, None)
+                    page.close()
+                    continue
 
                 image_blocks: List[Block] = []
                 page_image_warnings: List[str] = []
@@ -210,7 +216,7 @@ class NativePdfImporter(BaseImporter):
                     try:
                         fig_objs = list(
                             page.get_objects(
-                                filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE, pdfium_c.FPDF_PAGEOBJ_FORM]
+                                filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=16
                             )
                         )
                     except Exception:
@@ -245,20 +251,37 @@ class NativePdfImporter(BaseImporter):
 
                     page_area = max(1.0, page_meta.width * page_meta.height)
 
-                    for idx, img in enumerate(images):
-                        bbox = None
-                        # Try to match candidate bbox by pixel size
-                        for c_idx, c_obj in enumerate(candidate_objs):
-                            if c_obj is not None:
-                                try:
-                                    if hasattr(c_obj, "get_px_size") and c_obj.get_px_size() == (img.width, img.height):
-                                        bbox = candidate_bboxes[c_idx]
-                                        break
-                                except Exception:
-                                    pass
-                        if bbox is None:
-                            bbox = candidate_bboxes[idx] if idx < len(candidate_bboxes) else None
+                    # Match decoded content, not dimensions: same-sized figures can differ.
+                    candidate_digests = []
+                    for obj in candidate_objs:
+                        digest = None
+                        try:
+                            from openlargeprint.security.validator import validate_image_dimensions
+                            validate_image_dimensions(*obj.get_px_size())
+                            bitmap = obj.get_bitmap()
+                            try:
+                                digest = image_digest(bitmap.to_pil())
+                            finally:
+                                bitmap.close()
+                        except Exception:
+                            pass
+                        candidate_digests.append(digest)
+                    placed_images = []
+                    used_candidates = set()
+                    for img in images:
+                        with Image.open(img.file_path) as decoded:
+                            digest = image_digest(decoded)
+                        matches = [i for i, key in enumerate(candidate_digests)
+                                   if key == digest and i not in used_candidates]
+                        if matches:
+                            for match in matches:
+                                used_candidates.add(match)
+                                placed_images.append((img, candidate_bboxes[match]))
+                        else:
+                            page_image_warnings.append(f"Page {page_num}: a figure's source position could not be verified. It has been retained for review.")
+                            placed_images.append((img, None))
 
+                    for img, bbox in placed_images:
                         if bbox is None and candidate_bboxes:
                             page_image_warnings.append(
                                 f"Page {page_num}: a figure's position could not be determined and may be misplaced"
@@ -276,7 +299,7 @@ class NativePdfImporter(BaseImporter):
                             )
                         )
 
-                        if is_background_canvas and not self.preserve_page_artwork:
+                        if is_background_canvas and page_num != 1 and not self.preserve_page_artwork:
                             page_image_warnings.append(
                                 f"Page {page_num}: a full-page background image was omitted from the reflowed output"
                             )
@@ -366,8 +389,42 @@ class NativePdfImporter(BaseImporter):
                             )
                             block_counter += 1
 
+                    # Keep source evidence for inferred native tables. This is a
+                    # region crop alongside semantic cells, never rasterized text
+                    # replacing usable native extraction (TBL-002, PDF-002).
+                    for table in extracted:
+                        if table.type == BlockType.TABLE and table.image_asset is None and table.source_bounding_box:
+                            try:
+                                box = table.source_bounding_box
+                                from openlargeprint.security.validator import bounded_pdf_scale
+                                scale = bounded_pdf_scale(page_meta.width, page_meta.height, 144)
+                                bitmap = page.render(scale=scale, crop=(max(0, box.x0 - 3), max(0, box.y0 - 3),
+                                    max(0, page_meta.width - box.x1 - 3), max(0, page_meta.height - box.y1 - 3)))
+                                try:
+                                    raster = bitmap.to_pil()
+                                    path = workspace.assets_dir / f"{table.id}_source.png"
+                                    raster.save(path)
+                                    table.image_asset = ImageAsset(asset_id=f"{table.id}_source", file_path=str(path),
+                                        width=raster.width, height=raster.height, mime_type="image/png",
+                                        alt_text=f"Original table on page {page_num}")
+                                finally:
+                                    bitmap.close()
+                            except Exception:
+                                table.warnings.append("The source table image could not be prepared. Native table text was retained; compare with the original document.")
+
                     if page_meta.details.get("ocr_failed"):
                         image_blocks.append(self._preserve_page(page, page_num, workspace))
+                    elif any(
+                        b.text and b.warnings and (b.type != BlockType.TABLE or b.image_asset is None)
+                        and b.extraction_method in (ExtractionMethod.OCR_FAST, ExtractionMethod.OCR_MAXIMUM)
+                        for b in extracted
+                    ):
+                        try:
+                            image_blocks.append(self._preserve_page(page, page_num, workspace))
+                        except Exception:
+                            extracted[0].warnings.append(
+                                "The original page image could not be prepared. Extracted text was retained; compare with the original document."
+                            )
                     elif not extracted or all(b.confidence == 0 for b in extracted):
                         image_blocks = [self._preserve_page(page, page_num, workspace)]
 
@@ -377,22 +434,6 @@ class NativePdfImporter(BaseImporter):
                         # Surface image issues on the page's first block (never drop silently).
                         target = page_blocks[0] if page_blocks else marker_block
                         target.warnings.extend(page_image_warnings)
-
-                    # De-hyphenate broken word across page boundary (e.g. "pa-" at end of previous page + "rticle" at start of new page)
-                    if all_blocks and page_blocks:
-                        last_prev = next((b for b in reversed(all_blocks) if b.type == BlockType.PARAGRAPH and b.text), None)
-                        first_new = next((b for b in page_blocks if b.type == BlockType.PARAGRAPH and b.text), None)
-                        if last_prev and first_new and last_prev.text and first_new.text:
-                            txt_prev = last_prev.text.rstrip()
-                            hyphen_match = re.search(r"([A-Za-z]{2,})-$", txt_prev)
-                            if hyphen_match:
-                                suffix_match = re.match(r"^([a-z]{2,})\b(.*)", first_new.text, re.DOTALL)
-                                if suffix_match:
-                                    prefix = hyphen_match.group(1)
-                                    suffix = suffix_match.group(1)
-                                    rest = suffix_match.group(2)
-                                    last_prev.text = txt_prev[:-len(prefix)-1] + prefix + suffix
-                                    first_new.text = rest.lstrip()
 
                     all_blocks.extend(page_blocks)
 
@@ -513,13 +554,17 @@ class NativePdfImporter(BaseImporter):
 
         # 4. Merge native blocks and non-overlapping OCR blocks in reading order
         combined = native_blocks + accepted_ocr_blocks
-        return sorted(
-            combined,
-            key=lambda b: (
-                -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
-                (b.source_bounding_box.x0 if b.source_bounding_box else 0.0),
-            ),
-        )
+        proxies = []
+        owners = {}
+        for block in combined:
+            box = block.source_bounding_box
+            if box:
+                proxy = TextLine(block.text or "", (box.x0, box.y0, box.x1, box.y1),
+                                 12, "", False, page_num)
+                proxies.append(proxy)
+                owners[id(proxy)] = block
+        ordered = self._order_lines_by_layout(proxies, page_meta.width, page_meta.height)
+        return [owners[id(proxy)] for proxy in ordered] + [b for b in combined if b.source_bounding_box is None]
 
     def _interleave_images_with_blocks(
         self, content_blocks: List[Block], image_blocks: List[Block]
@@ -591,55 +636,8 @@ class NativePdfImporter(BaseImporter):
         page_height: float,
     ) -> List[TextLine]:
         """Filter out running headers, running footers, and isolated page numbers from original layout."""
-        if len(lines) <= 2:
-            return lines
-
-        font_sizes = sorted(l.font_size for l in lines)
-        body_font_size = font_sizes[len(font_sizes) // 2]
-
-        top_boundary = 0.90 * page_height
-        bottom_boundary = 0.08 * page_height
-
-        kept: List[TextLine] = []
-        for line in lines:
-            txt = line.text.strip()
-            if not txt:
-                continue
-
-            line.text = normalize_tracked_text(line.text)
-            txt = line.text.strip()
-
-            is_top = (line.y0 >= top_boundary)
-            is_bottom = (line.y1 <= bottom_boundary)
-
-            if not is_top and not is_bottom:
-                kept.append(line)
-                continue
-
-            # 1. Lone page numbers or roman numerals
-            if re.match(r"^(?:page\s+)?(?:\d{1,4}|[ivxlcdm]{1,8})(?:\s+(?:of|/|-)\s+\d{1,4})?$", txt, re.IGNORECASE):
-                continue
-
-            # 2. Number + title / Title + number header/footer (e.g. "4 English Phrasal Verbs in Use", "English Phrasal Verbs in Use 5")
-            if re.match(r"^(?:\d{1,4}\s+[A-Za-z\s]{2,50}|[A-Za-z\s]{2,50}\s+\d{1,4})$", txt):
-                if line.font_size <= 1.25 * body_font_size:
-                    continue
-
-            # 3. Running headers at top of page (for page > 1)
-            if is_top and page_num > 1:
-                if line.font_size <= 1.15 * body_font_size and len(txt) <= 70 and not txt.endswith((".", "!", "?", ":")):
-                    if not re.match(r"^(?:\d+[\.\)]|[-*•])\s+", txt):
-                        continue
-
-            # 4. Running footer at bottom of page
-            if is_bottom:
-                if line.font_size <= 1.05 * body_font_size and len(txt) <= 65:
-                    if txt.startswith("©") or "all rights reserved" in txt.lower() or txt.startswith("http"):
-                        continue
-
-            kept.append(line)
-
-        return kept if kept else lines
+        # Margin position alone cannot prove that text is disposable (PDF-002).
+        return lines
 
     def _extract_native_text(
         self,
@@ -777,6 +775,14 @@ class NativePdfImporter(BaseImporter):
             if len(col_anchors) < 2:
                 continue
 
+            # Prose columns can align by chance. Every candidate row must use the
+            # same anchors consistently before we consume it as tabular content.
+            if any(len(r) != len(col_anchors) for r in cluster):
+                continue
+            if any(abs(cell.x0 - col_anchors[c]) > 12.0
+                   for r in cluster for c, cell in enumerate(r)):
+                continue
+
             # Invariant: Disambiguate multi-column page layout, TOCs, and outlines from a table.
             # A true table has structured, concise data cells arranged in a grid across columns.
             total_cluster_lines = sum(len(r) for r in cluster)
@@ -842,7 +848,8 @@ class NativePdfImporter(BaseImporter):
                 source_page=page_num,
                 source_bounding_box=bbox,
                 extraction_method=ExtractionMethod.NATIVE,
-                confidence=1.0,
+                confidence=0.8,
+                warnings=["Table structure was inferred from aligned text. Compare it with the retained source table."],
                 language=tbl_lang,
                 text_direction=tbl_dir,
             )
@@ -861,68 +868,61 @@ class NativePdfImporter(BaseImporter):
         page_height: float = 0.0,
     ) -> List[TextLine]:
         """Extract text rectangles with font metrics and coordinates from textpage."""
-        rect_count = textpage.count_rects()
-        raw_frags: List[TextLine] = []
-        cb_x0, cb_y0, cb_x1, cb_y1 = cropbox if len(cropbox) == 4 else (0.0, 0.0, 0.0, 0.0)
-        has_cb = (cb_x1 > cb_x0 and cb_y1 > cb_y0)
-
-        for i in range(rect_count):
-            rect = textpage.get_rect(i)
-            # Clip and filter rects outside the visible cropbox (bleed, printer marks)
-            if has_cb:
-                if rect[2] <= cb_x0 or rect[0] >= cb_x1 or rect[3] <= cb_y0 or rect[1] >= cb_y1:
-                    continue
-
-            text = textpage.get_text_bounded(*rect)
+        import ctypes
+        cb_x0, cb_y0, cb_x1, cb_y1 = cropbox
+        has_crop = cb_x1 > cb_x0 and cb_y1 > cb_y0
+        groups = []
+        metrics = {}
+        current = None
+        # Each source character belongs to one span. Bounded rectangle queries
+        # can return neighbouring characters twice when bounds overlap (PDF-002).
+        for index in range(textpage.count_chars()):
+            codepoint = pdfium_c.FPDFText_GetUnicode(textpage, index)
+            if not codepoint or codepoint > 0x10FFFF:
+                continue
+            char = chr(codepoint)
+            if char in "\r\n\t":
+                current = None
+                continue
+            left, bottom, right, top = textpage.get_charbox(index)
+            if has_crop and (right <= cb_x0 or left >= cb_x1 or top <= cb_y0 or bottom >= cb_y1):
+                continue
+            obj = textpage.get_textobj(index)
+            key = ctypes.cast(obj.raw, ctypes.c_void_p).value if obj else None
+            if key not in metrics:
+                size, name, bold = max(4.0, top - bottom), "Helvetica", False
+                if obj:
+                    size = max(size, float(obj.get_font_size()))
+                    font = obj.get_font()
+                    if font:
+                        name = font.get_base_name()
+                        bold = "bold" in name.lower() or font.get_weight() > 500
+                metrics[key] = (size, name, bold)
+            size, name, bold = metrics[key]
+            mid_y = (bottom + top) / 2
+            if current is None or current[0] != key or abs(current[1] - mid_y) > size * .6:
+                current = [key, mid_y, [], []]
+                groups.append(current)
+            current[2].append(char)
+            if right > left and top > bottom:
+                current[3].append((left, bottom, right, top))
+        fragments = []
+        seen = set()
+        for key, _, chars, boxes in groups:
+            if not boxes:
+                continue
+            text = normalize_arabic_logical_order("".join(chars))
             if not text.strip():
                 continue
-
-            # Normalize visual-order Arabic and ligatures
-            text = clean_ligatures(text)
-            text = normalize_arabic_logical_order(text)
-
-            mid_x = (rect[0] + rect[2]) / 2.0
-            mid_y = (rect[1] + rect[3]) / 2.0
-            char_idx = textpage.get_index(mid_x, mid_y, 10.0, 10.0)
-
-            font_size = rect[3] - rect[1]
-            font_name = "Helvetica"
-            is_bold = False
-
-            if char_idx is not None and char_idx >= 0:
-                text_obj = textpage.get_textobj(char_idx)
-                if text_obj:
-                    obj_fs = float(text_obj.get_font_size())
-                    if obj_fs >= 4.0:
-                        font_size = obj_fs
-                    else:
-                        font_size = max(font_size, rect[3] - rect[1])
-                    font = text_obj.get_font()
-                    if font:
-                        font_name = font.get_base_name()
-                        is_bold = "bold" in font_name.lower() or font.get_weight() > 500
-
-            if has_cb:
-                nx0 = max(0.0, rect[0] - cb_x0)
-                ny0 = max(0.0, rect[1] - cb_y0)
-                nx1 = min(page_width, rect[2] - cb_x0) if page_width > 0 else (rect[2] - cb_x0)
-                ny1 = min(page_height, rect[3] - cb_y0) if page_height > 0 else (rect[3] - cb_y0)
-                norm_rect = (nx0, ny0, nx1, ny1)
-            else:
-                norm_rect = rect
-
-            raw_frags.append(
-                TextLine(
-                    text=text,
-                    rect=norm_rect,
-                    font_size=font_size,
-                    font_name=font_name,
-                    is_bold=is_bold,
-                    page_num=page_num,
-                )
-            )
-
-        return self._aggregate_fragments_into_lines(raw_frags, page_num)
+            rect = (min(r[0] for r in boxes) - cb_x0, min(r[1] for r in boxes) - cb_y0,
+                    max(r[2] for r in boxes) - cb_x0, max(r[3] for r in boxes) - cb_y0)
+            identity = (text, tuple(round(v, 2) for v in rect))
+            if identity in seen:
+                continue  # Identical glyphs painted at identical bounds, not repeated prose.
+            seen.add(identity)
+            size, name, bold = metrics[key]
+            fragments.append(TextLine(text, rect, size, name, bold, page_num))
+        return self._aggregate_fragments_into_lines(fragments, page_num)
 
     def _aggregate_fragments_into_lines(self, frags: List[TextLine], page_num: int) -> List[TextLine]:
         """Aggregate disjoint horizontal text fragments into unified visual lines."""
@@ -997,7 +997,7 @@ class NativePdfImporter(BaseImporter):
                         gap = f.x0 - prev_f.x1
                         avg_font = (f.font_size + prev_f.font_size) / 2.0
                         effective_font = max(avg_font, f.height, prev_f.height)
-                        space_threshold = max(2.5, 0.22 * effective_font)
+                        space_threshold = max(0.75, 0.18 * effective_font)
                         prev_ends_space = merged_parts[-1].endswith(" ")
                         curr_starts_space = t.startswith(" ")
 
@@ -1037,20 +1037,23 @@ class NativePdfImporter(BaseImporter):
         return aggregated_lines
 
     def _order_lines_by_layout(
-        self, lines: List[TextLine], page_width: float, page_height: float
+        self, lines: List[TextLine], page_width: float, page_height: float, _depth: int = 0
     ) -> List[TextLine]:
         """Reconstruct proper reading order for multi-column or single-column pages using adaptive gutters and vertical banding."""
-        if len(lines) <= 2:
+        if len(lines) <= 2 or _depth >= 16:
             return sorted(lines, key=lambda l: -l.y1)
 
         # 1. Adaptive Gutter Detection
         body_lines = [l for l in lines if l.width < 0.65 * page_width and len(l.text.strip()) > 0]
-        split_x = page_width / 2.0
+        split_x = (min(l.x0 for l in lines) + max(l.x1 for l in lines)) / 2 if _depth else page_width / 2.0
         is_multi_col = False
 
         if len(body_lines) >= 4:
-            start_x = int(0.25 * page_width)
-            end_x = int(0.75 * page_width)
+            start_x = int(max(0.25 * page_width, min(l.x0 for l in body_lines) + 2))
+            end_x = int(min(0.75 * page_width, max(l.x1 for l in body_lines) - 2))
+            if _depth:
+                start_x = int(min(l.x0 for l in body_lines) + 2)
+                end_x = int(max(l.x1 for l in body_lines) - 2)
             best_gutter_center = page_width / 2.0
             best_gutter_width = 0.0
             current_gutter_start = None
@@ -1083,10 +1086,9 @@ class NativePdfImporter(BaseImporter):
 
         if not is_multi_col:
             # Fallback to midpoint test
-            left_count = sum(1 for l in body_lines if l.x1 <= (page_width / 2.0) + 15)
-            right_count = sum(1 for l in body_lines if l.x0 >= (page_width / 2.0) - 15)
+            left_count = sum(1 for l in body_lines if l.x1 <= split_x + 15)
+            right_count = sum(1 for l in body_lines if l.x0 >= split_x - 15)
             if left_count >= 2 and right_count >= 2:
-                split_x = page_width / 2.0
                 is_multi_col = True
 
         if not is_multi_col:
@@ -1116,11 +1118,11 @@ class NativePdfImporter(BaseImporter):
         ordered: List[TextLine] = []
         if not full_width_breaks:
             if page_dir == TextDirection.RTL:
-                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
-                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_layout(right_lines, page_width, page_height, _depth + 1))
+                ordered.extend(self._order_lines_by_layout(left_lines, page_width, page_height, _depth + 1))
             else:
-                ordered.extend(sorted(left_lines, key=lambda l: -l.y1))
-                ordered.extend(sorted(right_lines, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_layout(left_lines, page_width, page_height, _depth + 1))
+                ordered.extend(self._order_lines_by_layout(right_lines, page_width, page_height, _depth + 1))
             return ordered
 
         remaining_left = list(left_lines)
@@ -1135,20 +1137,20 @@ class NativePdfImporter(BaseImporter):
             remaining_right = [l for l in remaining_right if l not in band_right]
 
             if page_dir == TextDirection.RTL:
-                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
-                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_layout(band_right, page_width, page_height, _depth + 1))
+                ordered.extend(self._order_lines_by_layout(band_left, page_width, page_height, _depth + 1))
             else:
-                ordered.extend(sorted(band_left, key=lambda l: -l.y1))
-                ordered.extend(sorted(band_right, key=lambda l: -l.y1))
+                ordered.extend(self._order_lines_by_layout(band_left, page_width, page_height, _depth + 1))
+                ordered.extend(self._order_lines_by_layout(band_right, page_width, page_height, _depth + 1))
 
             ordered.append(fw)
 
         if page_dir == TextDirection.RTL:
-            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
-            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
+            ordered.extend(self._order_lines_by_layout(remaining_right, page_width, page_height, _depth + 1))
+            ordered.extend(self._order_lines_by_layout(remaining_left, page_width, page_height, _depth + 1))
         else:
-            ordered.extend(sorted(remaining_left, key=lambda l: -l.y1))
-            ordered.extend(sorted(remaining_right, key=lambda l: -l.y1))
+            ordered.extend(self._order_lines_by_layout(remaining_left, page_width, page_height, _depth + 1))
+            ordered.extend(self._order_lines_by_layout(remaining_right, page_width, page_height, _depth + 1))
 
         return ordered
 
@@ -1161,43 +1163,6 @@ class NativePdfImporter(BaseImporter):
         page_width: float = 612.0,
     ) -> List[Block]:
         """Cluster ordered lines into paragraphs, headings, lists, footnotes, and captions."""
-        if not lines:
-            return []
-
-        # Pre-pass: Normalize standalone bullet lines (e.g. single "O", "o", "•") with subsequent text
-        normalized_lines: List[TextLine] = []
-        i = 0
-        while i < len(lines):
-            l = lines[i]
-            txt = l.text.strip()
-            is_lone_bullet = len(txt) <= 2 and txt in ("o", "O", "•", "\u2022", "*", "-", "–", "—", "▪", "▫", "◆", "◇", "·")
-            if is_lone_bullet and (i + 1 < len(lines)):
-                next_l = lines[i + 1]
-                gap_y = abs(l.y1 - next_l.y1)
-                if gap_y <= 12.0 or (0.0 <= l.y0 - next_l.y1 <= 16.0):
-                    new_text = f"• {next_l.text.strip()}"
-                    merged_rect = (
-                        min(l.x0, next_l.x0),
-                        min(l.y0, next_l.y0),
-                        max(l.x1, next_l.x1),
-                        max(l.y1, next_l.y1),
-                    )
-                    normalized_lines.append(
-                        TextLine(
-                            text=new_text,
-                            rect=merged_rect,
-                            font_size=next_l.font_size,
-                            font_name=next_l.font_name,
-                            is_bold=next_l.is_bold,
-                            page_num=page_num,
-                        )
-                    )
-                    i += 2
-                    continue
-            normalized_lines.append(l)
-            i += 1
-
-        lines = normalized_lines
         if not lines:
             return []
 
@@ -1215,32 +1180,11 @@ class NativePdfImporter(BaseImporter):
             if not current_lines:
                 return
 
-            # Combine lines handling hyphenated word continuation
-            parts: List[str] = []
-            for j, l in enumerate(current_lines):
-                t = l.text.strip()
-                if not t:
-                    continue
-                if j == 0:
-                    parts.append(t)
-                else:
-                    prev_t = parts[-1]
-                    if prev_t.endswith("-") and len(prev_t) > 1 and prev_t[-2].isalpha() and t[0].isalpha():
-                        # De-hyphenate broken word at line boundary (e.g. "organi-" + "sation" -> "organisation")
-                        parts[-1] = prev_t[:-1] + t
-                    else:
-                        parts.append(" " + t)
-
-            text_content = "".join(parts).strip()
-            if not text_content:
+            # Reflow changes layout whitespace, never source punctuation or words.
+            normalized_text = " ".join(l.text.strip() for l in current_lines if l.text.strip())
+            if not normalized_text:
                 current_lines = []
-                current_type = BlockType.PARAGRAPH
-                current_level = None
                 return
-
-            # Normalize letter-spaced tracking and Arabic logical order
-            cleaned_text = normalize_tracked_text(text_content)
-            normalized_text = normalize_arabic_logical_order(cleaned_text)
             blk_lang = detect_language(normalized_text)
             blk_dir = detect_text_direction(normalized_text)
 
@@ -1249,38 +1193,6 @@ class NativePdfImporter(BaseImporter):
             max_x = max(l.x1 for l in current_lines)
             max_y = max(l.y1 for l in current_lines)
             bbox = BoundingBox(x0=min_x, y0=min_y, x1=max_x, y1=max_y)
-
-            # De-duplicate drop-shadow / vector text layers
-            if blocks:
-                prev_b = blocks[-1]
-                # 1. Exact duplicate heading text (e.g. drop shadow)
-                if (
-                    current_type in (BlockType.HEADING, BlockType.TITLE)
-                    and prev_b.type in (BlockType.HEADING, BlockType.TITLE)
-                    and normalized_text.strip().lower() == (prev_b.text or "").strip().lower()
-                ):
-                    current_lines = []
-                    current_type = BlockType.PARAGRAPH
-                    current_level = None
-                    return
-
-                # 2. High spatial overlap on the same page (shadow or layered text)
-                if prev_b.source_page == page_num and prev_b.source_bounding_box and bbox:
-                    pb = prev_b.source_bounding_box
-                    x_overlap = max(0.0, min(pb.x1, bbox.x1) - max(pb.x0, bbox.x0))
-                    y_overlap = max(0.0, min(pb.y1, bbox.y1) - max(pb.y0, bbox.y0))
-                    min_area = min(pb.width * pb.height, bbox.width * bbox.height)
-                    if min_area > 0 and (x_overlap * y_overlap / min_area) > 0.65:
-                        t1 = (prev_b.text or "").strip().lower()
-                        t2 = normalized_text.strip().lower()
-                        if t1 == t2 or t1 in t2 or t2 in t1:
-                            if len(normalized_text) > len(prev_b.text or ""):
-                                prev_b.text = normalized_text
-                                prev_b.source_bounding_box = bbox
-                            current_lines = []
-                            current_type = BlockType.PARAGRAPH
-                            current_level = None
-                            return
 
             blk = Block(
                 id=f"p{page_num}_b{idx}",

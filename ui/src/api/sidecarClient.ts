@@ -217,6 +217,7 @@ export class SidecarClient {
             stage: payload.stage || 'converting',
             humanMessage: payload.message || `Processing page ${payload.current_page}`,
             percent: payload.percent || 0,
+            elapsedSeconds: payload.elapsed_seconds || 0,
           });
         });
 

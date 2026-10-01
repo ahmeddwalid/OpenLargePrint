@@ -1,4 +1,4 @@
-"""Page-filling artwork is preserved only when explicitly requested (IMG-001, PDF-004)."""
+"""Covers are retained by default; other page artwork has an advanced option."""
 
 from __future__ import annotations
 
@@ -22,11 +22,25 @@ def _build_native_page_with_full_page_image(path: Path) -> Path:
     artwork.save(artwork_path)
 
     sheet = canvas.Canvas(str(path), pagesize=A4)
+    sheet.drawString(72, 700, "Cover title")
+    sheet.showPage()
     sheet.drawImage(str(artwork_path), 0, 0, width=A4[0], height=A4[1])
     sheet.drawString(72, 780, "Chapter 1: The page artwork is part of the document.")
     sheet.showPage()
     sheet.save()
     return path
+
+
+def test_cover_artwork_is_kept_by_default(tmp_path):
+    source = _build_native_page_with_full_page_image(tmp_path / "cover-source.pdf")
+    import pikepdf
+    with pikepdf.Pdf.open(source) as original:
+        cover = pikepdf.Pdf.new()
+        cover.pages.append(original.pages[1])
+        cover.save(tmp_path / "cover.pdf")
+    result = PipelineOrchestrator().convert(tmp_path / "cover.pdf", tmp_path / "cover-out.pdf", export_format="pdf")
+    assert _image_blocks(result) >= 1
+    assert not _omission_warnings(result)
 
 
 def _image_blocks(result) -> int:

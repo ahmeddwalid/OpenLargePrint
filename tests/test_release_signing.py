@@ -51,3 +51,18 @@ def test_signature_verifier_exists_and_fails_on_missing_signature():
     assert "Get-AuthenticodeSignature" in text
     assert "exit 1" in text
     assert "'Valid'" in text
+
+
+def test_public_releases_require_signing_before_build():
+    text = (REPO_ROOT / ".github/workflows/release.yml").read_text()
+    assert "OLP_REQUIRE_SIGNING: '1'" in text
+    assert "if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}" not in text
+    assert "-RequirePublicTrust" in text
+
+
+def test_verification_rejects_development_trust_and_missing_timestamp():
+    text = VERIFY_SCRIPT.read_text()
+    assert "RequirePublicTrust" in text
+    assert "AuthRoot" in text
+    assert "1.2.840.113549.1.1.1" in text
+    assert '$failed += "$leaf -> missing trusted timestamp"' in text

@@ -23,7 +23,7 @@ from reportlab.platypus import (
 )
 
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, TableStructure, TextDirection
-from openlargeprint.layout.table import TableTier, evaluate_table_fit
+from openlargeprint.layout.table import TableTier, evaluate_table_fit, iter_visible_cells
 from openlargeprint.security.isolation import log_safe_info
 from openlargeprint.text.bidi import reorder_bidi_for_display
 from .base import BaseExporter, ExportOptions, PaperSize
@@ -105,8 +105,17 @@ class PdfExporter(BaseExporter):
         usable_width = doc_template.width - 2 * FRAME_PADDING_PT
         usable_height = doc_template.height - 2 * FRAME_PADDING_PT
 
-        for block in doc.blocks:
-            flowables = self._block_to_flowables(block, options, styles, usable_width, usable_height)
+        for index, block in enumerate(doc.blocks):
+            next_block = doc.blocks[index + 1] if index + 1 < len(doc.blocks) else None
+            follows_caption = next_block is not None and next_block.type == BlockType.CAPTION and len(next_block.text or "") <= 150
+            image_height = usable_height * 0.82 if follows_caption and block.type == BlockType.IMAGE else usable_height
+            flowables = self._block_to_flowables(block, options, styles, usable_width, image_height)
+            if follows_caption:
+                for item in flowables:
+                    item.keepWithNext = True
+            elif block.type == BlockType.CAPTION and next_block is not None and next_block.type == BlockType.IMAGE:
+                for item in flowables:
+                    item.keepWithNext = True
             story.extend(flowables)
 
         # 4. Build PDF with NumberedCanvas
@@ -417,21 +426,12 @@ class PdfExporter(BaseExporter):
         # Handle lists
         if block.type == BlockType.LIST:
             raw_text = (block.text or "").strip()
-            is_numbered = bool(re.match(r"^(?:\d{1,4}(?:\.\d{1,4})*[\.\)]?|[a-zA-Z][\.\)]|\([0-9a-zA-Z]+\))\s+", raw_text))
-            if not is_numbered:
-                raw_text = raw_text.lstrip("•-* \t")
             reordered = reorder_bidi_for_display(raw_text, TextDirection.RTL) if is_rtl else raw_text
             # Escape text first, then add the bullet with numeric entities so the
             # entity is not itself escaped (renders a real bullet, not "&nbsp;").
             safe_text = reordered.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            if is_numbered:
-                style_key = "list_rtl" if is_rtl else "list"
-                flowables.append(Paragraph(safe_text, styles[style_key]))
-            else:
-                if is_rtl:
-                    flowables.append(Paragraph(f"{safe_text}&nbsp;&nbsp;&#8226;", styles["list_rtl"]))
-                else:
-                    flowables.append(Paragraph(f"&#8226;&nbsp;&nbsp;{safe_text}", styles["list"]))
+            style_key = "list_rtl" if is_rtl else "list"
+            flowables.append(Paragraph(safe_text, styles[style_key]))
             return flowables
 
         # Handle quotes
@@ -480,6 +480,10 @@ class PdfExporter(BaseExporter):
         if block.type == BlockType.IMAGE and block.image_asset:
             asset = block.image_asset
             if asset.file_path and Path(asset.file_path).exists():
+                if asset.asset_id.endswith("_retained"):
+                    for warning in block.warnings:
+                        safe_warning = warning.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        flowables.append(Paragraph(safe_warning, styles["table_warning"]))
                 aspect = asset.width / max(1.0, asset.height)
                 # Fit image within the usable width AND height without distortion (IMG-003)
                 display_w = min(usable_width, float(asset.width * 72.0 / 96.0))
@@ -541,6 +545,9 @@ class PdfExporter(BaseExporter):
                 flowables.append(Paragraph(f"⚠️ [Table Note] {safe_warn}", styles["table_warning"]))
 
         # Tier 3: Linearized accessible cards (TBL-001)
+        if fit.tier != TableTier.LINEARIZE and block.image_asset and block.warnings:
+            flowables.extend(self._block_to_flowables(block.model_copy(update={"type": BlockType.IMAGE}),
+                options, styles, usable_width, usable_height))
         if fit.tier == TableTier.LINEARIZE:
             if block.image_asset and block.image_asset.file_path and Path(block.image_asset.file_path).exists():
                 asset = block.image_asset
@@ -627,6 +634,13 @@ class PdfExporter(BaseExporter):
                 row_cells.reverse()
             data.append(row_cells)
 
+        if is_rtl:
+            for r, c, cell, rs, cs in iter_visible_cells(table_struct):
+                if cs > 1:
+                    anchor = col_count - c - 1
+                    start = col_count - c - cs
+                    data[r][start], data[r][anchor] = data[r][anchor], data[r][start]
+
         # Allocate column widths
         calculated_widths: List[float] = []
         if col_widths and len(col_widths) == col_count:
@@ -652,6 +666,11 @@ class PdfExporter(BaseExporter):
         ]
         if table_struct.has_header:
             t_style.append(("BACKGROUND", (0, 0), (-1, 0), header_bg))
+        for r, c, cell, rs, cs in iter_visible_cells(table_struct):
+            if rs > 1 or cs > 1:
+                start = col_count - c - cs if is_rtl else c
+                end = col_count - c - 1 if is_rtl else c + cs - 1
+                t_style.append(("SPAN", (start, r), (end, r + rs - 1)))
 
         t.setStyle(TableStyle(t_style))
         return t

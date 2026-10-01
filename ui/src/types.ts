@@ -71,6 +71,7 @@ export interface ConversionSettings {
 }
 
 export interface ProgressInfo {
+  elapsedSeconds?: number;
   currentPage: number;
   totalPages: number;
   stage: string;

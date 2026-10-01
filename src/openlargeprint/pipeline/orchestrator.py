@@ -275,6 +275,9 @@ class PipelineOrchestrator:
                 log_safe_info(f"Applying selective page slicing for pages {sorted(selected_pages)}")
                 doc_ir = doc_ir.slice_by_source_pages_set(selected_pages)
 
+            if progress_callback:
+                progress_callback(len(doc_ir.pages), len(doc_ir.pages), "exporting", "Writing large-print output")
+
             # 7. Export to requested format (DOCX, Large-Print PDF, or Reader HTML)
             if cancel_check and cancel_check():
                 raise InterruptedError("Conversion cancelled.")

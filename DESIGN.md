@@ -363,3 +363,35 @@ None of these are banned outright — they're defaults, and a deliberate choice 
 | Packaging | Windows/Linux/macOS validated installers |
 
 Milestone 1 proves the core hypothesis with no OCR at all: one healthy digital PDF → extract exact text + images → `DocumentIR` → 20pt DOCX. Milestone 2 proves the abstraction holds under OCR: one scanned PDF → OCR/layout → the *same* `DocumentIR` → the *same* DOCX exporter, unmodified.
+
+## Faithful conversion and Windows release revision (2026-10-02)
+
+Native PDF extraction owns each source character index once, associates it with
+text objects and geometry, and orders columns before paragraph assembly. Only
+identical paint at identical bounds is suppressed. Default conversion does not
+collapse tracked lettering, de-hyphenate, replace list markers or remove margin text.
+OCR text is not rewritten. Textual OCR warnings retain original page imagery;
+optional evidence failures leave extracted text intact with a warning. Blank pages
+retain their anchors.
+
+Embedded figure placement matches decoded content hashes rather than dimensions.
+Scanned figure candidates are cropped from bounded raster images after masking text
+and tables and marked for placement review. Inferred native tables require consistent
+column geometry and retain a source crop. Crop failure does not discard table text.
+Mixed native/OCR blocks share column ordering. Assets retain source bounds.
+
+PDF, DOCX and Reader consume DocumentIR and share merged-cell traversal. PDF image
+limits subtract frame padding and constrain both dimensions; short captions keep
+with figures. Re-export, Reader restyling and selected-page export reuse IR.
+
+Sidecar progress adds elapsed_seconds heartbeats through preparation, extraction,
+recognition, export and preview preparation. Completion follows export and heartbeat
+shutdown. Desktop readiness requires a real ready response matching its version.
+Sidecar builds carry source/dependency fingerprints and reject changes during freezing.
+
+Windows uses a one-directory sidecar with adjacent _internal runtime resources.
+Public packaging signs applications and native payload before NSIS assembly, uses
+the bundler signing hook for its uninstaller, and verifies artifacts. Publication
+requires exact-artifact enforced Smart App Control acceptance separately. See
+SIGNING.md. Trusted identity and installed acceptance remain release blockers.
+No dependency or DocumentIR schema change was introduced.

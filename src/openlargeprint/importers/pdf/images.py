@@ -10,6 +10,17 @@ from openlargeprint.ir.models import ImageAsset
 from openlargeprint.security.validator import validate_image_dimensions
 
 
+def image_digest(image) -> str:
+    """Compare decoded pixel content, independent of PDF codec or object order."""
+    rgb = image.convert("RGB")
+    try:
+        digest = hashlib.sha256(str(rgb.size).encode())
+        digest.update(rgb.tobytes())
+        return digest.hexdigest()
+    finally:
+        rgb.close()
+
+
 def _coerce_pdf_image(value):
     """Return a ``PdfImage`` from a pikepdf page-image value.
 
@@ -28,6 +39,7 @@ def _recover_images_with_pdfium(
     failed_sizes: List[Tuple[int, int]],
     _warn: Callable[[str], None],
     existing_sizes: Optional[List[Tuple[int, int]]] = None,
+    existing_assets: Optional[List[ImageAsset]] = None,
 ) -> List[ImageAsset]:
     """Decode images pikepdf could not read, using pdfium's own decoders (IMG-001).
 
@@ -44,7 +56,14 @@ def _recover_images_with_pdfium(
     if pdfium_page is None:
         return recovered
 
-    known_sizes = set(existing_sizes or [])
+    from PIL import Image
+    known_digests = set()
+    for asset in existing_assets or []:
+        try:
+            with Image.open(asset.file_path) as image:
+                known_digests.add(image_digest(image))
+        except OSError:
+            pass
     pending = list(failed_sizes)
 
     try:
@@ -64,10 +83,6 @@ def _recover_images_with_pdfium(
             size: Tuple[int, int] = (int(px_size[0]), int(px_size[1]))
         except Exception:
             continue
-        if size in known_sizes:
-            # Decoded losslessly already: never add a second copy of the same figure.
-            continue
-
         # If we have explicit pending failures, prioritize those; otherwise recover missing objects
         if pending and size not in pending:
             continue
@@ -89,6 +104,9 @@ def _recover_images_with_pdfium(
             from PIL import Image
 
             with Image.open(out_path) as decoded:
+                digest = image_digest(decoded)
+                if digest in known_digests:
+                    continue
                 decoded.convert("RGB").save(out_path, format="PNG")
         except Exception as exc:
             if out_path.exists():
@@ -106,7 +124,7 @@ def _recover_images_with_pdfium(
                 alt_text=f"Figure from page {page_num}",
             )
         )
-        known_sizes.add(size)
+        known_digests.add(digest)
         if size in pending:
             pending.remove(size)
         _warn(
@@ -184,8 +202,8 @@ def extract_lossless_images_for_page(
                 out_path = assets_dir / f"{asset_id}.png"
 
                 # Convert to PIL image and save losslessly
-                pil_img = pdf_img.as_pil_image()
-                pil_img.save(out_path, format="PNG")
+                with pdf_img.as_pil_image() as pil_img:
+                    pil_img.save(out_path, format="PNG")
 
                 images.append(
                     ImageAsset(
@@ -204,6 +222,8 @@ def extract_lossless_images_for_page(
                     failed_sizes.append((width, height))
 
     existing_sizes = [(img.width, img.height) for img in images]
+    if not failed_sizes and images:
+        return images
     images.extend(
         _recover_images_with_pdfium(
             pdfium_page,
@@ -212,6 +232,7 @@ def extract_lossless_images_for_page(
             failed_sizes,
             _warn,
             existing_sizes=existing_sizes,
+            existing_assets=images,
         )
     )
 

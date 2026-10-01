@@ -42,6 +42,9 @@ export const ProgressScreen: React.FC<ProgressScreenProps> = ({
       >
         {progress.humanMessage || 'Preparing conversion...'}
       </div>
+      <p style={{ color: 'var(--text-secondary)' }}>
+        Elapsed time: {Math.floor((progress.elapsedSeconds || 0) / 60)} min {Math.floor((progress.elapsedSeconds || 0) % 60)} sec
+      </p>
 
       <div className="progress-bar-wrapper">
         <div

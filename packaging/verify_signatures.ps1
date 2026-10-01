@@ -24,7 +24,9 @@
 #>
 param(
     [Parameter(Mandatory = $true)][string[]]$Path,
-    [string]$ExpectedPublisherMatch = ""
+    [string]$ExpectedPublisherMatch = "",
+    [string]$ExpectedThumbprint = "",
+    [switch]$RequirePublicTrust
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,9 +51,37 @@ foreach ($target in $Path) {
     if ($ExpectedPublisherMatch -and ($subject -notmatch [regex]::Escape($ExpectedPublisherMatch))) {
         $failed += "$leaf -> unexpected publisher: $subject"
     }
+    if ($ExpectedThumbprint -and $signature.SignerCertificate.Thumbprint -ne $ExpectedThumbprint) {
+        $failed += "$leaf -> unexpected signing identity"
+    }
 
     if (-not $signature.TimeStamperCertificate) {
-        Write-Host ("  warning: {0} has no trusted timestamp; it will expire with the certificate." -f $leaf) -ForegroundColor Yellow
+        $failed += "$leaf -> missing trusted timestamp"
+    }
+
+    if ($RequirePublicTrust) {
+        # Microsoft's current SAC guidance accepts RSA and ECC. Local roots must never
+        # satisfy the public-release gate merely because they were installed locally.
+        if ($signature.SignerCertificate.PublicKey.Oid.Value -notin '1.2.840.113549.1.1.1', '1.2.840.10045.2.1') {
+            $failed += "$leaf -> unsupported signing key algorithm"
+        }
+        $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        try {
+            $chain.ChainPolicy.RevocationMode = 'Online'
+            # WinTrust above verifies the signing time against the trusted
+            # timestamp. A vendor certificate may now be expired but still valid
+            # for its timestamped binary; chain trust is checked independently.
+            $chain.ChainPolicy.VerificationFlags = 'IgnoreNotTimeValid'
+            if (-not $chain.Build($signature.SignerCertificate)) {
+                $failed += "$leaf -> certificate chain verification failed"
+            } else {
+                $root = $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate
+                $publicRoot = "HKLM:\SOFTWARE\Microsoft\SystemCertificates\AuthRoot\Certificates\$($root.Thumbprint)"
+                if (-not (Test-Path -LiteralPath $publicRoot)) {
+                    $failed += "$leaf -> root is absent from Microsoft's AuthRoot store"
+                }
+            }
+        } finally { $chain.Dispose() }
     }
 }
 

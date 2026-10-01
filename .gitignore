@@ -64,6 +64,11 @@ src-tauri/binaries/*
 packaging/dist/
 packaging/build/
 packaging/certs/
+packaging/verification/books/
+packaging/verification/benchmark/
+packaging/verification/corpus/
+packaging/verification/page294/
+scratch-*.log
 *.spec
 *.pfx
 *.cer

@@ -15,6 +15,20 @@ from pydantic import BaseModel, Field
 from openlargeprint.ir.models import TableCell, TableStructure
 
 
+def iter_visible_cells(table: TableStructure):
+    """Yield grid anchors and bounded spans; covered placeholders are not cells."""
+    covered = set()
+    for r, row in enumerate(table.rows):
+        for c, cell in enumerate(row):
+            if (r, c) in covered:
+                continue
+            rs = max(1, min(cell.row_span, len(table.rows) - r))
+            cs = max(1, min(cell.col_span, table.column_count - c))
+            covered.update((y, x) for y in range(r, r + rs) for x in range(c, c + cs)
+                           if (y, x) != (r, c))
+            yield r, c, cell, rs, cs
+
+
 class TableTier(str, Enum):
     """Presentation tier selected based on table width and target printable area."""
     ENLARGED = "enlarged"
@@ -155,6 +169,12 @@ def evaluate_table_fit(
     # 1. Check fit at requested large font size
     est_widths = estimate_column_widths(table, font_pt)
     total_w = sum(est_widths)
+    if any(cell.col_span > 1 or cell.row_span > 1 for row in table.rows for cell in row):
+        # Splitting a merged table by columns destroys its cell topology. Keep the
+        # original grid and wrap the cells over additional pages instead.
+        widths = [w * min(1.0, available_width / max(1, total_w)) for w in est_widths]
+        return TableFitEvaluation(tier=TableTier.ENLARGED, column_widths=widths,
+            total_width=sum(widths), available_width=available_width)
 
     if total_w <= available_width:
         # Fits comfortably at full font_pt

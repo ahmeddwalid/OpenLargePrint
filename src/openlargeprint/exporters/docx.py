@@ -13,7 +13,7 @@ from docx.oxml.ns import qn
 from docx.shared import Emu, Inches, Mm, Pt, RGBColor
 
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, TableStructure, TextDirection
-from openlargeprint.layout.table import TableTier, evaluate_table_fit
+from openlargeprint.layout.table import TableTier, evaluate_table_fit, iter_visible_cells
 from openlargeprint.security.isolation import log_safe_info
 from .base import BaseExporter, ExportOptions, PaperSize
 
@@ -175,13 +175,8 @@ class DocxExporter(BaseExporter):
         # Handle lists
         if block.type == BlockType.LIST:
             raw_text = safe_text.strip()
-            is_numbered = bool(re.match(r"^(?:\d{1,4}(?:\.\d{1,4})*[\.\)]?|[a-zA-Z][\.\)]|\([0-9a-zA-Z]+\))\s+", raw_text))
-            if is_numbered:
-                p = document.add_paragraph()
-                p.paragraph_format.left_indent = Inches(0.25)
-            else:
-                p = document.add_paragraph(style="List Bullet")
-                raw_text = raw_text.lstrip("•-* \t")
+            p = document.add_paragraph()
+            p.paragraph_format.left_indent = Inches(0.25)
             p.paragraph_format.line_spacing = options.line_spacing
             p.paragraph_format.space_after = Pt(options.body_pt * 0.3)
             run = p.add_run(raw_text)
@@ -250,6 +245,14 @@ class DocxExporter(BaseExporter):
         if block.type == BlockType.IMAGE and block.image_asset:
             asset = block.image_asset
             if asset.file_path and Path(asset.file_path).exists():
+                if asset.asset_id.endswith("_retained"):
+                    for warning in block.warnings:
+                        note = document.add_paragraph()
+                        note.paragraph_format.line_spacing = options.line_spacing
+                        run = note.add_run(warning)
+                        run.font.name = options.font_family
+                        run.font.size = Pt(max(14.0, options.body_pt * 0.8))
+                        self._apply_text_direction(note, run, block, options)
                 p = document.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.space_before = Pt(12)
@@ -343,6 +346,9 @@ class DocxExporter(BaseExporter):
                 self._apply_text_direction(p_warn, r_warn, block, options)
 
         # Tier 3: Linearized accessible cards (TBL-001)
+        if fit.tier != TableTier.LINEARIZE and block.image_asset and block.warnings:
+            self._render_block(document, block.model_copy(update={"type": BlockType.IMAGE}),
+                options, usable_width, usable_height)
         if fit.tier == TableTier.LINEARIZE:
             # Retain source table crop image if available (TBL-001)
             if block.image_asset and block.image_asset.file_path and Path(block.image_asset.file_path).exists():
@@ -432,6 +438,10 @@ class DocxExporter(BaseExporter):
                 tblPr.append(OxmlElement("w:bidiVisual"))
 
         cell_font_size = Pt(max(14.0, options.body_pt * 0.85))
+        visible = {(r, c): (rs, cs) for r, c, _, rs, cs in iter_visible_cells(table_struct)}
+        for (r, c), (rs, cs) in visible.items():
+            if rs > 1 or cs > 1:
+                tbl.cell(r, c).merge(tbl.cell(r + rs - 1, c + cs - 1))
 
         for r_idx, row in enumerate(table_struct.rows):
             tr = tbl.rows[r_idx]
@@ -449,6 +459,8 @@ class DocxExporter(BaseExporter):
                 trPr.append(OxmlElement("w:cantSplit"))
 
             for c_idx, cell_data in enumerate(row):
+                if (r_idx, c_idx) not in visible:
+                    continue
                 if c_idx >= cols:
                     break
                 cell = tbl.cell(r_idx, c_idx)

@@ -78,7 +78,7 @@ def test_milestone2_scanned_pdf_to_docx_end_to_end(tmp_path: Path):
     assert doc_ir.metadata.page_count == 1
     assert doc_ir.pages[0].classification == PageClassification.SCANNED
 
-    ocr_blocks = [b for b in doc_ir.blocks if b.type != BlockType.PAGE_MARKER]
+    ocr_blocks = [b for b in doc_ir.blocks if b.type not in (BlockType.PAGE_MARKER, BlockType.IMAGE)]
     assert len(ocr_blocks) > 0
 
     # Every OCR block must carry OCR_FAST extraction method and bounding box in PDF points (PDF-006)

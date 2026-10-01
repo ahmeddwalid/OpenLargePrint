@@ -504,16 +504,9 @@ class ReaderExporter(BaseExporter):
         # Lists
         if block.type == BlockType.LIST:
             raw_text = (block.text or "").strip()
-            is_numbered = bool(re.match(r"^(?:\d{1,4}(?:\.\d{1,4})*[\.\)]?|[a-zA-Z][\.\)]|\([0-9a-zA-Z]+\))\s+", raw_text))
-            if is_numbered:
-                safe_text = html.escape(raw_text)
-                p_class = ' class="list-item list-numbered rtl"' if is_rtl else ' class="list-item list-numbered"'
-                return f'<p{p_class}{dir_attr}>{safe_text}</p>', None
-            else:
-                raw_text = raw_text.lstrip("•-* \t")
-                safe_text = html.escape(raw_text)
-                list_class = ' class="rtl"' if is_rtl else ""
-                return f"<ul{list_class}{dir_attr}><li>{safe_text}</li></ul>", None
+            safe_text = html.escape(raw_text)
+            p_class = ' class="list-item list-numbered rtl"' if is_rtl else ' class="list-item list-numbered"'
+            return f'<p{p_class}{dir_attr}>{safe_text}</p>', None
 
         # Quotes
         if block.type == BlockType.QUOTE:
@@ -557,19 +550,27 @@ class ReaderExporter(BaseExporter):
             if ts.caption:
                 table_parts.append(f'<caption>{html.escape(ts.caption)}</caption>')
 
+            from openlargeprint.layout.table import iter_visible_cells
+            visible = {(r, c): (rs, cs) for r, c, _, rs, cs in iter_visible_cells(ts)}
+            def cell_html(cell, r, c, tag):
+                if (r, c) not in visible:
+                    return ""
+                rs, cs = visible[r, c]
+                attrs = (' scope="col"' if tag == "th" else "") + (f' rowspan="{rs}"' if rs > 1 else "") + (f' colspan="{cs}"' if cs > 1 else "")
+                return f'<{tag}{attrs}>{html.escape(cell.text or "")}</{tag}>'
             start_row = 0
             if ts.has_header and ts.rows:
                 table_parts.append("<thead><tr>")
-                for cell in ts.rows[0]:
-                    table_parts.append(f'<th scope="col">{html.escape(cell.text or "")}</th>')
+                for c, cell in enumerate(ts.rows[0]):
+                    table_parts.append(cell_html(cell, 0, c, "th"))
                 table_parts.append("</tr></thead>")
                 start_row = 1
 
             table_parts.append("<tbody>")
-            for row in ts.rows[start_row:]:
+            for r, row in enumerate(ts.rows[start_row:], start_row):
                 table_parts.append("<tr>")
-                for cell in row:
-                    table_parts.append(f'<td>{html.escape(cell.text or "")}</td>')
+                for c, cell in enumerate(row):
+                    table_parts.append(cell_html(cell, r, c, "td"))
                 table_parts.append("</tr>")
             table_parts.append("</tbody>")
             table_parts.append("</table></div>")

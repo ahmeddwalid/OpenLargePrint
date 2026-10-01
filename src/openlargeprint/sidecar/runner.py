@@ -26,6 +26,7 @@ from openlargeprint.pipeline import PipelineOrchestrator
 from openlargeprint.pipeline.orchestrator import parse_page_range
 from openlargeprint.security import JobAssetStore, detect_file_type, log_safe_info
 from openlargeprint.security.isolation import atomic_output
+from openlargeprint.sidecar.progress import JobProgress
 from openlargeprint.version import __version__ as ENGINE_VERSION
 from openlargeprint.sidecar.protocol import (
     CancelledEvent,
@@ -267,17 +268,7 @@ class SidecarRunner:
             pass
 
         def on_progress(curr: int, total: int, stage: str, msg: str) -> None:
-            pct = round((curr / max(1, total)) * 100.0, 1)
-            self.emit_event(
-                ProgressEvent(
-                    job_id=job_id,
-                    stage=stage,
-                    current_page=curr,
-                    total_pages=total,
-                    percent=pct,
-                    message=msg,
-                )
-            )
+            progress.update(curr, total, stage, msg)
 
         def on_checkpoint(p_num: int, classif, has_warn: bool, warn_msg: Optional[str]) -> None:
             cls_str = classif.value if hasattr(classif, "value") else str(classif)
@@ -306,78 +297,78 @@ class SidecarRunner:
             return self._cancel_flags.get(job_id, False)
 
         try:
-            res = orchestrator.convert(
-                input_path=input_path,
-                output_path=output_path,
-                options=options,
-                export_format=export_format,
-                page_range=page_range,
-                progress_callback=on_progress,
-                cancel_check=cancel_check,
-                checkpoint_callback=on_checkpoint,
-                asset_store=asset_store,
-            )
+            with JobProgress(job_id, self.emit_event) as progress:
+                res = orchestrator.convert(
+                    input_path=input_path,
+                    output_path=output_path,
+                    options=options,
+                    export_format=export_format,
+                    page_range=page_range,
+                    progress_callback=on_progress,
+                    cancel_check=cancel_check,
+                    checkpoint_callback=on_checkpoint,
+                    asset_store=asset_store,
+                )
+                # Retain the built DocumentIR so later exports skip extraction/OCR (OUT-002).
+                self._ir_stores[job_id] = res.document_ir
+
+                flagged_list = []
+                for flagged in self._review_stores.get(job_id, []):
+                    matching = [block for block in res.document_ir.blocks
+                                if block.source_page == flagged.page_number
+                                and block.type != BlockType.PAGE_MARKER and block.text]
+                    if not matching:
+                        flagged_list.append(flagged)
+                    for block in matching:
+                        flagged_list.append(flagged.model_copy(update={
+                            "block_id": block.id,
+                            "converted_text": block.text,
+                            "confidence": block.confidence,
+                        }))
+                self._review_stores[job_id] = flagged_list
+                previews = {}
+                if detect_file_type(input_path) == "pdf" and flagged_list:
+                    import base64
+                    import io
+                    import pypdfium2 as pdfium
+                    from openlargeprint.security.validator import bounded_pdf_scale
+
+                    with pdfium.PdfDocument(input_path) as source:
+                        for page_number in dict.fromkeys(item.page_number for item in flagged_list):
+                            page = source[page_number - 1]
+                            try:
+                                width, height = page.get_size()
+                                scale = min(bounded_pdf_scale(width, height, 96), 1200 / max(width, height))
+                                bitmap = page.render(scale=scale)
+                                try:
+                                    with io.BytesIO() as buffer:
+                                        bitmap.to_pil().convert("RGB").save(buffer, format="JPEG", quality=80)
+                                        previews[page_number] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+                                finally:
+                                    bitmap.close()
+                            except Exception:
+                                pass
+                            finally:
+                                page.close()
+
+                from openlargeprint.ir.serialization import document_to_ui_dict
+
+                success_event = SuccessEvent(
+                        job_id=job_id,
+                        output_path=str(res.output_path),
+                        format=res.format,
+                        page_count=len(res.document_ir.pages),
+                        flagged_count=len(flagged_list),
+                        warnings=res.warnings,
+                        document_ir=document_to_ui_dict(res.document_ir),
+                        review_items=flagged_list,
+                        review_previews=previews,
+                )
         except InterruptedError:
             self.emit_event(CancelledEvent(job_id=job_id))
             return
 
-        # Retain the built DocumentIR so later exports skip extraction/OCR (OUT-002).
-        self._ir_stores[job_id] = res.document_ir
-
-        flagged_list = []
-        for flagged in self._review_stores.get(job_id, []):
-            matching = [block for block in res.document_ir.blocks
-                        if block.source_page == flagged.page_number
-                        and block.type != BlockType.PAGE_MARKER and block.text]
-            if not matching:
-                flagged_list.append(flagged)
-            for block in matching:
-                flagged_list.append(flagged.model_copy(update={
-                    "block_id": block.id,
-                    "converted_text": block.text,
-                    "confidence": block.confidence,
-                }))
-        self._review_stores[job_id] = flagged_list
-        previews = {}
-        if detect_file_type(input_path) == "pdf" and flagged_list:
-            import base64
-            import io
-            import pypdfium2 as pdfium
-            from openlargeprint.security.validator import bounded_pdf_scale
-
-            with pdfium.PdfDocument(input_path) as source:
-                for page_number in dict.fromkeys(item.page_number for item in flagged_list):
-                    page = source[page_number - 1]
-                    try:
-                        width, height = page.get_size()
-                        scale = min(bounded_pdf_scale(width, height, 96), 1200 / max(width, height))
-                        bitmap = page.render(scale=scale)
-                        try:
-                            with io.BytesIO() as buffer:
-                                bitmap.to_pil().convert("RGB").save(buffer, format="JPEG", quality=80)
-                                previews[page_number] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-                        finally:
-                            bitmap.close()
-                    except Exception:
-                        pass
-                    finally:
-                        page.close()
-
-        from openlargeprint.ir.serialization import document_to_ui_dict
-
-        self.emit_event(
-            SuccessEvent(
-                job_id=job_id,
-                output_path=str(res.output_path),
-                format=res.format,
-                page_count=len(res.document_ir.pages),
-                flagged_count=len(flagged_list),
-                warnings=res.warnings,
-                document_ir=document_to_ui_dict(res.document_ir),
-                review_items=flagged_list,
-                review_previews=previews,
-            )
-        )
+        self.emit_event(success_event)
 
     def _handle_export(self, data: dict, job_id: str) -> None:
         """Re-render an already-built DocumentIR without re-extraction or OCR (OUT-002, OUT-010).

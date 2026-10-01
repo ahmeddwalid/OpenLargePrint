@@ -1,0 +1,14 @@
+{
+  "url": "http://127.0.0.1:5174/progress-verification.html",
+  "viewports": [
+    "1040x820",
+    "640x820"
+  ],
+  "targetHeight": 49,
+  "keyboardCancel": true,
+  "visibleFocus": true,
+  "textScale200": true,
+  "highContrast": true,
+  "reducedMotion": true,
+  "consoleErrors": []
+}

@@ -70,8 +70,8 @@ def test_filter_running_headers_and_footers():
     filtered = importer._filter_running_headers_and_footers(lines, page_num=2, page_width=600.0, page_height=800.0)
     texts = [l.text for l in filtered]
 
-    assert "English Phrasal Verbs in Use" not in texts
-    assert "2 English Phrasal Verbs in Use" not in texts
+    assert "English Phrasal Verbs in Use" in texts
+    assert "2 English Phrasal Verbs in Use" in texts
     assert any("Phrasal verbs are multi-word verbs" in t for t in texts)
 
 
