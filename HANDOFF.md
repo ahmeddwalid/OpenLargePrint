@@ -299,10 +299,8 @@ This pass resolved layout and page readability defects across multi-page textboo
 
 ## Still open (release blockers)
 
-- **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Until a
-  trusted certificate is configured, Windows 11 with Smart App Control enforced cannot run the application at all.
-- **The generated uninstaller stays unsigned**: NSIS creates `uninstall.exe` at install time, so it does not inherit
-  the installer's signature and Smart App Control blocks the Settings > Apps entry. Needs an NSIS build hook.
+- **Code signing certificate**: apply to SignPath Foundation (free for OSS) or buy an EV/OV certificate. Trusted signing and enforced-mode testing remain necessary release acceptance gates; no compatibility claim is made for the current unsigned artifacts.
+- **Installed uninstaller acceptance remains open**: build-time NSIS signing is wired and mandatory for public releases; verification of the actual installed `uninstall.exe` still requires trusted signing and an enforced-SAC acceptance run.
 - Packaged Windows CPU/GPU corpus runs, Linux desktop tests, screen-reader checks, physical printing at 100% scale,
   and target-machine RAM/VRAM measurement (`PKG-001`, `PERF-002`, `QA-001`) — the acceptance harness produces the
   numbers, but a packaged (signed) build has not been measured on a Smart App Control machine yet.
@@ -346,17 +344,34 @@ To continue development on Windows:
   samples and distinct embedded originals, independent transcripts and structural
   references, separate execution/fidelity results, image dimension-aware hashes,
   and unexpected-table detection. Whole-table text counts cells once, not Markdown.
-- Validation: 236 Python tests passed, 3 LibreOffice-dependent skips; 16 benchmark
+- Validation: 250 Python tests passed, 3 LibreOffice-dependent skips, followed by
+  three passing freshness tests after adding hook invalidation; 33 UI tests and
+  the TypeScript/Vite build passed. Both frozen standard and optional-English
+  health/second-page recognition/export checks passed. 16 benchmark
   execution passes and no expectation mismatches. Per-metric reports are in
   `packaging/verification/benchmark-results.{json,md}`. Child RAM/VRAM unmeasured.
 - All eight intermediate-source book exports completed at 20pt/28pt and selected
   A3 with complete page anchors. See `packaging/verification/REPORT.md` for timings,
   dimensions and limitations. These are not final rebuilt-GUI acceptance.
+- `OCR-001..006`, `SEC-006/009`, `LIC-001`: optional RapidOCR 3.9.2 adapter with
+  verified English-v6 recognition weights, metadata-bound vocabulary, CPU worker
+  isolation and recognition-only network denial. Explicit model setup remains
+  separate from conversion. Arabic-v5 research weights are pinned but recognition
+  is disabled after real decoding failed logical-order acceptance. Code and weight
+  licenses are recorded separately. See `ACCURACY_PACK.md`.
+- `UI-001`, `A11Y-001..003`, `VIS-001..004`: Advanced gates English accuracy on
+  verified health capability; native-text-only mode retains scanned originals and
+  mixed-page native text even if evidence retention fails. Keyboard/focus, 200%
+  text, narrow width, high contrast, reduced motion and RTL evidence is attached.
+- `PKG-002`: health initializes the real baseline recognizer before reporting ready;
+  optional-runtime packaging hooks now participate in source freshness checks.
 - Still open: better Arabic/mixed recognition, authoritative handling of visual
-  Arabic encoding, expert structure/fidelity acceptance, final frozen sidecar,
-  rebuilt GUI/installer and trusted-signing/enforced-SAC acceptance. No new OCR
-  runtime or weights were added; latest PP-OCRv6/Arabic-v5 and layout candidates
-  were researched but remain unimplemented/unbenchmarked optional candidates.
+  Arabic encoding, expert structure/fidelity acceptance, end-user packaged model
+  acquisition, rebuilt GUI/installer and trusted-signing/enforced-SAC acceptance.
+  Semantic layout candidates remain unimplemented; no frontier-quality claim.
+  The eight book diagnostics used an intermediate source revision, not this final
+  frozen sidecar or a rebuilt installed GUI. Physical printing and screen-reader
+  acceptance are also open.
 
 ```bash
 uv run python -m pytest tests/ -q

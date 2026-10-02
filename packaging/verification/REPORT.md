@@ -2,7 +2,9 @@
 
 Status: implementation changes prepared; release acceptance remains blocked.
 Branch: codex/faithful-conversion-windows. Source version: 0.5.0.
-No runtime dependencies/model weights added. SBOM now records the existing pinned Arabic dictionary.
+SBOM records the pinned Arabic dictionary, optional RapidOCR runtime dependencies,
+English-v6 weights and the disabled Arabic-v5 research candidate. Optional weights
+were prepared locally and are excluded from the base frozen payload.
 
 ## Demonstrated GUI failure
 
@@ -42,11 +44,17 @@ is not a full-document rebuilt-GUI comparison.
 
 ## Automated and visual evidence
 
+Follow-up source verification enables the optional English pack for its real
+offline test. The Python suite, UI suite/build and frozen-engine checks are
+recorded in [test-results.md](test-results.md). Frozen optional recognition checks
+actual health capabilities, exact native text, spawned second-page recognition,
+PDF export and `ocr_maximum` provenance. Arabic-v5 is refused, not silently reordered.
+
 Final command results are recorded in the accompanying handoff ledger. The full
 Python suite includes malformed/security, schema, worker recovery, native and
 scanned samples, actual PDF/DOCX/Reader output, A4/A3 and selected-page checks.
 Three LibreOffice-dependent tests are skipped because LibreOffice is unavailable.
-Frontend: 25 tests across six files passed; TypeScript/Vite production build passed.
+Frontend: 33 tests across seven files passed; TypeScript/Vite production build passed.
 Rust formatting passes. Rust compilation/tests and installer creation are blocked
 by Application Control, described below. PowerShell packaging scripts parse.
 
@@ -67,6 +75,20 @@ were preserved. Evidence:
 [high contrast](screenshots/progress-high-contrast.png),
 [machine-readable UI checks](screenshots/progress-check.json).
 
+The changed advanced option also passed keyboard selection, visible focus, minimum
+48px target, 200% text, 640px width, high contrast, reduced motion and RTL layout.
+Visual inspection caught and corrected a truncated selected label. The actual
+React screen was rendered with a substituted capability handshake; this is
+frontend evidence, not rebuilt native-GUI acceptance. Screenshots were checked
+against the repository visual craft checklist:
+
+[normal](screenshots/advanced-normal.png),
+[200% text](screenshots/advanced-200-percent.png),
+[narrow](screenshots/advanced-narrow.png),
+[high contrast](screenshots/advanced-high-contrast.png),
+[RTL](screenshots/advanced-rtl.png),
+[checks](screenshots/advanced-check.json).
+
 ## Benchmark fidelity, speed and memory
 
 [Per-case metrics](benchmark-results.md) list all 16 synthetic cases separately.
@@ -80,6 +102,13 @@ in [benchmark-results.json](benchmark-results.json) and the Markdown table. Old 
 new corpus metrics are not directly comparable. Missing metrics are N/A. Child RAM
 and VRAM are unmeasured; parent RAM is a lifetime peak. Concurrent test load prevents
 treating these timings as an isolated engine comparison.
+
+The optional English comparison is in [accuracy-results.md](accuracy-results.md)
+and [accuracy-results.json](accuracy-results.json). Table CER/WER improves from
+0.049/0.500 to 0.012/0.167; the main English scan is unchanged, and the skewed
+sample regresses. The pack therefore remains optional. Real Arabic-v5 decoder
+testing emitted visual-order text; that candidate stays disabled pending proper
+logical/mixed-direction acceptance. Details and licenses: [ACCURACY_PACK.md](../../ACCURACY_PACK.md).
 
 ## Full-book diagnostic run
 
