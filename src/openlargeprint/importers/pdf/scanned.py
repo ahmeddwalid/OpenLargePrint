@@ -156,6 +156,10 @@ class ScannedPageExtractor:
             text_blocks = self._cluster_semantic_blocks(
                 ordered_lines, page_num, idx_after_tables, ocr_res.warnings, page_h_pt
             )
+            capabilities = getattr(engine, "capabilities", None)
+            if callable(capabilities) and getattr(capabilities(), "recognition_profile", "standard") == "optional_accuracy":
+                for block in text_blocks + table_blocks:
+                    block.extraction_method = ExtractionMethod.OCR_MAXIMUM
 
             # Keep content order from the column pass; insert graphics within
             # the matching column rather than globally re-sorting the page.

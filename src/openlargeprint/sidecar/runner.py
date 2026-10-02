@@ -58,6 +58,8 @@ class SidecarRunner:
                 pass
 
         self.in_stream = in_stream or sys.stdin
+        self._health_ready: bool | None = None
+        self._health_lock = threading.Lock()
         self.out_stream = out_stream or sys.stdout
         self._cancel_flags: Dict[str, bool] = {}
         self._review_stores: Dict[str, List[FlaggedPageReview]] = {}
@@ -143,11 +145,24 @@ class SidecarRunner:
 
     def _handle_health(self) -> None:
         """Respond to health check request."""
+        from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
+        from openlargeprint.ocr.router import OcrRouter
+        with self._health_lock:
+            if self._health_ready is None:
+                probe = PaddleRapidOcrEngine(use_gpu=False)
+                try:
+                    probe._get_engine()
+                    self._health_ready = True
+                except Exception:
+                    self._health_ready = False
+                finally:
+                    probe.close()
         self.emit_event(
             HealthCheckEvent(
-                status="ready",
+                status="ready" if self._health_ready else "unavailable",
                 engine_version=ENGINE_VERSION,
-                ocr_available=True,
+                ocr_available=bool(self._health_ready),
+                accuracy_languages=OcrRouter.available_accuracy_languages() if self._health_ready else [],
             )
         )
 
@@ -243,7 +258,9 @@ class SidecarRunner:
 
         # "Automatic" genuinely means native-first with escalation, not Maximum accuracy.
         routing_mode_raw = str(data.get("routing_mode", "automatic")).lower().strip()
-        if routing_mode_raw in ("fast", "native_only", "native-only"):
+        if routing_mode_raw in ("native_only", "native-only", "native text only"):
+            routing_enum = RoutingMode.NATIVE_ONLY
+        elif routing_mode_raw == "fast":
             routing_enum = RoutingMode.FAST
         elif "max" in routing_mode_raw or "acc" in routing_mode_raw:
             routing_enum = RoutingMode.MAXIMUM_ACCURACY

@@ -143,6 +143,8 @@ def build_sidecar() -> Path:
         ]
 
     try:
+        if importlib.util.find_spec("rapidocr") is not None and not (spec_file.exists() and "--reuse-spec" in sys.argv):
+            cmd[-1:-1] = ["--additional-hooks-dir", str(repo_root / "packaging" / "hooks"), "--hidden-import", "rapidocr"]
         # Check if PyInstaller is installed
         if importlib.util.find_spec("PyInstaller") is None:
             raise ImportError("PyInstaller is unavailable")

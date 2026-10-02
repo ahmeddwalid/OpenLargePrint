@@ -44,6 +44,19 @@ def test_sidecar_health_check():
     assert event["ocr_available"] is True
 
 
+def test_failed_recognition_health_never_reports_ready(monkeypatch):
+    from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
+    def fail(self):
+        raise RuntimeError("Unusable recognition installation")
+    monkeypatch.setattr(PaddleRapidOcrEngine, "_get_engine", fail)
+    output = io.StringIO()
+    runner = SidecarRunner(in_stream=io.StringIO('{"command": "health"}\n'), out_stream=output)
+    runner.run_loop()
+    event = json.loads(output.getvalue())
+    assert event["status"] != "ready"
+    assert event["ocr_available"] is False
+
+
 def test_sidecar_inspect_pdf(tmp_path: Path):
     """Verify inspect command returns document format, page count, and title."""
     pdf_file = tmp_path / "sample.pdf"

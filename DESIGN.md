@@ -113,6 +113,28 @@ These are application-level checks (`OCR-005`), not something delegated blindly 
 
 ## 4. OCR engine abstraction and routing (`OCR-001..007`)
 
+The optional English accuracy adapter uses RapidOCR 3.9.2 / PP-OCRv6 medium
+recognition while retaining the verified CPU baseline detector/classifier. It
+implements the same engine/worker interface; no importer-to-exporter shortcut is
+introduced. Capabilities declare `recognition_profile`, and recognized text/table
+blocks record the existing `ocr_maximum` provenance when this pack was used.
+Native source text remains native. No semantic-layout capability is claimed.
+The default remains unchanged because corpus results show improvements and
+regressions; see [ACCURACY_PACK.md](ACCURACY_PACK.md).
+
+Health initializes the baseline recognizer once per sidecar session and reports
+unavailable on failure. Optional pack availability checks its installed runtime
+version and artifact digest; unreadable/missing/invalid optional storage does not
+break baseline availability. The advanced option consumes the existing narrow
+health command, refreshing when opened. No new Rust/webview filesystem or shell
+command is exposed. OCR subprocesses deny network connections/name resolution,
+and missing embedded decoder metadata cannot trigger upstream dictionary downloads.
+
+Native text only is an actual extraction policy, rather than an alias for Fast.
+It extracts usable native spans, bypasses OCR, and retains original scanned pages
+or mixed-page evidence. Optional evidence failures retain already-extracted native
+blocks and warn locally.
+
 Scanned extraction selects the router's engine using the page language hints and
 selected mode; explicitly injected engines retain control for standalone callers.
 All routed workers close at the importer boundary. The optional Arabic recognizer

@@ -111,6 +111,7 @@ class HealthCheckEvent(BaseModel):
     status: str = "ready"
     engine_version: str = ENGINE_VERSION
     ocr_available: bool = True
+    accuracy_languages: List[str] = Field(default_factory=list)
 
 
 class ProgressEvent(BaseModel):

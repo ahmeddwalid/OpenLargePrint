@@ -15,6 +15,7 @@ class EngineCapabilities:
     supports_confidence: bool
     supported_languages: List[str]
     is_gpu_accelerated: bool = False
+    recognition_profile: str = "standard"
 
 
 @dataclass

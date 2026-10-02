@@ -56,6 +56,24 @@ class ModelCatalog(BaseModel):
 # Pinned baseline models used by OpenLargePrint (RapidOCR ONNX default stack)
 PINNED_MODELS = ModelCatalog(
     models={
+        "PP-OCRv6_rec_medium": ModelArtifact(
+            key="PP-OCRv6_rec_medium", name="PP-OCRv6 medium recognition (ONNX)",
+            task=ModelTask.RECOGNITION, framework=ModelFramework.ONNX,
+            version="PP-OCRv6/RapidOCR-3.9.2",
+            sha256="eef444829dbbe18d7fea59a3f6eb75647518d2b3a9568d27c92e42940204894b",
+            file_size_bytes=76629984, code_license="Apache-2.0", weight_license="Apache-2.0",
+            download_url="https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/4e9666f0fbf5fac850d30e530bf0a2e0d886aa78/onnx/PP-OCRv6/rec/PP-OCRv6_rec_medium.onnx",
+            is_default=False, description="Optional CPU Chinese/English recognition; no semantic layout claims",
+        ),
+        "arabic_PP-OCRv5_rec_mobile": ModelArtifact(
+            key="arabic_PP-OCRv5_rec_mobile", name="PP-OCRv5 Arabic recognition (ONNX)",
+            task=ModelTask.RECOGNITION, framework=ModelFramework.ONNX,
+            version="PP-OCRv5/RapidOCR-3.9.2",
+            sha256="c1192e632d0baa9146ae5b756a0e635e3dc63c1733737ebfd1629e87144e9295",
+            file_size_bytes=8023828, code_license="Apache-2.0", weight_license="Apache-2.0",
+            download_url="https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/b8ff564a23de421e7144385bfe120fe2bb869932/onnx/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile.onnx",
+            is_default=False, description="Optional CPU Arabic recognition candidate; direction acceptance pending, disabled in conversion",
+        ),
         "ch_PP-OCRv4_det": ModelArtifact(
             key="ch_PP-OCRv4_det",
             name="PP-OCRv4 Text Detection (ONNX)",

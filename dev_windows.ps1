@@ -49,7 +49,7 @@ Write-Host "[1/4] Prerequisites verified (uv, node, npm, cargo)." -ForegroundCol
 
 # 2. Sync Python environment
 Write-Host "[2/4] Synchronizing Python environment with uv..." -ForegroundColor Green
-& uv sync --locked --dev --extra dev --python 3.12
+& uv sync --locked --dev --extra dev --extra accuracy --python 3.12
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to synchronize Python dependencies via uv."
 }

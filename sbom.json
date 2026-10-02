@@ -182,6 +182,114 @@
       "parses_untrusted_content": false,
       "purpose": "Offline Arabic interface and Reader typography",
       "sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e"
+    },
+    {
+      "component": "rapidocr",
+      "version": "3.9.2",
+      "code_license": "Apache-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": true,
+      "purpose": "Optional local-only recognition adapter; package downloader is unused",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "omegaconf",
+      "version": "2.3.1",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": true,
+      "purpose": "Optional recognition configuration",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "antlr4-python3-runtime",
+      "version": "4.9.3",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": false,
+      "purpose": "Optional configuration parser",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "colorlog",
+      "version": "6.12.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": false,
+      "purpose": "Optional runtime diagnostics; document contents are not logged",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "requests",
+      "version": "2.34.2",
+      "code_license": "Apache-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": false,
+      "purpose": "Upstream optional runtime utility; recognition network calls are blocked",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "certifi",
+      "version": "2026.7.22",
+      "code_license": "MPL-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": false,
+      "purpose": "Upstream HTTP certificate data; not used by conversion",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "charset-normalizer",
+      "version": "3.5.1",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": false,
+      "purpose": "Upstream optional HTTP utility",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "idna",
+      "version": "3.20",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": false,
+      "purpose": "Upstream optional HTTP utility",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
+    },
+    {
+      "component": "urllib3",
+      "version": "2.8.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; recognition worker rejects network",
+      "parses_untrusted_content": false,
+      "purpose": "Upstream optional HTTP utility",
+      "distribution": "Optional accuracy runtime; model weights prepared separately"
     }
   ],
   "models": [
@@ -249,6 +357,32 @@
       "parses_untrusted_content": false,
       "purpose": "Pinned decoder vocabulary for the optional Arabic recognition pack",
       "distribution": "Bundled 405-byte dictionary; checked again in the recognition worker"
+    },
+    {
+      "model_key": "PP-OCRv6_rec_medium",
+      "version": "PP-OCRv6/RapidOCR-3.9.2",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "eef444829dbbe18d7fea59a3f6eb75647518d2b3a9568d27c92e42940204894b",
+      "download_source": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/4e9666f0fbf5fac850d30e530bf0a2e0d886aa78/onnx/PP-OCRv6/rec/PP-OCRv6_rec_medium.onnx",
+      "native_code": false,
+      "network_behavior": "Explicit setup download only; none in conversion",
+      "parses_untrusted_content": true,
+      "purpose": "Optional CPU Chinese/English recognition; no semantic layout claims",
+      "distribution": "Optional, not in base installer"
+    },
+    {
+      "model_key": "arabic_PP-OCRv5_rec_mobile",
+      "version": "PP-OCRv5/RapidOCR-3.9.2",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "c1192e632d0baa9146ae5b756a0e635e3dc63c1733737ebfd1629e87144e9295",
+      "download_source": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/b8ff564a23de421e7144385bfe120fe2bb869932/onnx/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile.onnx",
+      "native_code": false,
+      "network_behavior": "Explicit setup download only; none in conversion",
+      "parses_untrusted_content": true,
+      "purpose": "Optional CPU Arabic recognition candidate; direction acceptance pending, disabled in conversion",
+      "distribution": "Optional, not in base installer"
     }
   ],
   "excluded_candidates": [

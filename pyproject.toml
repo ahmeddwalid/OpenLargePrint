@@ -22,6 +22,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+accuracy = [
+    "rapidocr==3.9.2",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",

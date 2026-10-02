@@ -12,6 +12,7 @@ def fingerprint(root: Path) -> str:
     files = list((root / "src/openlargeprint").rglob("*.py"))
     files += [root / name for name in ("uv.lock", "pyproject.toml", "packaging/build_sidecar.py")]
     files += list((root / "src/openlargeprint/models").rglob("*.txt"))
+    files += list((root / "packaging/hooks").rglob("*.py"))
     for path in sorted(p for p in files if p.is_file()):
         digest.update(path.relative_to(root).as_posix().encode())
         digest.update(path.read_bytes())

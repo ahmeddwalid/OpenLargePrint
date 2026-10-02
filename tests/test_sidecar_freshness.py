@@ -36,3 +36,17 @@ def test_onefile_build_refuses_missing_output(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["build_sidecar.py"])
     with pytest.raises(RuntimeError, match="expected executable"):
         module.build_sidecar()
+
+
+def test_hook_changes_invalidate_frozen_sidecar(tmp_path):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    hooks = tmp_path / "packaging/hooks"
+    hooks.mkdir(parents=True)
+    hook = hooks / "hook-rapidocr.py"
+    hook.write_text("datas = []")
+    binary = tmp_path / "engine.exe"
+    binary.write_bytes(b"engine")
+    module.record_build(tmp_path, binary)
+    hook.write_text("datas = ['config.yaml']")
+    assert not module.is_fresh(tmp_path, binary)

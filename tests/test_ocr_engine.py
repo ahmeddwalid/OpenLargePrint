@@ -65,8 +65,9 @@ def test_default_engine_is_cpu_only():
     assert getattr(engine, "use_gpu", False) is False
 
 
-def test_routing_mode_matrix():
+def test_routing_mode_matrix(monkeypatch):
     """AUTOMATIC/FAST return CPU engine; MAXIMUM tries VLM then falls back (OCR-001)."""
+    monkeypatch.setattr(OcrRouter, "_modern_model_path", staticmethod(lambda language: None))
     router = OcrRouter()
     auto_eng = router.get_engine(RoutingMode.AUTOMATIC)
     fast_eng = router.get_engine(RoutingMode.FAST)
@@ -87,6 +88,7 @@ def test_routing_mode_matrix():
 
 def test_engine_swap_distinct_classes_when_vlm_available(monkeypatch):
     """FAST vs MAXIMUM return different classes when VLM model is present (OCR-001)."""
+    monkeypatch.setattr(OcrRouter, "_modern_model_path", staticmethod(lambda language: None))
     from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
     from openlargeprint.ocr.vlm_engine import PaddleOcrVlEngine
 

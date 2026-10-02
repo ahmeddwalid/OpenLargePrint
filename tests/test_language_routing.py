@@ -81,6 +81,79 @@ def test_maximum_mode_keeps_its_warning_for_arabic():
     assert engine is not router._arabic_engine
 
 
+def test_installed_accuracy_engine_is_cached_and_closed(tmp_path, monkeypatch):
+    from openlargeprint.ocr.router import RoutingMode
+    from openlargeprint.ocr.modern_engine import ModernRapidOcrEngine
+    monkeypatch.setattr(OcrRouter, "_modern_model_path", staticmethod(lambda language: tmp_path / "verified.onnx" if language == "en" else None))
+    router = OcrRouter()
+    engine = router.get_engine(RoutingMode.MAXIMUM_ACCURACY)
+    assert isinstance(engine, ModernRapidOcrEngine)
+    assert router.get_engine(RoutingMode.MAXIMUM_ACCURACY) is engine
+    closed = []
+    monkeypatch.setattr(engine, "close", lambda: closed.append(True))
+    router.close()
+    assert closed == [True]
+
+
+def test_unreadable_optional_cache_does_not_break_baseline(monkeypatch):
+    import importlib.util
+    import importlib.metadata
+    from openlargeprint.models import model_manager
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "3.9.2")
+    def denied(*args, **kwargs):
+        raise PermissionError("Optional cache is unreadable")
+    monkeypatch.setattr(model_manager, "get_model_path", denied)
+    assert OcrRouter.available_accuracy_languages() == []
+
+
+def test_native_only_mixed_page_keeps_text_when_evidence_fails(tmp_path, monkeypatch):
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    from openlargeprint.importers.pdf.native import NativePdfImporter
+    from openlargeprint.ocr.router import RoutingMode
+    from openlargeprint.security.isolation import JobWorkspace
+    from openlargeprint.ir.models import PageClassification
+    source = tmp_path / "mixed.pdf"
+    image_path = tmp_path / "figure.png"
+    Image.new("RGB", (400, 400), "gray").save(image_path)
+    pdf = canvas.Canvas(str(source), pagesize=A4)
+    text = "Native wording remains intact when page evidence fails."
+    pdf.drawString(72, 760, text)
+    pdf.drawImage(str(image_path), 72, 80, width=500, height=660)
+    pdf.showPage(); pdf.save()
+    importer = NativePdfImporter(routing_mode=RoutingMode.NATIVE_ONLY)
+    def fail(*args, **kwargs):
+        raise OSError("Evidence preparation failed")
+    monkeypatch.setattr(importer, "_preserve_page", fail)
+    with JobWorkspace() as workspace:
+        doc = importer.import_document(source, workspace)
+    assert doc.pages[0].classification == PageClassification.MIXED
+    assert any(block.text == text for block in doc.blocks)
+    assert any("retained" in warning.lower() for block in doc.blocks for warning in block.warnings)
+
+
+def test_native_only_retains_scan_without_recognition(tmp_path):
+    from openlargeprint.importers.pdf.native import NativePdfImporter
+    from openlargeprint.ocr.router import RoutingMode
+    from openlargeprint.qa.corpus_builder import BenchmarkCorpusBuilder
+    from openlargeprint.security.isolation import JobWorkspace
+    from openlargeprint.ir.models import BlockType, ExtractionMethod
+    calls = []
+    class NoOcr:
+        def analyze_page(self, *args, **kwargs):
+            calls.append(True)
+            raise AssertionError("Native-only mode must never run recognition")
+    path = BenchmarkCorpusBuilder(tmp_path).build_mixed_digital_scan()
+    with JobWorkspace() as workspace:
+        doc = NativePdfImporter(ocr_engine=NoOcr(), routing_mode=RoutingMode.NATIVE_ONLY).import_document(path, workspace)
+    assert doc.metadata.page_count == 2
+    assert calls == []
+    assert any(block.source_page == 1 and block.extraction_method == ExtractionMethod.NATIVE and block.text for block in doc.blocks)
+    assert any(block.source_page == 2 and block.type == BlockType.IMAGE and block.image_asset for block in doc.blocks)
+    assert not any(block.extraction_method in (ExtractionMethod.OCR_FAST, ExtractionMethod.OCR_MAXIMUM) for block in doc.blocks if block.text)
+
+
 def test_unsupported_language_has_visible_warning(monkeypatch):
     engine = PaddleRapidOcrEngine()
     monkeypatch.setattr(engine, "_get_engine", lambda: lambda image: ([], []))

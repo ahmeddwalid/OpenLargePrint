@@ -332,31 +332,43 @@ class NativePdfImporter(BaseImporter):
                         block_counter += len(extracted)
 
                     elif page_meta.classification in (PageClassification.SCANNED, PageClassification.BROKEN_DIGITAL):
+                        if self.routing_mode == RoutingMode.NATIVE_ONLY:
+                            pass  # Common empty-extraction path retains the original below.
+                        else:
                         # OCR path for scanned pages and broken-digital fallback (PDF-003, PDF-005)
-                        log_safe_info(
-                            f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
-                        )
-                        page_lang_hints = ("ar",) if (
-                            "arabic" in file_path.name.lower()
-                            or any("\u0600" <= c <= "\u06ff" for c in file_path.stem)
-                            or any("\u0600" <= c <= "\u06ff" for c in str(page_meta.details.get("clean_text", "")))
-                        ) else ("en",)
-                        extracted = self.scanned_extractor.extract_page(
-                            page,
-                            page_num,
-                            block_counter,
-                            assets_dir=workspace.assets_dir,
-                            cancel_check=cancel_check,
-                            language_hints=page_lang_hints,
-                        )
-                        block_counter += len(extracted)
+                            log_safe_info(
+                                f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
+                            )
+                            page_lang_hints = ("ar",) if (
+                                "arabic" in file_path.name.lower()
+                                or any("\u0600" <= c <= "\u06ff" for c in file_path.stem)
+                                or any("\u0600" <= c <= "\u06ff" for c in str(page_meta.details.get("clean_text", "")))
+                            ) else ("en",)
+                            extracted = self.scanned_extractor.extract_page(
+                                page,
+                                page_num,
+                                block_counter,
+                                assets_dir=workspace.assets_dir,
+                                cancel_check=cancel_check,
+                                language_hints=page_lang_hints,
+                            )
+                            block_counter += len(extracted)
 
                     elif page_meta.classification == PageClassification.MIXED:
                         # Mixed page reconciliation path (PDF-004)
                         log_safe_info(f"Page {page_num} routed to mixed reconciliation (PDF-004)")
-                        extracted = self._reconcile_mixed_page(
-                            page, page_num, block_counter, page_meta, assets_dir=workspace.assets_dir, cancel_check=cancel_check
-                        )
+                        if self.routing_mode == RoutingMode.NATIVE_ONLY:
+                            extracted = self._extract_native_text(page, page_num, block_counter, page_meta)
+                            try:
+                                image_blocks.append(self._preserve_page(page, page_num, workspace))
+                            except Exception:
+                                page_image_warnings.append(
+                                    "The original mixed-page image could not be prepared. Native text was retained; compare scanned areas with the original document."
+                                )
+                        else:
+                            extracted = self._reconcile_mixed_page(
+                                page, page_num, block_counter, page_meta, assets_dir=workspace.assets_dir, cancel_check=cancel_check
+                            )
                         block_counter += len(extracted)
 
                     # 4b. IMG-002: preserve vector artwork when no embedded raster was recovered
