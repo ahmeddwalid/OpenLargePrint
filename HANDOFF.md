@@ -328,6 +328,36 @@ To continue development on Windows:
 
 ## Verification commands
 
+### Faithfulness and benchmark follow-up (2026-10-02)
+
+- `PDF-002`, `LANG-002`: removed default word-based Arabic reversal from native
+  extraction. Valid logical words remain unchanged; suspected display-order
+  encoding is flagged and the original page retained. Authoritative logical-order
+  recovery remains open, rather than guessing text silently.
+- `OCR-004`, `SEC-004/006/008`: fixed missing Arabic-router import and unused
+  scanned-page router. Language hints select the verified recognizer; explicit
+  injected engines remain supported. Workers close at import completion. Arabic
+  dictionaries are pinned and verified in both routing and recognition; adjacent
+  unverified vocabulary files cannot alter decoding. Unsupported languages warn.
+- `SEC-003/006/009`: setup downloads are bounded by the pinned model size; staging
+  is cleaned after errors and installed atomically after verification. Existing
+  verified copies survive failed replacement. No conversion-path network added.
+- `QA-001..003`, `PERF-002`: corpus now has genuine bidi/native-plus-scan/rotated
+  samples and distinct embedded originals, independent transcripts and structural
+  references, separate execution/fidelity results, image dimension-aware hashes,
+  and unexpected-table detection. Whole-table text counts cells once, not Markdown.
+- Validation: 236 Python tests passed, 3 LibreOffice-dependent skips; 16 benchmark
+  execution passes and no expectation mismatches. Per-metric reports are in
+  `packaging/verification/benchmark-results.{json,md}`. Child RAM/VRAM unmeasured.
+- All eight intermediate-source book exports completed at 20pt/28pt and selected
+  A3 with complete page anchors. See `packaging/verification/REPORT.md` for timings,
+  dimensions and limitations. These are not final rebuilt-GUI acceptance.
+- Still open: better Arabic/mixed recognition, authoritative handling of visual
+  Arabic encoding, expert structure/fidelity acceptance, final frozen sidecar,
+  rebuilt GUI/installer and trusted-signing/enforced-SAC acceptance. No new OCR
+  runtime or weights were added; latest PP-OCRv6/Arabic-v5 and layout candidates
+  were researched but remain unimplemented/unbenchmarked optional candidates.
+
 ```bash
 uv run python -m pytest tests/ -q
 cd ui && NODE_ENV=test npx vitest run

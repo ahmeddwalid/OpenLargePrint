@@ -1,0 +1,491 @@
+{
+  "timestamp": "2026-10-02T05:05:38Z",
+  "total_cases": 16,
+  "passed_cases": 16,
+  "failed_cases": 0,
+  "results": {
+    "born_digital_english": {
+      "case_name": "born_digital_english",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 0.038,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 0.038,
+        "peak_ram_mb": 92.3
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "two_column_law": {
+      "case_name": "two_column_law",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 0.036,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 0.667,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 0.036,
+        "peak_ram_mb": 92.3
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "legal_footnotes": {
+      "case_name": "legal_footnotes",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 0.035,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 0.035,
+        "peak_ram_mb": 92.3
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "scanned_english": {
+      "case_name": "scanned_english",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 3.496,
+      "metrics": {
+        "cer": 0.030534351145038167,
+        "wer": 0.3333333333333333,
+        "reading_order_accuracy": 0.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 3.496,
+        "peak_ram_mb": 160.74
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": false
+    },
+    "arabic_scan": {
+      "case_name": "arabic_scan",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 2.99,
+      "metrics": {
+        "cer": 0.825,
+        "wer": 1.0,
+        "reading_order_accuracy": 0.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 2.99,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": false
+    },
+    "mixed_bidi": {
+      "case_name": "mixed_bidi",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 2.853,
+      "metrics": {
+        "cer": 0.56,
+        "wer": 0.8235294117647058,
+        "reading_order_accuracy": 0.3333333333333333,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 2.853,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 2,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": false
+    },
+    "scanned_table": {
+      "case_name": "scanned_table",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 2.688,
+      "metrics": {
+        "cer": 0.04878048780487805,
+        "wer": 0.5,
+        "reading_order_accuracy": 0.6666666666666666,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 2.688,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 2,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": false
+    },
+    "images_captions": {
+      "case_name": "images_captions",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 0.049,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": 1.0,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 0.049,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "rotated_page": {
+      "case_name": "rotated_page",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 2.528,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 2.528,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "skewed_page": {
+      "case_name": "skewed_page",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 2.439,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 2.439,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "low_res_scan": {
+      "case_name": "low_res_scan",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 2.392,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 2.392,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "mixed_digital_scan": {
+      "case_name": "mixed_digital_scan",
+      "format": "docx",
+      "page_count": 2,
+      "duration_seconds": 2.5,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 1.25,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 1,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "page_numbering": {
+      "case_name": "page_numbering",
+      "format": "docx",
+      "page_count": 2,
+      "duration_seconds": 0.037,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 0.018,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "malformed_pdf": {
+      "case_name": "malformed_pdf",
+      "format": "pdf",
+      "page_count": 1,
+      "duration_seconds": 0.003,
+      "metrics": {
+        "cer": null,
+        "wer": null,
+        "reading_order_accuracy": null,
+        "table_structural_accuracy": null,
+        "image_content_retention": null,
+        "reading_order_score": 0.0,
+        "table_score": 0.0,
+        "image_retention": 0.0,
+        "page_anchor_fidelity": 0.0,
+        "speed_sec_per_page": 0.003,
+        "peak_ram_mb": 168.87109375
+      },
+      "success": true,
+      "warning_count": 1,
+      "error_message": "Safely caught: SecurityValidationError",
+      "measurement_notes": [
+        "Rejection test; content fidelity metrics do not apply."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": null
+    },
+    "docx_sample": {
+      "case_name": "docx_sample",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 0.053,
+      "metrics": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 0.053,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": true
+    },
+    "pptx_sample": {
+      "case_name": "pptx_sample",
+      "format": "docx",
+      "page_count": 1,
+      "duration_seconds": 0.046,
+      "metrics": {
+        "cer": 0.13793103448275862,
+        "wer": 0.14285714285714285,
+        "reading_order_accuracy": 1.0,
+        "table_structural_accuracy": 1.0,
+        "image_content_retention": null,
+        "reading_order_score": 1.0,
+        "table_score": 1.0,
+        "image_retention": 1.0,
+        "page_anchor_fidelity": 1.0,
+        "speed_sec_per_page": 0.046,
+        "peak_ram_mb": 168.87
+      },
+      "success": true,
+      "warning_count": 0,
+      "error_message": null,
+      "measurement_notes": [
+        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
+        "RAM is the process lifetime peak; child processes and VRAM are not measured.",
+        "Conversion success is not a document-fidelity pass."
+      ],
+      "peak_vram_mb": null,
+      "expectation_mismatches": [],
+      "fidelity_accepted": false
+    }
+  },
+  "average_cer": 0.1068,
+  "average_wer": 0.1866,
+  "average_speed_s_per_page": 1.394,
+  "peak_ram_mb": 168.87,
+  "expectation_failures": 0
+}

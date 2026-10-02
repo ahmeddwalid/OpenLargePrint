@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-import difflib
 from typing import List, Sequence, TypeVar
 from pydantic import BaseModel, Field
+import hashlib
 
 
 T = TypeVar("T")
+
+
+def image_pixel_digest(image) -> str:
+    """Identify exact decoded pixels and dimensions, including aspect ratio."""
+    rgb = image.convert("RGB")
+    prefix = f"RGB:{rgb.width}x{rgb.height}:".encode("ascii")
+    return hashlib.sha256(prefix + rgb.tobytes()).hexdigest()
 
 
 def _levenshtein_distance(s1: Sequence[T], s2: Sequence[T]) -> int:
@@ -65,9 +72,13 @@ def calculate_reading_order_accuracy(ref_order: List[str], hyp_order: List[str])
     if not ref_order or not hyp_order:
         return 0.0
 
-    matcher = difflib.SequenceMatcher(None, ref_order, hyp_order)
-    match_size = sum(block.size for block in matcher.get_matching_blocks())
-    return match_size / len(ref_order)
+    previous = [0] * (len(hyp_order) + 1)
+    for ref in ref_order:
+        current = [0]
+        for index, hyp in enumerate(hyp_order, 1):
+            current.append(previous[index - 1] + 1 if ref == hyp else max(previous[index], current[-1]))
+        previous = current
+    return previous[-1] / max(len(ref_order), len(hyp_order))
 
 
 def calculate_table_structural_score(
@@ -90,11 +101,10 @@ def calculate_table_structural_score(
 
     # Cell content accuracy
     matching_cells = 0
-    total_cells = 0
+    total_cells = max(sum(map(len, ref_table)), sum(map(len, hyp_table)))
     for r in range(min(ref_rows, hyp_rows)):
         for c in range(min(len(ref_table[r]), len(hyp_table[r]))):
-            total_cells += 1
-            if ref_table[r][c].strip().lower() == hyp_table[r][c].strip().lower():
+            if ref_table[r][c].strip() == hyp_table[r][c].strip():
                 matching_cells += 1
 
     content_score = (matching_cells / total_cells) if total_cells > 0 else 0.0
@@ -123,6 +133,9 @@ class EvaluationMetrics(BaseModel):
 
     cer: float | None = Field(..., ge=0.0, description="Character Error Rate")
     wer: float | None = Field(..., ge=0.0, description="Word Error Rate")
+    reading_order_accuracy: float | None = Field(default=None, ge=0.0, le=1.0, description="Reference order-unit LCS accuracy")
+    table_structural_accuracy: float | None = Field(default=None, ge=0.0, le=1.0, description="Reference cell and shape fidelity")
+    image_content_retention: float | None = Field(default=None, ge=0.0, le=1.0, description="Decoded original image pixel retention")
     reading_order_score: float = Field(..., ge=0.0, le=1.0, description="Reading order correctness")
     table_score: float = Field(..., ge=0.0, le=1.0, description="Table structure fidelity")
     image_retention: float = Field(..., ge=0.0, le=1.0, description="Asset retention rate")

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import io
+import json
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, features
+import arabic_reshaper
 import pypdfium2 as pdfium
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 import docx
 from pptx import Presentation
 
@@ -51,6 +55,20 @@ class BenchmarkCorpusBuilder:
             "docx_sample": self.build_docx_sample(),
             "pptx_sample": self.build_pptx_sample(),
         }
+        for name, path in cases.items():
+            if name == "malformed_pdf":
+                continue
+            lines = REFERENCE_LINES[name]
+            self._write_ground_truth(path, "\n".join(lines))
+            reference = {
+                "reading_order": lines,
+                "source_pages": list(range(1, int(CASE_EXPECTATIONS[name].get("page_count", 1)) + 1)),
+                "tables": REFERENCE_TABLES.get(name, []),
+                "image_count": 2 if name == "images_captions" else 0,
+                "image_pixel_hashes": self._figure_hashes() if name == "images_captions" else [],
+                "license": "Project-authored synthetic fixture; GPL-3.0-or-later",
+            }
+            path.with_suffix(".reference.json").write_text(json.dumps(reference, ensure_ascii=False, indent=2), encoding="utf-8")
         log_safe_info(f"Generated {len(cases)} benchmark documents in {self.output_dir}")
         return cases
 
@@ -76,15 +94,14 @@ class BenchmarkCorpusBuilder:
         """Case 2: Two-column law page (tests reading order flow)."""
         out_path = self.output_dir / "02_two_column_law.pdf"
         c = canvas.Canvas(str(out_path), pagesize=letter)
-        # Left column
         c.setFont("Helvetica", 10)
-        c.drawString(50, 700, "Left column paragraph 1: The plaintiff filed an action for breach.")
-        c.drawString(50, 680, "Left column paragraph 2: Notice was served in accordance with Rule 4.")
-        # Right column
-        c.drawString(320, 700, "Right column paragraph 1: The defendant filed a motion to dismiss.")
-        c.drawString(320, 680, "Right column paragraph 2: The court held that jurisdiction was proper.")
+        for x, lines in ((50, REFERENCE_LINES["two_column_law"][:2]), (320, REFERENCE_LINES["two_column_law"][2:])):
+            for y, line in zip((700, 660), lines):
+                assert c.stringWidth(line, "Helvetica", 10) < 250
+                c.drawString(x, y, line)
         c.showPage()
         c.save()
+        self._write_ground_truth(out_path, "\n".join(REFERENCE_LINES["two_column_law"]))
         return out_path
 
     def build_legal_footnotes(self) -> Path:
@@ -157,13 +174,18 @@ class BenchmarkCorpusBuilder:
             "rendered with real Arabic text."
         )
 
+    @staticmethod
+    def _arabic_display(text: str) -> str:
+        # Reference transcripts keep logical Unicode; only fixture painting shapes.
+        return text if features.check_feature("raqm") else arabic_reshaper.reshape(text)[::-1]
+
     def render_arabic_page(self) -> Image.Image:
         """Draw the Arabic benchmark page (LANG-002, OCR-003)."""
-        img = Image.new("RGB", (800, 1100), color=(252, 250, 246))
+        img = Image.new("RGB", (1100, 1400), color=(252, 250, 246))
         draw = ImageDraw.Draw(img)
         title, body = self._ARABIC_PAGE_LINES
-        draw.text((300, 100), title, fill=(10, 10, 10), font=self.arabic_font(34))
-        draw.text((60, 170), body, fill=(20, 20, 20), font=self.arabic_font(28))
+        draw.text((300, 100), self._arabic_display(title), fill=(10, 10, 10), font=self.arabic_font(34))
+        draw.text((60, 170), self._arabic_display(body), fill=(20, 20, 20), font=self.arabic_font(28))
         return img
 
     def build_arabic_scan(self) -> Path:
@@ -175,13 +197,17 @@ class BenchmarkCorpusBuilder:
     def build_mixed_bidi(self) -> Path:
         """Case 6: Mixed Arabic/English (tests bidi layout)."""
         out_path = self.output_dir / "06_mixed_bidi.pdf"
-        c = canvas.Canvas(str(out_path), pagesize=A4)
-        c.setFont("Helvetica", 11)
-        c.drawString(72, 750, "Bilingual Agreement / Arabic Clause")
-        c.drawString(72, 720, "Clause 1: The governing law is Civil Code No 131.")
-        c.showPage()
-        c.save()
-        return out_path
+        lines = REFERENCE_LINES["mixed_bidi"]
+        img = Image.new("RGB", (1100, 1400), color=(252, 250, 246))
+        draw = ImageDraw.Draw(img)
+        draw.text((70, 90), lines[0], font=ImageFont.load_default(size=30), fill=(20, 20, 20))
+        # Pillow's RAQM text engine shapes and orders Arabic when available.
+        arabic_clause, english_clause = lines[1].split(" Civil Code")
+        draw.text((70, 160), "Civil Code" + english_clause, font=ImageFont.load_default(size=30), fill=(20, 20, 20))
+        draw.text((600, 160), self._arabic_display(arabic_clause), font=self.arabic_font(30), fill=(20, 20, 20))
+        draw.text((70, 230), self._arabic_display(lines[2]), font=self.arabic_font(30), fill=(20, 20, 20))
+        self._write_ground_truth(out_path, "\n".join(lines))
+        return self._save_image_as_pdf(img, out_path)
 
     def build_scanned_table(self) -> Path:
         """Case 7: Scanned table (tests structure reconstruction)."""
@@ -195,11 +221,10 @@ class BenchmarkCorpusBuilder:
         draw = ImageDraw.Draw(img)
         draw.text((80, 80), "Schedule of Deliverables", fill=(0, 0, 0))
         # Draw table grid lines
-        draw.rectangle([80, 120, 820, 360], outline=(0, 0, 0), width=2)
+        draw.rectangle([80, 120, 820, 270], outline=(0, 0, 0), width=2)
         draw.line([80, 180, 820, 180], fill=(0, 0, 0), width=2)
-        draw.line([80, 270, 820, 270], fill=(0, 0, 0), width=1)
-        draw.line([300, 120, 300, 360], fill=(0, 0, 0), width=1)
-        draw.line([560, 120, 560, 360], fill=(0, 0, 0), width=1)
+        draw.line([300, 120, 300, 270], fill=(0, 0, 0), width=1)
+        draw.line([560, 120, 560, 270], fill=(0, 0, 0), width=1)
         # Header text
         draw.text((90, 140), "Milestone", fill=(0, 0, 0))
         draw.text((320, 140), "Due Date", fill=(0, 0, 0))
@@ -217,23 +242,46 @@ class BenchmarkCorpusBuilder:
         out_path = self.output_dir / "08_images_captions.pdf"
         c = canvas.Canvas(str(out_path), pagesize=A4)
         c.drawString(72, 750, "Patent Exhibit A")
-        # Draw a synthetic graphic diagram
-        c.rect(100, 500, 300, 200, fill=0, stroke=1)
-        c.line(100, 500, 400, 700)
-        c.drawString(100, 475, "Figure 1. Schematic diagram of the hydraulic brake assembly.")
+        for index, image in enumerate(self._figure_images()):
+            c.drawImage(ImageReader(image), 100 + index * 220, 530, width=190, height=150)
+        c.drawString(72, 490, REFERENCE_LINES["images_captions"][1])
+        c.drawString(72, 465, REFERENCE_LINES["images_captions"][2])
         c.showPage()
         c.save()
+        self._write_ground_truth(out_path, "\n".join(REFERENCE_LINES["images_captions"]))
         return out_path
 
+    @staticmethod
+    def _figure_images():
+        images = []
+        for color in ((160, 40, 30), (30, 100, 60)):
+            img = Image.new("RGB", (240, 180), (249, 246, 238))
+            draw = ImageDraw.Draw(img)
+            draw.rectangle((25, 25, 215, 155), outline=color, width=8)
+            draw.line((30, 150, 210, 30), fill=color, width=6)
+            images.append(img)
+        return images
+
+    @classmethod
+    def _figure_hashes(cls):
+        from .metrics import image_pixel_digest
+        return [image_pixel_digest(image) for image in cls._figure_images()]
+
     def build_rotated_page(self) -> Path:
-        """Case 9: Rotated page (tests orientation handling)."""
+        """Case 9: A nonempty scanned page with explicit PDF orientation."""
         out_path = self.output_dir / "09_rotated_page.pdf"
-        pdf = pdfium.PdfDocument.new()
-        p = pdf.new_page(842, 595)
-        p.set_rotation(90)
-        p.close()
-        pdf.save(str(out_path))
-        pdf.close()
+        img = Image.new("RGB", (1000, 700), (250, 250, 248))
+        draw = ImageDraw.Draw(img)
+        draw.text((80, 100), REFERENCE_LINES["rotated_page"][0], font=ImageFont.load_default(size=32), fill=(20, 20, 20))
+        self._save_image_as_pdf(img, out_path, pagesize=(842, 595))
+        rotated = out_path.with_suffix(".rotated.pdf")
+        with pdfium.PdfDocument(out_path) as pdf:
+            page = pdf[0]
+            page.set_rotation(90)
+            page.close()
+            pdf.save(str(rotated))
+        rotated.replace(out_path)
+        self._write_ground_truth(out_path, REFERENCE_LINES["rotated_page"][0])
         return out_path
 
     def build_skewed_page(self) -> Path:
@@ -267,10 +315,14 @@ class BenchmarkCorpusBuilder:
         c = canvas.Canvas(str(out_path), pagesize=A4)
         c.drawString(72, 750, "Page 1: Digital cover page with exact searchable text.")
         c.showPage()
-        # Page 2: digital with image
-        c.drawString(72, 750, "Page 2: Second section.")
+        # Page 2 has no native text; selective OCR must recognize its raster.
+        img = Image.new("RGB", (1000, 1400), (250, 250, 248))
+        draw = ImageDraw.Draw(img)
+        draw.text((70, 100), REFERENCE_LINES["mixed_digital_scan"][1], font=ImageFont.load_default(size=28), fill=(20, 20, 20))
+        c.drawImage(ImageReader(img), 0, 0, width=A4[0], height=A4[1])
         c.showPage()
         c.save()
+        self._write_ground_truth(out_path, "\n".join(REFERENCE_LINES["mixed_digital_scan"]))
         return out_path
 
     def build_page_numbering(self) -> Path:
@@ -334,7 +386,7 @@ CASE_EXPECTATIONS: Dict[str, Dict[str, object]] = {
     "born_digital_english": {"page_count": 1, "keywords": ["mutual assent", "consideration"]},
     "two_column_law": {"page_count": 1, "keywords": ["plaintiff", "jurisdiction"]},
     "legal_footnotes": {"page_count": 1, "keywords": ["promissory estoppel"]},
-    "mixed_bidi": {"page_count": 1, "keywords": ["Civil Code No 131"]},
+    "mixed_bidi": {"page_count": 1},
     "images_captions": {"page_count": 1, "keywords": ["Patent Exhibit A"], "has_images": True},
     "mixed_digital_scan": {"page_count": 2, "keywords": ["Digital cover page"]},
     "page_numbering": {"page_count": 2, "keywords": ["Preface"]},
@@ -347,4 +399,28 @@ CASE_EXPECTATIONS: Dict[str, Dict[str, object]] = {
     "low_res_scan": {"page_count": 1},
     "docx_sample": {"page_count": 1},
     "pptx_sample": {"page_count": 1},
+}
+
+
+# Independent authored references, never derived from the pipeline output.
+REFERENCE_LINES = {
+    "born_digital_english": ["Contract Law Restatement", "An agreement requires mutual assent and valid consideration to be legally binding.", "Performance may be excused only upon impossibility, impracticability, or frustration."],
+    "two_column_law": ["The plaintiff filed an action for breach.", "Notice was served under Rule 4.", "The defendant moved to dismiss.", "The court upheld jurisdiction."],
+    "legal_footnotes": ["The doctrine of promissory estoppel prevents injustice when a promise is relied upon.[1]", "[1] Restatement (Second) of Contracts § 90."],
+    "scanned_english": ["IN THE COURT OF APPEALS", "This appeal concerns the interpretation of indemnity clauses.", "We affirm the judgment of the district court."],
+    "arabic_scan": list(BenchmarkCorpusBuilder._ARABIC_PAGE_LINES),
+    "mixed_bidi": ["Bilingual Agreement", "البند 1: القانون المدني Civil Code No 131", "تم الاتفاق بين الطرفين على شروط العقد."],
+    "scanned_table": ["Schedule of Deliverables", "Milestone Due Date Status", "Initial Draft 30 Days Completed"],
+    "images_captions": ["Patent Exhibit A", "Figure 1. Hydraulic brake assembly.", "Figure 2. Valve assembly."],
+    "rotated_page": ["Rotated affidavit of execution"],
+    "skewed_page": ["Affidavit of Execution"],
+    "low_res_scan": ["Low Resolution Scan"],
+    "mixed_digital_scan": ["Page 1: Digital cover page with exact searchable text.", "Page 2: Scanned witness statement."],
+    "page_numbering": ["Preface", "iii", "Chapter 1: Principles", "1"],
+    "docx_sample": ["Legal Brief", "The doctrine of res judicata bars re-litigation of the claim.", "Party Role", "Petitioner Appellant"],
+    "pptx_sample": ["Corporate Governance Presentation", "Board duties and stakeholder responsibilities", "Opening slide remarks for the board."],
+}
+REFERENCE_TABLES = {
+    "scanned_table": [[["Milestone", "Due Date", "Status"], ["Initial Draft", "30 Days", "Completed"]]],
+    "docx_sample": [[["Party", "Role"], ["Petitioner", "Appellant"]]],
 }

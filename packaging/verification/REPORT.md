@@ -2,7 +2,7 @@
 
 Status: implementation changes prepared; release acceptance remains blocked.
 Branch: codex/faithful-conversion-windows. Source version: 0.5.0.
-No dependencies/model weights added; SBOM unchanged.
+No runtime dependencies/model weights added. SBOM now records the existing pinned Arabic dictionary.
 
 ## Demonstrated GUI failure
 
@@ -71,30 +71,39 @@ were preserved. Evidence:
 
 [Per-case metrics](benchmark-results.md) list all 16 synthetic cases separately.
 Execution PASS means completed conversion or safe rejection, not fidelity acceptance.
-Native English CER/WER is 0. English scan CER/WER is 0.031/0.333; Arabic scan
-0.938/1.000; scanned table 0.488/1.750. Arabic/table fidelity is not release quality.
-Skewed/low-resolution scan character metrics are zero for these synthetic samples.
-The mixed digital/scan image metric remains 0 and is open for investigation.
-Reading-order/table values are heuristics, not ground-truth accuracy. Missing
-CER/WER is N/A. VRAM and child-process peak RAM are unmeasured; process RAM is a
-lifetime parent-process peak. Speed was measured under concurrent test load and
-must not be treated as an isolated performance comparison.
+The updated corpus includes independent transcripts/order/cells/pixels and genuine
+mixed, rotated, Arabic and figure content. Table transcripts count semantic cells
+once and exclude Markdown formatting. Distinct embedded images retain exact pixels
+and aspect ratios. Baseline Arabic/mixed-script recognition remains below release
+quality. Reference scores and the older geometry heuristics are reported separately
+in [benchmark-results.json](benchmark-results.json) and the Markdown table. Old and
+new corpus metrics are not directly comparable. Missing metrics are N/A. Child RAM
+and VRAM are unmeasured; parent RAM is a lifetime peak. Concurrent test load prevents
+treating these timings as an isolated engine comparison.
 
 ## Full-book diagnostic run
 
 The source-engine run started on an intermediate revision and is **not final
-acceptance evidence**. Completed diagnostics: a1/a2 318/318 with all anchors,
-1,117 output pages at 20pt / 1,846 at 28pt; b1/b2 394/394 with all anchors,
-2,532 / 3,880 output pages. Both selected A3 exports have six pages and embedded
-paper dimensions were checked. Extraction/export timings: 1,272.94s and 232.22s;
-end-to-end including re-export: 1,282.11s and 338.02s. Parent lifetime peaks:
-310.5MB and 807.7MB respectively; child RAM/VRAM unmeasured.
+acceptance evidence**. All eight completed, with page-anchor fidelity 1.0 and
+embedded A4/A3 paper dimensions checked. Outputs remain local and ignored by Git.
 
-The longer all-eight source diagnostic continues separately and writes
-packaging/verification/books/results.json after each completed book. These private
-book outputs are ignored by Git. Unfinished books, final-revision all-eight GUI
-conversions, representative full-book visual acceptance, and physical 100%-scale
-printing are not claimed complete. Source documents were left unchanged.
+| Input | Source pages processed | Output pages 20pt / 28pt | Selected A3 output pages | Extraction + export seconds | Total including re-export seconds |
+|---|---:|---:|---:|---:|---:|
+| a1/a2 | 318/318 | 1117 / 1846 | 6 | 1272.94 | 1282.11 |
+| b1/b2 | 394/394 | 2532 / 3880 | 6 | 232.22 | 338.02 |
+| c1/c2 | 306/306 | 309 / 519 | 6 | 2236.03 | 2237.17 |
+| Phrasal Verbs Advanced | 195/195 | 1075 / 1806 | 5 | 42.31 | 63.33 |
+| Collocations Intermediate | 194/194 | 1233 / 1900 | 4 | 56.97 | 82.30 |
+| Phrasal Verbs Intermediate | 210/210 | 1174 / 1801 | 8 | 551.81 | 693.27 |
+| Vocabulary b2 | 280/280 | 1733 / 2712 | 12 | 432.91 | 470.67 |
+| Vocabulary c1/c2 | 303/303 | 1748 / 2829 | 5 | 119.47 | 178.84 |
+
+Parent lifetime peak was 310.5MB for the first book and 807.7MB subsequently.
+Child RAM/VRAM and book-level CER/WER/order/table/image ground truth are unmeasured.
+Large output-page counts and flagged blocks require layout review; completion is
+not proof of fidelity. Final-revision all-eight GUI conversions, representative
+full-book visual acceptance, and physical 100%-scale printing remain open.
+Source documents were left unchanged.
 
 ## Windows release blockers
 
