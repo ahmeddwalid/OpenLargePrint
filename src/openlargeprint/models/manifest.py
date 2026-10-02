@@ -6,6 +6,8 @@ from enum import Enum
 from typing import Dict, Optional
 from pydantic import BaseModel, Field
 
+ARABIC_DICTIONARY_SHA256 = "637c27c88512c22089bef927b34ada08f748dc132ac70facd68d8202384c2726"
+
 
 class ModelTask(str, Enum):
     DETECTION = "detection"

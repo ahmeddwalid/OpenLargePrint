@@ -133,7 +133,11 @@ class NativePdfImporter(BaseImporter):
         self.preserve_page_artwork = preserve_page_artwork
         self._router = OcrRouter()
         self.ocr_engine = ocr_engine or self._router.get_engine(routing_mode)
-        self.scanned_extractor = ScannedPageExtractor(self.ocr_engine, dpi=ocr_dpi, ocr_router=self._router)
+        self.scanned_extractor = ScannedPageExtractor(
+            self.ocr_engine, dpi=ocr_dpi,
+            ocr_router=self._router if ocr_engine is None else None,
+            routing_mode=routing_mode,
+        )
 
     def import_document(
         self,
@@ -416,7 +420,6 @@ class NativePdfImporter(BaseImporter):
                         image_blocks.append(self._preserve_page(page, page_num, workspace))
                     elif any(
                         b.text and b.warnings and (b.type != BlockType.TABLE or b.image_asset is None)
-                        and b.extraction_method in (ExtractionMethod.OCR_FAST, ExtractionMethod.OCR_MAXIMUM)
                         for b in extracted
                     ):
                         try:
@@ -473,7 +476,9 @@ class NativePdfImporter(BaseImporter):
         finally:
             pike_doc.close()
             pdf.close()
-            close_engine = getattr(self.ocr_engine, "close", None)
+            self._router.close()
+            close_engine = (getattr(self.ocr_engine, "close", None)
+                            if self.scanned_extractor.ocr_router is None else None)
             if callable(close_engine):
                 close_engine()
 
@@ -675,6 +680,11 @@ class NativePdfImporter(BaseImporter):
         text_blocks = self._form_semantic_blocks(
             ordered_lines, page_num, idx_after_tables, page_meta.height, page_meta.width
         )
+        for block in text_blocks + table_blocks:
+            if block.text and normalize_arabic_logical_order(block.text) != block.text:
+                block.warnings.append(
+                    "Arabic reading order may be uncertain. Source characters were preserved; compare with the retained original page."
+                )
 
         # 4. If table blocks were extracted, insert them in reading order without
         # disrupting multi-column ordering of text_blocks
@@ -911,7 +921,9 @@ class NativePdfImporter(BaseImporter):
         for key, _, chars, boxes in groups:
             if not boxes:
                 continue
-            text = normalize_arabic_logical_order("".join(chars))
+            # Native Unicode is authoritative. Lexical guesses about Arabic
+            # articles also reverse valid words such as 'مثلا' (PDF-002).
+            text = "".join(chars)
             if not text.strip():
                 continue
             rect = (min(r[0] for r in boxes) - cb_x0, min(r[1] for r in boxes) - cb_y0,

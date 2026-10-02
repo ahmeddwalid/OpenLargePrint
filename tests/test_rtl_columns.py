@@ -81,19 +81,23 @@ def test_rtl_multi_column_reading_order(tmp_path: Path):
 
     full_text = " ".join(b.text for b in text_blocks)
 
-    # In proper Arabic reading order:
-    # 1. Title
-    # 2. Right column articles (المادة ١, المادة ٢, المادة ٣)
-    # 3. Left column articles (المادة ٤, المادة ٥, المادة ٦)
-    # 4. Footer
-    pos_m1 = full_text.find("المادة ١") if "المادة ١" in full_text else full_text.find("المادة 1")
-    pos_m4 = full_text.find("المادة ٤") if "المادة ٤" in full_text else full_text.find("المادة 4")
-
-    # If numbers or text were normalized, check relative positions of key phrases:
-    # Right column phrase: "لا مساغ للاجتهاد"
-    # Left column phrase: "القديم يترك"
-    pos_right_col = full_text.find("لا مساغ للاجتهاد")
-    pos_left_col = full_text.find("القديم يترك")
+    # This fixture deliberately embeds display-order presentation forms, not
+    # logical Unicode. Native import must preserve those source characters;
+    # guessing words to reverse also corrupts valid logical Arabic (PDF-002).
+    # PDFium can normalize presentation glyph mappings itself. Its extracted
+    # source stream is the native-character oracle, independent of our grouping.
+    with pdfium.PdfDocument(pdf_path) as source:
+        page = source[0]
+        text_page = page.get_textpage()
+        try:
+            source_lines = text_page.get_text_range().splitlines()
+            right_source = next(line for line in source_lines if "للاجتهاد" in line)
+            left_source = next(line for line in source_lines if "القديم" in line)
+        finally:
+            text_page.close()
+            page.close()
+    pos_right_col = full_text.find(right_source)
+    pos_left_col = full_text.find(left_source)
 
     assert pos_right_col != -1, "Right column content must be present"
     assert pos_left_col != -1, "Left column content must be present"
@@ -101,3 +105,5 @@ def test_rtl_multi_column_reading_order(tmp_path: Path):
         f"Right column (Column 1) must be read BEFORE Left column (Column 2) in Arabic RTL documents! "
         f"pos_right={pos_right_col}, pos_left={pos_left_col}"
     )
+    assert any("reading order" in warning for block in text_blocks for warning in block.warnings)
+    assert any(block.image_asset for block in doc_ir.blocks), "Ambiguous native encoding retains the original page"

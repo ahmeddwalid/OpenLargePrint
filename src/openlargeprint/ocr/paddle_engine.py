@@ -62,6 +62,9 @@ class PaddleRapidOcrEngine:
                     artifact = PINNED_MODELS.models.get("arabic_PP-OCRv3_rec")
                     if artifact and ModelManager.compute_sha256(rec_path) != artifact.sha256:
                         raise ModelIntegrityError("Arabic recognition model failed integrity verification.")
+                    from openlargeprint.models.manifest import ARABIC_DICTIONARY_SHA256
+                    if not self.rec_keys_path or ModelManager.compute_sha256(self.rec_keys_path) != ARABIC_DICTIONARY_SHA256:
+                        raise ModelIntegrityError("Arabic recognition dictionary failed integrity verification.")
                 model_paths["rec_model_path"] = str(rec_path)
                 if self.rec_keys_path:
                     model_paths["rec_keys_path"] = str(self.rec_keys_path)
@@ -146,6 +149,9 @@ class PaddleRapidOcrEngine:
 
         lines: list[OcrDetectedLine] = []
         warnings: list[str] = []
+        supported = self.capabilities().supported_languages
+        if language_hints and not any(language in supported for language in language_hints):
+            warnings.append("The requested language is not available in this recognition pack. Review this page against the original.")
 
         if raw_result:
             for item in raw_result:

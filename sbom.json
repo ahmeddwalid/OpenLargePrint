@@ -236,6 +236,19 @@
       "parses_untrusted_content": true,
       "purpose": "Optional on-device Arabic text recognition model (PaddleOCR v3 ONNX)",
       "distribution": "Optional download; not bundled in base installer (OCR-003)"
+    },
+    {
+      "model_key": "arabic_PP-OCRv3_dictionary",
+      "version": "v3.0.0",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "637c27c88512c22089bef927b34ada08f748dc132ac70facd68d8202384c2726",
+      "download_source": "https://github.com/monkt/paddleocr-onnx",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Pinned decoder vocabulary for the optional Arabic recognition pack",
+      "distribution": "Bundled 405-byte dictionary; checked again in the recognition worker"
     }
   ],
   "excluded_candidates": [

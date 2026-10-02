@@ -23,6 +23,7 @@ from openlargeprint.ir.models import (
     TextDirection,
 )
 from openlargeprint.ocr.base import CancellationToken, DocumentOcrEngine
+from openlargeprint.ocr.router import RoutingMode
 from openlargeprint.importers.base import CancelCheck
 from openlargeprint.security.isolation import log_safe_info
 from openlargeprint.text.direction import detect_language, detect_text_direction
@@ -51,10 +52,12 @@ class ScannedPageExtractor:
         ocr_engine: DocumentOcrEngine,
         dpi: float = 300.0,
         ocr_router: Optional[Any] = None,
+        routing_mode: RoutingMode = RoutingMode.AUTOMATIC,
     ):
         self.ocr_engine = ocr_engine
         self.dpi = dpi
         self.ocr_router = ocr_router
+        self.routing_mode = routing_mode
 
     def extract_page(
         self,
@@ -85,6 +88,10 @@ class ScannedPageExtractor:
                     )
             # 2. Run OCR recognition (OCR-001, OCR-002, OCR-006)
             engine = self.ocr_engine
+            if self.ocr_router is not None:
+                engine = self.ocr_router.get_engine(
+                    self.routing_mode, language=language_hints[0] if language_hints else "en"
+                )
             import inspect
             sig = inspect.signature(engine.analyze_page)
             analyze_kwargs = {

@@ -113,6 +113,21 @@ These are application-level checks (`OCR-005`), not something delegated blindly 
 
 ## 4. OCR engine abstraction and routing (`OCR-001..007`)
 
+Scanned extraction selects the router's engine using the page language hints and
+selected mode; explicitly injected engines retain control for standalone callers.
+All routed workers close at the importer boundary. The optional Arabic recognizer
+uses a bundled, pinned dictionary, checked again in the recognition worker.
+Unsupported language hints produce a visible review warning, rather than an
+implicit claim that the selected pack supports them. Model preparation uses
+bounded downloads and verified staging followed by atomic replacement; conversion
+never invokes the downloader (`SEC-003/004/006/008/009`).
+
+Native extraction preserves PDFium's Unicode character stream. Word-based Arabic
+reversal guesses are not applied to source content. Potential display-order
+encoding is flagged for review and the original page is retained. Restoring
+logical order without authoritative source evidence remains open (`PDF-002`,
+`LANG-002`); this limitation must not be hidden by lexical corrections.
+
 ```python
 class DocumentOcrEngine(Protocol):
     def capabilities(self) -> EngineCapabilities:
@@ -289,9 +304,9 @@ Track separately: character error rate, word error rate, reading-order correctne
 
 ### 11.1 Measurement limitations
 
-CER and WER are calculated only when a reference transcript exists; otherwise they are null/N/A. WER uses token-level Levenshtein distance and may exceed 1 when insertions dominate. Reported reading-order/table scores remain plausibility heuristics, not ground-truth correctness. RAM is the process lifetime peak, excludes child processes, and is not an isolated per-case measurement. VRAM is unmeasured. A completed conversion is reported separately from fidelity acceptance.
+CER and WER are calculated only when a reference transcript exists; otherwise they are null/N/A. WER uses token-level Levenshtein distance and may exceed 1 when insertions dominate. Separate reference measurements compare authored reading-order units, table cells, and original image pixels including dimensions. Missing/misrecognized reading units reduce that reference score as well as inversions. Unexpected reconstructed tables are structural mismatches. The existing order/table plausibility heuristics remain separate. RAM is the process lifetime peak, excludes child processes, and is not an isolated per-case measurement. VRAM is unmeasured. A completed conversion is reported separately from fidelity acceptance.
 
-The generated corpus is a smoke-test corpus, not release-quality coverage: the mixed-bidi, mixed-digital/scan, Arabic font rendering, rotated-content, and image-reference fixtures need stronger real-content ground truth. Real rights-safe books, annotated structures, long-document stress tests, and target-machine measurements remain release blockers.
+The generated corpus is a smoke-test corpus, not release-quality coverage. It now has actual mixed-script and native/scanned content, nonblank rotated scans, distinct embedded originals, nonoverlapping columns, fitting Arabic text, and independent per-case transcripts/reference manifests. Real rights-safe books, expert-annotated structures, robust Arabic recognition, long-document final-GUI stress tests, and target-machine measurements remain release blockers.
 
 ## 12. Licensing enforcement as code (`LIC-001..002`)
 
