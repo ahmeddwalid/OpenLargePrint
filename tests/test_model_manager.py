@@ -155,3 +155,59 @@ def test_download_model_verifies_hash(tmp_path: Path):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def _download_manager(tmp_path):
+    payload = b"verified-model"
+    artifact = ModelArtifact(
+        key="bounded", name="Bounded model", task=ModelTask.RECOGNITION,
+        framework=ModelFramework.ONNX, version="1", sha256=hashlib.sha256(payload).hexdigest(),
+        file_size_bytes=len(payload), code_license="Apache-2.0", weight_license="Apache-2.0",
+        download_url="https://example.invalid/model.onnx",
+    )
+    return ModelManager(ModelCatalog(models={"bounded": artifact}), tmp_path), payload
+
+
+def test_failed_model_download_removes_temporary_file(tmp_path, monkeypatch):
+    import urllib.request
+    mgr, _ = _download_manager(tmp_path)
+    def fail(*args, **kwargs):
+        raise OSError("Connection failed")
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    with pytest.raises(OSError):
+        mgr.download_model("bounded")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_oversized_model_response_stops_at_pinned_limit(tmp_path, monkeypatch):
+    import io
+    import urllib.request
+    mgr, payload = _download_manager(tmp_path)
+    response = io.BytesIO(payload + b"x" * 1000000)
+    consumed = []
+    original_read = response.read
+    def read(size=-1):
+        data = original_read(size)
+        consumed.append(len(data))
+        return data
+    response.read = read
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: response)
+    with pytest.raises(ModelIntegrityError):
+        mgr.download_model("bounded")
+    assert sum(consumed) <= len(payload) + 1
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_model_replace_preserves_previous_verified_copy(tmp_path, monkeypatch):
+    import os
+    mgr, payload = _download_manager(tmp_path / "cache")
+    source = tmp_path / "source.onnx"
+    source.write_bytes(payload)
+    dest = mgr.install_model("bounded", source)
+    def fail(*args, **kwargs):
+        raise OSError("Replacement failed")
+    monkeypatch.setattr(os, "replace", fail)
+    with pytest.raises(OSError):
+        mgr.install_model("bounded", source)
+    assert dest.read_bytes() == payload
+    assert list(mgr.cache_dir.iterdir()) == [dest]

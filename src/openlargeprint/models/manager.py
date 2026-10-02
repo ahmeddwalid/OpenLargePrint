@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-import shutil
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -106,17 +106,43 @@ class ModelManager:
         if not src.is_file():
             raise FileNotFoundError(f"Source file not found: {src}")
 
-        # Compute and verify hash before committing to cache
-        actual_hash = self.compute_sha256(src)
-        if not hmac.compare_digest(actual_hash.lower(), artifact.sha256.lower()):
-            raise ModelIntegrityError(
-                f"Cannot install model '{key}': hash mismatch. Expected {artifact.sha256}, got {actual_hash}."
-            )
-
         dest = self.cache_dir / f"{key}.onnx"
-        shutil.copy2(src, dest)
+        # Verify the staged bytes, then atomically replace. Interrupted or
+        # concurrent setup must never expose a partial model to conversion.
+        staged = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=self.cache_dir, delete=False) as tmp:
+                staged = Path(tmp.name)
+                with src.open("rb") as source:
+                    self._copy_bounded(source, tmp, artifact.file_size_bytes)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            actual_hash = self.compute_sha256(staged)
+            if not hmac.compare_digest(actual_hash.lower(), artifact.sha256.lower()):
+                raise ModelIntegrityError(f"Cannot install model '{key}': hash mismatch.")
+            os.replace(staged, dest)
+        finally:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
         log_safe_info(f"Installed model '{key}' successfully into {dest}")
         return dest
+
+    @staticmethod
+    def _copy_bounded(source, target, expected_bytes: int) -> None:
+        """Reject oversized/truncated artifacts using the pinned byte count."""
+        if expected_bytes <= 0:
+            raise ModelIntegrityError("Model manifest has no valid size bound.")
+        count = 0
+        while True:
+            chunk = source.read(min(65536, expected_bytes - count + 1))
+            if not chunk:
+                break
+            count += len(chunk)
+            if count > expected_bytes:
+                raise ModelIntegrityError("Model artifact exceeds its pinned size.")
+            target.write(chunk)
+        if count != expected_bytes:
+            raise ModelIntegrityError("Model artifact does not match its pinned size.")
 
     def download_model(self, key: str, force: bool = False) -> Path:
         """Download, hash-verify, and install a pinned model (OCR-003, SEC-006)."""
@@ -128,17 +154,18 @@ class ModelManager:
         dest = self.cache_dir / f"{key}.onnx"
         if dest.exists() and not force:
             return self.get_model_path(key)
-        import tempfile
         import urllib.request
 
-        with tempfile.NamedTemporaryFile(dir=self.cache_dir, delete=False) as tmp:
-            with urllib.request.urlopen(artifact.download_url, timeout=120) as resp:
-                shutil.copyfileobj(resp, tmp)
-            tmp_path = Path(tmp.name)
+        tmp_path = None
         try:
+            with tempfile.NamedTemporaryFile(dir=self.cache_dir, delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                with urllib.request.urlopen(artifact.download_url, timeout=120) as resp:
+                    self._copy_bounded(resp, tmp, artifact.file_size_bytes)
             self.install_model(key, tmp_path)
         finally:
-            tmp_path.unlink(missing_ok=True)
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
         return dest
 
     def is_offline_ready(self, keys: Optional[List[str]] = None) -> bool:
