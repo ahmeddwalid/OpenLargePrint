@@ -1,0 +1,56 @@
+{
+  "keyboard": true,
+  "errors": [],
+  "cases": [
+    {
+      "name": "normal",
+      "width": 512,
+      "height": 48,
+      "fontSize": "18px",
+      "focusOutline": "solid",
+      "focusWidth": "3px",
+      "selectedTextFits": true,
+      "overflow": false
+    },
+    {
+      "name": "200-percent",
+      "width": 902,
+      "height": 71,
+      "fontSize": "36px",
+      "focusOutline": "solid",
+      "focusWidth": "3px",
+      "selectedTextFits": true,
+      "overflow": false
+    },
+    {
+      "name": "narrow",
+      "width": 542,
+      "height": 71,
+      "fontSize": "36px",
+      "focusOutline": "solid",
+      "focusWidth": "3px",
+      "selectedTextFits": true,
+      "overflow": false
+    },
+    {
+      "name": "high-contrast",
+      "width": 542,
+      "height": 71,
+      "fontSize": "36px",
+      "focusOutline": "solid",
+      "focusWidth": "3px",
+      "selectedTextFits": true,
+      "overflow": false
+    },
+    {
+      "name": "rtl",
+      "width": 542,
+      "height": 71,
+      "fontSize": "36px",
+      "focusOutline": "solid",
+      "focusWidth": "3px",
+      "selectedTextFits": true,
+      "overflow": false
+    }
+  ]
+}

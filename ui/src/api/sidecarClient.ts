@@ -45,6 +45,18 @@ function getTauri() {
 
 export class SidecarClient {
 
+  public async hasEnglishAccuracyPack(): Promise<boolean> {
+    const t = getTauri();
+    if (!t?.invoke) return false;
+    try {
+      const health = await t.invoke('health_check');
+      return health?.status === 'ready' && health?.ocr_available === true &&
+        Array.isArray(health.accuracy_languages) && health.accuracy_languages.includes('en');
+    } catch {
+      return false;
+    }
+  }
+
   public async openFileDialog(): Promise<{ path: string; name: string; size: number } | null> {
     const t = getTauri();
     if (t?.invoke) {

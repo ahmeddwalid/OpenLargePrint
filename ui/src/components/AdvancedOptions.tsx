@@ -10,6 +10,8 @@ import {
 
 interface AdvancedOptionsProps {
   routingMode: RoutingMode;
+  accuracyAvailable?: boolean;
+  onOpen?: () => void;
   onRoutingModeChange: (mode: RoutingMode) => void;
   pageRange: string;
   onPageRangeChange: (range: string) => void;
@@ -23,6 +25,8 @@ interface AdvancedOptionsProps {
 
 export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
   routingMode,
+  accuracyAvailable = false,
+  onOpen,
   onRoutingModeChange,
   pageRange,
   onPageRangeChange,
@@ -61,7 +65,10 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
       <button
         type="button"
         className="disclosure-toggle"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (!isOpen) onOpen?.();
+          setIsOpen(!isOpen);
+        }}
         aria-expanded={isOpen}
         aria-controls="advanced-options-content"
       >
@@ -104,8 +111,9 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
               value={routingMode}
               onChange={(e) => onRoutingModeChange(e.target.value as RoutingMode)}
               style={{
+                minHeight: '48px',
                 width: '100%',
-                maxWidth: '320px',
+                maxWidth: '32rem',
                 padding: '8px 12px',
                 backgroundColor: 'var(--bg-primary)',
                 color: 'var(--text-primary)',
@@ -113,11 +121,16 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
                 borderRadius: 'var(--radius-sm)',
               }}
             >
-              <option value="max_accuracy" disabled>Higher accuracy pack unavailable</option>
+              <option value="max_accuracy" disabled={!accuracyAvailable}>
+                {accuracyAvailable ? 'English accuracy pack' : 'Higher accuracy pack unavailable'}
+              </option>
               <option value="auto">Automatic (default)</option>
-              <option value="native_only">Native text only (preserves scans for review)</option>
+              <option value="native_only">Native text only</option>
               <option value="ocr_scanned_only">Recognize scanned pages</option>
             </select>
+            {routingMode === 'native_only' && (
+              <p style={{ marginTop: '6px' }}>Scans are kept as original page images for review.</p>
+            )}
           </div>
 
           {/* Laser Printer Monochrome Export */}

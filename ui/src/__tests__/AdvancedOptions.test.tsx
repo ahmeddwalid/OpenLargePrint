@@ -31,6 +31,24 @@ async function openAdvancedOptions() {
   await userEvent.click(screen.getByRole('button', { name: /more options|hide advanced/i }));
 }
 
+describe('verified optional recognition pack', () => {
+  it('keeps the option disabled until verified health reports availability', async () => {
+    renderOptions();
+    await openAdvancedOptions();
+    expect(screen.getByRole('option', { name: /higher accuracy pack unavailable/i })).toBeDisabled();
+  });
+
+  it('allows keyboard selection for an installed verified English pack', async () => {
+    const props = renderOptions({ accuracyAvailable: true });
+    await openAdvancedOptions();
+    const select = screen.getByRole('combobox', { name: /recognition mode/i });
+    expect(select).toHaveStyle({ minHeight: '48px' });
+    expect(screen.getByRole('option', { name: /english accuracy pack/i })).not.toBeDisabled();
+    await userEvent.selectOptions(select, 'max_accuracy');
+    expect(props.onRoutingModeChange).toHaveBeenCalledWith('max_accuracy');
+  });
+});
+
 describe('AdvancedOptions page artwork toggle', () => {
   it('starts off and reports the change (UI-001, IMG-001)', async () => {
     const props = renderOptions();

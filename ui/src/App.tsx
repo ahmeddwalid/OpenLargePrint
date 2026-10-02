@@ -78,6 +78,7 @@ export const App: React.FC = () => {
   const [customOutputPath, setCustomOutputPath] = useState<string | null>(null);
   const [systemPaths, setSystemPaths] = useState<{ downloads: string; desktop: string; documents: string } | null>(null);
   const [routingMode, setRoutingMode] = useState<RoutingMode>('auto');
+  const [accuracyAvailable, setAccuracyAvailable] = useState(false);
   const [pageRange, setPageRange] = useState<string>('');
   const [monochrome, setMonochrome] = useState<boolean>(false);
   const [preservePageArtwork, setPreservePageArtwork] = useState<boolean>(false);
@@ -101,6 +102,11 @@ export const App: React.FC = () => {
   // Load recent documents on startup
   useEffect(() => {
     setRecentDocs(loadRecentDocs());
+    let active = true;
+    sidecar.hasEnglishAccuracyPack().then(available => {
+      if (active) setAccuracyAvailable(available);
+    });
+    return () => { active = false; };
   }, []);
 
   // Synchronize theme to document element and persist preference
@@ -582,6 +588,8 @@ export const App: React.FC = () => {
             {/* Collapsible Disclosure for Advanced Settings (UI-001) */}
             <AdvancedOptions
               routingMode={routingMode}
+              accuracyAvailable={accuracyAvailable}
+              onOpen={() => { void sidecar.hasEnglishAccuracyPack().then(setAccuracyAvailable); }}
               onRoutingModeChange={setRoutingMode}
               pageRange={pageRange}
               onPageRangeChange={setPageRange}
