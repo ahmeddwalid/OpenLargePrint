@@ -3,12 +3,16 @@ name: Release
 # A version tag (v0.6.0) builds Windows and Linux packages on their own runners,
 # tests each package by converting real documents with the packaged engine, and
 # only then publishes one GitHub Release with every file and SHA256SUMS.txt.
-# Running the workflow by hand builds and tests the packages without publishing.
+# Release branches and manual runs build and test the packages without publishing.
 
 on:
   push:
     tags:
       - 'v*'
+    # Release branches build and test every package too, so a tag is only
+    # pushed once the packages are known to work.
+    branches:
+      - 'release/**'
   workflow_dispatch:
 
 permissions:
