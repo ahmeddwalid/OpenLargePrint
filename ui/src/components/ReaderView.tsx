@@ -15,10 +15,11 @@ interface ReaderViewProps {
 
 export type ReaderFont = 'system' | 'hyperlegible' | 'lexend' | 'mono';
 
+// Atkinson Hyperlegible is the font of every exported file, so the reader matches them.
 const FONT_FAMILIES: Record<ReaderFont, string> = {
+  hyperlegible: '"Atkinson Hyperlegible", "Noto Sans Arabic", sans-serif',
   system: 'var(--font-family)',
-  hyperlegible: 'var(--font-family-arabic)',
-  lexend: 'Georgia, serif',
+  lexend: 'Georgia, "Noto Sans Arabic", serif',
   mono: 'Consolas, "Courier New", monospace',
 };
 
@@ -150,7 +151,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [fontSize, setFontSize] = useState<number>(initialSize);
   const [lineHeight, setLineHeight] = useState<number>(1.6);
   const [readingWidth, setReadingWidth] = useState<number>(85);
-  const [readerFont, setReaderFont] = useState<ReaderFont>('system');
+  const [readerFont, setReaderFont] = useState<ReaderFont>('hyperlegible');
   const [showRuler, setShowRuler] = useState<boolean>(false);
   const [rulerTop, setRulerTop] = useState<number>(180);
   const [selectedPageFilter, setSelectedPageFilter] = useState<number | 'all'>('all');
@@ -584,10 +585,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               borderRadius: 'var(--radius-sm)',
             }}
           >
+            <option value="hyperlegible">Atkinson Hyperlegible</option>
             <option value="system">Source Sans 3</option>
-            <option value="hyperlegible">Noto Sans Arabic</option>
-            <option value="lexend">Georgia</option>
-            <option value="mono">Monospace</option>
+            <option value="lexend">{t('reader.font_serif')}</option>
+            <option value="mono">{t('reader.font_mono')}</option>
           </select>
         </div>
 
@@ -619,11 +620,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         {/* Reading Width Selection */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="reading-width-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
-            Width:
+            {t('reader.width_label')}
           </label>
           <select
             id="reading-width-select"
-            aria-label="Reading width"
+            aria-label={t('reader.width_aria')}
             value={readingWidth}
             onChange={(e) => setReadingWidth(parseInt(e.target.value, 10))}
             style={{
@@ -635,17 +636,17 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            <option value="55">Narrow (55 ch)</option>
-            <option value="70">Comfortable (70 ch)</option>
-            <option value="85">Wide (85 ch)</option>
-            <option value="110">Full width (110 ch)</option>
+            <option value="55">{t('reader.width_narrow')}</option>
+            <option value="70">{t('reader.width_medium')}</option>
+            <option value="85">{t('reader.width_wide')}</option>
+            <option value="110">{t('reader.width_full')}</option>
           </select>
         </div>
 
         {/* Theme Selection */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="theme-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
-            Theme:
+            {t('theme.label')}
           </label>
           <select
             id="theme-select"
@@ -660,10 +661,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            <option value="light">Light</option>
-            <option value="auto">Auto (system)</option>
-            <option value="sepia">Sepia</option>
-            <option value="dark">Dark</option>
+            <option value="sepia">{t('theme.sepia')}</option>
+            <option value="light">{t('theme.light')}</option>
+            <option value="dark">{t('theme.dark')}</option>
+            <option value="auto">{t('theme.auto')}</option>
           </select>
         </div>
 

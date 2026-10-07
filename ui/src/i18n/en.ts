@@ -185,6 +185,15 @@ const en: Record<string, string> = {
   'reader.in_picture': 'In the picture:',
   'reader.page_marker': 'Original page {page}',
   'reader.page_marker_printed': 'Original page {page} (printed {printed})',
+  'reader.font_serif': 'Georgia (serif)',
+  'reader.width_label': 'Width',
+  'reader.width_aria': 'Reading width',
+  'reader.width_narrow': 'Narrow',
+  'reader.width_medium': 'Medium',
+  'reader.width_wide': 'Wide',
+  'reader.width_full': 'Full width',
+  'review.retry_title': 'Page recognised again',
+  'review.retry_help': 'Compare this result with the original. Copy any corrections into the text above before accepting.',
 };
 
 export default en;

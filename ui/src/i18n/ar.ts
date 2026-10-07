@@ -185,6 +185,15 @@ const ar: Record<string, string> = {
   'reader.in_picture': 'في الصورة:',
   'reader.page_marker': 'الصفحة الأصلية {page}',
   'reader.page_marker_printed': 'الصفحة الأصلية {page} (المطبوعة {printed})',
+  'reader.font_serif': 'Georgia (بخطوط مذيّلة)',
+  'reader.width_label': 'العرض',
+  'reader.width_aria': 'عرض سطر القراءة',
+  'reader.width_narrow': 'ضيق',
+  'reader.width_medium': 'متوسط',
+  'reader.width_wide': 'عريض',
+  'reader.width_full': 'كامل العرض',
+  'review.retry_title': 'أُعيد التعرف على الصفحة',
+  'review.retry_help': 'قارن هذه النتيجة بالأصل. انسخ أي تصحيحات إلى النص أعلاه قبل القبول.',
 };
 
 export default ar;

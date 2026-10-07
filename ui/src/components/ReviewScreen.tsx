@@ -211,8 +211,8 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
 
       {retryResult && (
         <section className="review-pane" aria-live="polite">
-          <h3>Repeated recognition result</h3>
-          <p>Compare this page result with the original. Copy any corrections into the section above before accepting.</p>
+          <h3>{t('review.retry_title')}</h3>
+          <p>{t('review.retry_help')}</p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{retryResult}</p>
         </section>
       )}
