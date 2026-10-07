@@ -12,6 +12,11 @@ from build_sidecar import get_target_triple
 PACKAGED_CONVERSION_TIMEOUT_SECONDS = 180
 
 
+def _fail(reason: str) -> bool:
+    print(f"Packaged conversion check failed: {reason}")
+    return False
+
+
 def verify_conversion(sidecar_bin: Path) -> bool:
     import docx
     import pypdfium2 as pdfium
@@ -51,17 +56,18 @@ def verify_conversion(sidecar_bin: Path) -> bool:
                 events = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
                 success = next((event for event in events if event.get("type") == "success"), None)
                 if success is None or not output.is_file():
-                    return False
+                    errors = [e.get("message", "") for e in events if e.get("type") == "error"]
+                    return _fail(f"{paper} {output_format}: no output ({'; '.join(errors)[:300]})")
                 if output_format == "pdf":
                     with pdfium.PdfDocument(output) as document:
                         if not len(document):
-                            return False
+                            return _fail(f"{paper} pdf: no pages")
                         texts = []
                         for index in range(len(document)):
                             page = document[index]
                             try:
                                 if any(abs(actual - expected) > 1 for actual, expected in zip(page.get_size(), dimensions)):
-                                    return False
+                                    return _fail(f"{paper} pdf: page size {page.get_size()}")
                                 textpage = page.get_textpage()
                                 try:
                                     texts.append(textpage.get_text_range())
@@ -78,12 +84,14 @@ def verify_conversion(sidecar_bin: Path) -> bool:
                     if any(abs(actual - expected) > 1 for actual, expected in zip(
                         (section.page_width.pt, section.page_height.pt), dimensions
                     )):
-                        return False
+                        return _fail(f"{paper} docx: page size")
                     text = " ".join(paragraph.text for paragraph in document.paragraphs)
-                if "Judicial Review" not in text or "Native acceptance page 3" not in text:
-                    return False
+                if "Judicial Review" not in text:
+                    return _fail(f"{paper} {output_format}: scanned page text missing (got: {text[:300]!r})")
+                if "Native acceptance page 3" not in text:
+                    return _fail(f"{paper} {output_format}: native page text missing")
                 if ("Native acceptance page 1" in text) != (paper == "A4"):
-                    return False
+                    return _fail(f"{paper} {output_format}: page selection not honoured")
     return True
 
 

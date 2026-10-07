@@ -180,7 +180,9 @@ impl AppSession {
             self.pending_health.lock().unwrap().take();
             return Err(error);
         }
-        let result = tokio::time::timeout(Duration::from_secs(15), rx).await;
+        // The first answer waits for the engine to unpack and the recogniser to load;
+        // on a slow disk, or while antivirus scans a fresh install, that takes a while.
+        let result = tokio::time::timeout(Duration::from_secs(90), rx).await;
         self.pending_health.lock().unwrap().take();
         match result {
             Ok(Ok(value)) => {
