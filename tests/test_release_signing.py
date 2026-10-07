@@ -53,11 +53,20 @@ def test_signature_verifier_exists_and_fails_on_missing_signature():
     assert "'Valid'" in text
 
 
-def test_public_releases_require_signing_before_build():
-    text = (REPO_ROOT / ".github/workflows/release.yml").read_text()
-    assert "OLP_REQUIRE_SIGNING: '1'" in text
-    assert "if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}" not in text
-    assert "-RequirePublicTrust" in text
+def test_release_signs_when_an_identity_exists_and_otherwise_builds_unsigned():
+    """Releases ship unsigned until a trusted certificate exists; signing stays wired in (PKG-001).
+
+    The workflow passes the optional thumbprint through, never fails for its
+    absence, and the packaging script still refuses unsigned output when
+    OLP_REQUIRE_SIGNING=1 and verifies public trust whenever it signs.
+    """
+    workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text()
+    assert "OLP_CODESIGN_THUMBPRINT: ${{ vars.OLP_CODESIGN_THUMBPRINT }}" in workflow
+    assert "OLP_REQUIRE_SIGNING: '1'" not in workflow
+    script = PACKAGING_SCRIPT.read_text(encoding="utf-8")
+    assert 'if ($env:OLP_CODESIGN_THUMBPRINT) {' in script
+    assert 'elseif ($env:OLP_REQUIRE_SIGNING -eq "1")' in script
+    assert "-RequirePublicTrust:$PublicRelease" in script
 
 
 def test_verification_rejects_development_trust_and_missing_timestamp():

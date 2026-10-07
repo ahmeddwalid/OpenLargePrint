@@ -18,10 +18,12 @@ export interface UpdateInfo {
   expectedSha256?: string;
 }
 
-export const CURRENT_VERSION = '0.5.0';
+export const CURRENT_VERSION = '0.6.0';
 const REPO_OWNER = 'ahmeddwalid';
 const REPO_NAME = 'OpenLargePrint';
 const RELEASES_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
+
+const INSTALLER_ASSET = 'OpenLargePrint-Setup-x64.exe';
 
 const AUTO_UPDATE_KEY = 'openlargeprint_auto_update';
 const DISMISSED_VERSION_KEY = 'openlargeprint_dismissed_update_version';
@@ -138,10 +140,12 @@ export async function checkForUpdates(forceCheck: boolean = false): Promise<Upda
     let expectedSha256: string | undefined;
 
     if (/Win/i.test(navigator.platform) && Array.isArray(data.assets)) {
-      const exeAsset = data.assets.find(
-        (a: { name?: string; browser_download_url?: string }) =>
-          typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
-      );
+      type Asset = { name?: string; browser_download_url?: string; digest?: string };
+      const assets = data.assets as Asset[];
+      // The release carries one installer under a stable name; any other .exe is a fallback.
+      const exeAsset =
+        assets.find((a) => a.name === INSTALLER_ASSET) ||
+        assets.find((a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe'));
       if (exeAsset) {
         downloadUrl = exeAsset.browser_download_url;
         assetName = exeAsset.name;

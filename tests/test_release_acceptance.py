@@ -30,7 +30,11 @@ def test_gate_rejects_missing_or_failed_acceptance(tmp_path):
         module.verify_acceptance(record, installer, portable, "a" * 40)
 
 
-def test_publication_waits_for_artifact_bound_acceptance():
+def test_publication_waits_for_tested_packages_and_checksums():
+    """Nothing is published unless both platforms built, converted documents, and were checksummed."""
     workflow = (Path(__file__).parents[1] / ".github/workflows/release.yml").read_text()
-    assert "environment: windows-sac-accepted" in workflow
-    assert workflow.index("release_acceptance.py") < workflow.index("softprops/action-gh-release")
+    assert "needs: [version-check, build-windows, build-linux]" in workflow
+    assert workflow.count("packaging/smoke_convert.py") >= 3  # installed, portable, AppImage
+    assert workflow.index("sha256sum OpenLargePrint* > SHA256SUMS.txt") < workflow.index("softprops/action-gh-release")
+    assert "fail_on_unmatched_files: true" in workflow
+    assert "permissions:\n  contents: read" in workflow  # write access only in the publish job

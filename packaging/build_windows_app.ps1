@@ -17,10 +17,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+# Signing is optional: with OLP_CODESIGN_THUMBPRINT set, every executable is signed
+# before bundling (publicly trusted unless -DevelopmentUnsigned); without it the
+# build is unsigned and Windows SmartScreen asks the user to confirm (see README).
+# Set OLP_REQUIRE_SIGNING=1 to refuse unsigned output.
 $PublicRelease = -not $DevelopmentUnsigned
-if ($PublicRelease -and -not $env:OLP_CODESIGN_THUMBPRINT) {
-    throw "Public Windows packaging requires a trusted signing identity. Use -DevelopmentUnsigned only for local testing; that installer is not Smart App Control accepted."
-}
 if ($env:OLP_CODESIGN_THUMBPRINT -and $env:OLP_CODESIGN_THUMBPRINT -notmatch '^[a-fA-F0-9]{40}$') {
     throw "OLP_CODESIGN_THUMBPRINT must be a 40-character certificate thumbprint."
 }
@@ -143,7 +144,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[6/6] Building Windows desktop shell (unbundled)..." -ForegroundColor Green
 Push-Location "$RepoRoot\src-tauri"
 try {
-    npx -y @tauri-apps/cli@2 build --no-bundle --config $BuildConfigPath
+    npx -y @tauri-apps/cli@2.11.5 build --no-bundle --config $BuildConfigPath
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Tauri build failed."
     }
@@ -167,7 +168,7 @@ if ($env:OLP_CODESIGN_THUMBPRINT) {
 } elseif ($env:OLP_REQUIRE_SIGNING -eq "1") {
     Write-Error "OLP_REQUIRE_SIGNING=1 but OLP_CODESIGN_THUMBPRINT is not set; refusing to build artifacts that Smart App Control will block."
 } else {
-    Write-Host "WARNING: no signing certificate configured. The desktop shell and sidecar stay unsigned and will be blocked by Smart App Control on Windows 11 (PKG-001)." -ForegroundColor Yellow
+    Write-Host "No signing certificate configured: building unsigned. SmartScreen will ask users to confirm, and Smart App Control (if enforced) blocks unsigned apps (PKG-001)." -ForegroundColor Yellow
 }
 
 Write-Host "Assembling NSIS installer from the signed binaries..." -ForegroundColor Green
@@ -179,9 +180,9 @@ try {
         $signCmd = ('signtool.exe sign /sha1 {0} /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 "%1"' -f $env:OLP_CODESIGN_THUMBPRINT)
         $bundleConfig = (@{ bundle = @{ resources = @{ "binaries/engine/_internal/" = "_internal/" }; windows = @{ signCommand = $signCmd } } } | ConvertTo-Json -Depth 5 -Compress)
         Set-Content -LiteralPath $BuildConfigPath -Value $bundleConfig -Encoding UTF8
-        npx -y @tauri-apps/cli@2 bundle --bundles nsis --config $BuildConfigPath
+        npx -y @tauri-apps/cli@2.11.5 bundle --bundles nsis --config $BuildConfigPath
     } else {
-        npx -y @tauri-apps/cli@2 bundle --bundles nsis --config $BuildConfigPath
+        npx -y @tauri-apps/cli@2.11.5 bundle --bundles nsis --config $BuildConfigPath
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Tauri bundle step failed."

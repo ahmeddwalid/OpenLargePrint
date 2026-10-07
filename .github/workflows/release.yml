@@ -1,5 +1,10 @@
 name: Release
 
+# A version tag (v0.6.0) builds Windows and Linux packages on their own runners,
+# tests each package by converting real documents with the packaged engine, and
+# only then publishes one GitHub Release with every file and SHA256SUMS.txt.
+# Running the workflow by hand builds and tests the packages without publishing.
+
 on:
   push:
     tags:
@@ -7,196 +12,227 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  version-check:
+    name: Check version numbers agree
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - id: version
+        name: Compare every version declaration (and the tag)
+        run: python3 packaging/check_versions.py --tag "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}" >> "$GITHUB_OUTPUT"
+
   build-windows:
-    name: Build Windows Release
+    name: Windows x64 installer and portable zip
+    needs: version-check
     runs-on: windows-latest
     env:
-      OLP_REQUIRE_SIGNING: '1'
+      # Signing is optional. With a certificate thumbprint configured on the runner,
+      # every executable is signed before bundling; without it the build is unsigned.
       OLP_CODESIGN_THUMBPRINT: ${{ vars.OLP_CODESIGN_THUMBPRINT }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
-      - name: Install Python 3.12
-        run: uv python install 3.12
-
-      - name: Install Python dependencies
-        run: uv sync --locked --dev --extra dev --extra accuracy --python 3.12
-
-      - name: Install Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: 'ui/package-lock.json'
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
 
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: ui
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Require provisioned trusted signing identity
-        shell: pwsh
+      - name: Install engine and interface dependencies
         run: |
-          if (-not $env:OLP_CODESIGN_THUMBPRINT) {
-            throw "Public Windows releases require a trusted signing identity. Provision the signing service/certificate on this runner and set OLP_CODESIGN_THUMBPRINT. See SIGNING.md."
-          }
-          if (-not (Test-Path "Cert:\CurrentUser\My\$env:OLP_CODESIGN_THUMBPRINT")) {
-            throw "The configured signing certificate is unavailable on the release runner."
-          }
+          uv python install 3.12
+          uv sync --locked --dev --extra dev --python 3.12
+          npm --prefix ui ci
 
-      - name: Validate engine and frontend
+      - name: Cache pinned models
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
+
+      - name: Test engine and interface
         run: |
           uv run pytest tests/ -q
           if ($LASTEXITCODE -ne 0) { throw "Engine tests failed" }
           npm --prefix ui test -- --run
-          if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed" }
-      - name: Package standalone Python engine sidecar
+          if ($LASTEXITCODE -ne 0) { throw "Interface tests failed" }
+
+      - name: Package the engine (no Python needed by users)
         run: uv run python packaging/build_sidecar.py --onedir
 
-      - name: Smoke-test packaged engine
-        shell: pwsh
-        run: |
-          '{"command":"health"}' | & .\src-tauri\binaries\engine\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe sidecar
-          if ($LASTEXITCODE -ne 0) { throw "Packaged engine failed" }
-      - name: Build Windows NSIS installer and portable package
+      - name: Build installer and portable zip (converts test documents with the packaged engine)
         run: powershell -ExecutionPolicy Bypass -File packaging/build_windows_app.ps1 -SkipSidecarBuild
 
-      # Windows 11 Smart App Control blocks unsigned executables outright. This gate
-      # inspects the real Authenticode state of what is about to be published.
-      # Always mandatory. Missing credentials must never publish unsigned releases.
-      - name: Verify Windows signatures (Smart App Control gate)
-        shell: pwsh
-        run: |
-          $artifacts = @()
-          $artifacts += Get-ChildItem "packaging/dist/OpenLargePrint_*_x64-setup.exe" | Select-Object -ExpandProperty FullName
-          $artifacts += (Resolve-Path "src-tauri/target/release/openlargeprint-desktop.exe").Path
-          $artifacts += (Resolve-Path "src-tauri/binaries/openlargeprint-sidecar-x86_64-pc-windows-msvc.exe").Path
-          $artifacts += Get-ChildItem "src-tauri/binaries/engine/_internal" -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll', '.pyd' } | Select-Object -ExpandProperty FullName
-          powershell -ExecutionPolicy Bypass -File packaging/verify_signatures.ps1 `
-            -Path $artifacts -RequirePublicTrust
-          if ($LASTEXITCODE -ne 0) { throw "Public Windows signature gate failed" }
-
-      - name: Verify release artifacts exist
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "packaging/dist/SHA256SUMS.txt")) {
-            throw "Release manifest SHA256SUMS.txt was not generated."
-          }
-          Get-Content "packaging/dist/SHA256SUMS.txt"
-
-      # One installer, one stable name. A version-stamped asset name breaks the
-      # repository's latest-download link as soon as the version changes, and two .exe
-      # assets also make the in-app updater's asset choice depend on asset ordering.
-      # The version is carried by the release tag, not by the file name.
-      - name: Publish the installer under its stable name
+      - name: Give the installer its stable name
         shell: pwsh
         run: |
           $installer = Get-ChildItem "packaging/dist/OpenLargePrint_*_x64-setup.exe" | Select-Object -First 1
           if (-not $installer) { throw "No Windows installer was produced." }
-          $versionedName = $installer.Name
-          $stable = "packaging/dist/OpenLargePrint-Setup-x64.exe"
-          Move-Item -LiteralPath $installer.FullName -Destination $stable -Force
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stable).Hash.ToLowerInvariant()
-          $sums = "packaging/dist/SHA256SUMS.txt"
-          $kept = Get-Content $sums | Where-Object { $_.Trim() -ne "" -and $_ -notmatch [regex]::Escape($versionedName) }
-          Set-Content -Path $sums -Value (($kept + ("{0}  OpenLargePrint-Setup-x64.exe" -f $hash)) -join "`r`n") -Encoding ascii
-          Write-Host ("Renamed {0} to the published name {1}" -f $versionedName, (Split-Path $stable -Leaf))
+          Move-Item -LiteralPath $installer.FullName -Destination "packaging/dist/OpenLargePrint-Setup-x64.exe" -Force
+          Remove-Item "packaging/dist/SHA256SUMS.txt" -ErrorAction SilentlyContinue
 
-      - name: Retain signed candidates for acceptance testing
-        uses: actions/upload-artifact@v4
+      - name: Install silently, check the installed files, convert, uninstall
+        shell: pwsh
+        run: |
+          $setup = (Resolve-Path "packaging/dist/OpenLargePrint-Setup-x64.exe").Path
+          $proc = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Silent install failed ($($proc.ExitCode))." }
+          $dir = Join-Path $env:LOCALAPPDATA "OpenLargePrint"
+          $app = @("OpenLargePrint.exe", "openlargeprint-desktop.exe") | Where-Object { Test-Path (Join-Path $dir $_) }
+          if (-not $app) { Get-ChildItem $dir | Format-Table Name; throw "Installed copy is missing the application." }
+          foreach ($f in @("openlargeprint-sidecar.exe", "_internal")) {
+            if (-not (Test-Path (Join-Path $dir $f))) { Get-ChildItem $dir | Format-Table Name; throw "Installed copy is missing $f" }
+          }
+          $weights = Get-ChildItem -Path (Join-Path $dir "_internal") -Recurse -Filter "pp_doc_layoutv2.onnx"
+          if (-not $weights) { throw "Installed copy is missing the layout model." }
+          $fonts = Get-ChildItem -Path (Join-Path $dir "_internal") -Recurse -Filter "AtkinsonHyperlegible-Regular.ttf"
+          if (-not $fonts) { throw "Installed copy is missing the reading font." }
+          uv run python packaging/smoke_convert.py (Join-Path $dir "openlargeprint-sidecar.exe")
+          if ($LASTEXITCODE -ne 0) { throw "The installed engine could not convert the test documents." }
+          $uninstaller = Join-Path $dir "uninstall.exe"
+          if (Test-Path $uninstaller) { Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait }
+
+      - name: Check the portable zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem "packaging/dist/OpenLargePrint_*_windows_x64_portable.zip" | Select-Object -First 1
+          if (-not $zip) { throw "No portable zip was produced." }
+          $out = Join-Path $env:RUNNER_TEMP "portable"
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $out -Force
+          uv run python packaging/smoke_convert.py (Join-Path $out "openlargeprint-sidecar.exe")
+          if ($LASTEXITCODE -ne 0) { throw "The portable engine could not convert the test documents." }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: windows-release-candidates
+          name: windows-x64
           if-no-files-found: error
           path: |
             packaging/dist/OpenLargePrint-Setup-x64.exe
             packaging/dist/OpenLargePrint_*_windows_x64_portable.zip
-            packaging/dist/SHA256SUMS.txt
-
-  publish-windows:
-    needs: build-windows
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: windows-latest
-    environment: windows-sac-accepted
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-release-candidates
-          path: packaging/dist
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Require acceptance of these exact signed artifacts
-        shell: pwsh
-        env:
-          OLP_SAC_ACCEPTANCE_JSON: ${{ secrets.OLP_SAC_ACCEPTANCE_JSON }}
-          OLP_CODESIGN_THUMBPRINT: ${{ vars.OLP_CODESIGN_THUMBPRINT }}
-        run: |
-          if (-not $env:OLP_SAC_ACCEPTANCE_JSON) { throw "Enforced-mode installation, OCR, update, removal and full GUI corpus acceptance is missing." }
-          $evidence = Join-Path $env:RUNNER_TEMP 'sac-acceptance.json'
-          Set-Content -LiteralPath $evidence -Value $env:OLP_SAC_ACCEPTANCE_JSON -Encoding utf8
-          $portable = Get-ChildItem 'packaging/dist/OpenLargePrint_*_windows_x64_portable.zip' | Select-Object -First 1
-          if (-not $portable) { throw "Portable artifact is missing." }
-          python packaging/release_acceptance.py --acceptance $evidence --installer packaging/dist/OpenLargePrint-Setup-x64.exe --portable $portable.FullName --thumbprint $env:OLP_CODESIGN_THUMBPRINT
-          if ($LASTEXITCODE -ne 0) { throw "Exact-artifact acceptance verification failed." }
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: OpenLargePrint ${{ github.ref_name }}
-          draft: false
-          make_latest: true
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            packaging/dist/OpenLargePrint-Setup-x64.exe
-            packaging/dist/OpenLargePrint_*_windows_x64_portable.zip
-            packaging/dist/SHA256SUMS.txt
 
   build-linux:
-    name: Build Linux x86_64 packages
+    name: Linux x86_64 AppImage, RPM and DEB
+    needs: version-check
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: ui/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install desktop prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - name: Install and validate
+          cache-dependency-path: 'ui/package-lock.json'
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Install desktop build libraries
         run: |
-          uv sync --locked --dev --extra dev --extra accuracy --python 3.12
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf rpm
+
+      - name: Install engine and interface dependencies
+        run: |
+          uv python install 3.12
+          uv sync --locked --dev --extra dev --python 3.12
           npm --prefix ui ci
+
+      - name: Cache pinned models
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
+
+      - name: Test engine and interface
+        run: |
           uv run pytest tests/ -q
           npm --prefix ui test -- --run
-      - name: Package engine
+
+      - name: Package the engine (no Python needed by users)
         run: uv run python packaging/build_sidecar.py
-      - name: Smoke-test packaged engine
+
+      - name: Build interface and check the packaged engine converts documents
         run: |
-          printf '%s\n' '{"command":"health"}' | src-tauri/binaries/openlargeprint-sidecar-x86_64-unknown-linux-gnu sidecar
-      - name: Build Linux bundles
+          npm --prefix ui run build
+          uv run python packaging/generate_icons.py
+          cd packaging && uv run python verify_packaging.py
+
+      - name: Build Linux packages
         working-directory: src-tauri
-        run: npx -y @tauri-apps/cli@2 build --bundles deb,rpm,appimage
-      - uses: actions/upload-artifact@v4
+        run: npx -y @tauri-apps/cli@2.11.5 build --bundles appimage,rpm,deb
+
+      - name: Name the packages and check their contents
+        run: |
+          set -euo pipefail
+          version="${{ needs.version-check.outputs.version }}"
+          mkdir -p dist
+          cp src-tauri/target/release/bundle/appimage/*.AppImage "dist/OpenLargePrint_${version}_linux_x86_64.AppImage"
+          cp src-tauri/target/release/bundle/rpm/*.rpm "dist/OpenLargePrint_${version}_linux_x86_64.rpm"
+          cp src-tauri/target/release/bundle/deb/*.deb "dist/OpenLargePrint_${version}_linux_amd64.deb"
+          rpm -qlp dist/*.rpm | grep -q '/usr/bin/openlargeprint-sidecar'
+          dpkg-deb -c dist/*.deb | grep -q '/usr/bin/openlargeprint-sidecar'
+          chmod +x dist/*.AppImage
+          cd dist && ./OpenLargePrint_*.AppImage --appimage-extract >/dev/null
+          test -x squashfs-root/usr/bin/openlargeprint-sidecar
+          uv run --project .. python ../packaging/smoke_convert.py squashfs-root/usr/bin/openlargeprint-sidecar
+          rm -rf squashfs-root
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: openlargeprint-linux-x86_64
+          name: linux-x86_64
           if-no-files-found: error
-          path: |
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/rpm/*.rpm
-            src-tauri/target/release/bundle/appimage/*.AppImage
+          path: dist/OpenLargePrint_*
+
+  publish:
+    name: Publish the GitHub Release
+    needs: [version-check, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release
+          merge-multiple: true
+      - name: Checksums and release notes
+        run: |
+          set -euo pipefail
+          cd release
+          ls -la
+          test -f OpenLargePrint-Setup-x64.exe
+          ls OpenLargePrint_*_windows_x64_portable.zip OpenLargePrint_*_linux_x86_64.AppImage OpenLargePrint_*_linux_x86_64.rpm
+          sha256sum OpenLargePrint* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+          python3 packaging/release_notes.py "${{ needs.version-check.outputs.version }}" > release-notes.md
+      - name: Publish
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: OpenLargePrint ${{ needs.version-check.outputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            release/OpenLargePrint-Setup-x64.exe
+            release/OpenLargePrint_*_windows_x64_portable.zip
+            release/OpenLargePrint_*_linux_x86_64.AppImage
+            release/OpenLargePrint_*_linux_x86_64.rpm
+            release/OpenLargePrint_*_linux_amd64.deb
+            release/SHA256SUMS.txt
