@@ -722,7 +722,11 @@ class PageAssembler:
                 page.blocks.extend(self._figure(region, region_words, make_figure))
                 continue
             if kind == RegionKind.TABLE:
-                page.blocks.extend(self._table(region, region_words, make_table))
+                if any(not w.blank for w in region_words):
+                    page.blocks.extend(self._table(region, region_words, make_table))
+                else:
+                    # A table with no readable words (pasted in as a picture) is kept as one.
+                    page.blocks.extend(self._figure(region, [], make_figure))
                 continue
             if not region_words:
                 continue

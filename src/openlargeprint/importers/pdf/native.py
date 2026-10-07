@@ -48,7 +48,7 @@ from openlargeprint.ocr.base import CancellationToken, DocumentOcrEngine
 from openlargeprint.ocr.router import OcrRouter, RoutingMode
 from openlargeprint.security.isolation import JobWorkspace, log_safe_info
 from openlargeprint.security.validator import bounded_pdf_scale
-from .assemble import PageAssembler, assign_heading_levels, insert_blanks
+from .assemble import GEOMETRIC_LABELS, PageAssembler, assign_heading_levels, insert_blanks
 from .classifier import classify_pdf_page
 from .rules import find_rules
 from .scanned import ocr_words
@@ -403,14 +403,23 @@ class NativePdfImporter(BaseImporter):
 
     def _recognise_empty_regions(self, page, frame: PageFrame, regions: List[LayoutRegion], words: List[Word],
                                  meta: PageMetadata, language: str, cancel_check) -> List[Word]:
-        """Mixed pages: text regions with no native text but painted as a picture (PDF-004)."""
-        if self.routing_mode == RoutingMode.NATIVE_ONLY or meta.details.get("raster_coverage", 0) < 0.01:
+        """Mixed pages: layout regions with no native text (PDF-004).
+
+        Text regions and tables can be painted as a picture or drawn as vector
+        outlines (headings set as curves), so they are recognised whatever the
+        page is made of. Words inside pictures are only looked for on pages that
+        contain raster images.
+        """
+        if self.routing_mode == RoutingMode.NATIVE_ONLY:
             return []
-        empty = [r for r in regions if r.kind in TEXT_KINDS and r.area > 200
+        empty = [r for r in regions if r.label not in GEOMETRIC_LABELS
+                 and (r.kind in TEXT_KINDS or r.kind == RegionKind.TABLE) and r.area > 200
                  and not any(coverage(w.box, r.box) > 0.5 for w in words)]
         # Pictures often carry words of their own (speech bubbles, labels, signs).
         pictures = [r for r in regions if r.kind == RegionKind.FIGURE and not r.decorative
                     and r.area > 2500 and not any(coverage(w.box, r.box) > 0.5 for w in words)]
+        if meta.details.get("raster_coverage", 0) < 0.01:
+            pictures = []
         if not empty and not pictures:
             return []
         width, height = meta.width, meta.height

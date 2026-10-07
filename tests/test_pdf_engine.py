@@ -466,3 +466,52 @@ def test_missing_arabic_recogniser_falls_back_instead_of_losing_the_page(tmp_pat
         doc = importer.import_document(_scan_pdf(tmp_path / "قراءة كتاب.pdf"), workspace)
     assert "Judicial review" in _texts(doc)
     assert not any(b.id.endswith("_retained") for b in doc.blocks)
+
+
+def test_table_region_without_words_is_kept_as_a_picture():
+    """A table pasted into the page as an image must not vanish (never drop content)."""
+    assembler = PageAssembler(1, 595, 842, ExtractionMethod.NATIVE)
+    table = LayoutRegion(RegionKind.TABLE, 72, 100, 500, 300, order=0, label="table")
+    made = []
+
+    def make_figure(region):
+        made.append(region)
+        from openlargeprint.ir.models import ImageAsset
+        return ImageAsset(asset_id="t", file_path="t.png", width=10, height=10)
+
+    page = assembler.assemble([table], [], make_figure, lambda r, w: None)
+    assert made == [table]
+    assert [b.type for b in page.blocks] == [BlockType.IMAGE]
+
+
+class OneRegionLayout:
+    """Stands in for the layout model: the given regions, in the given order."""
+
+    name = "test"
+
+    def __init__(self, regions):
+        self._regions = regions
+
+    def detect(self, image, page_width, page_height):
+        from openlargeprint.layout.regions import PageLayout
+
+        return PageLayout(width=page_width, height=page_height, regions=list(self._regions), source="model")
+
+
+def test_heading_drawn_as_outlines_is_recognised_on_a_text_page(tmp_path: Path):
+    """Text set as vector curves has no characters; its layout region is recognised instead."""
+    pdf = tmp_path / "outlined.pdf"
+    c = canvas.Canvas(str(pdf), pagesize=A4)
+    c.rect(72, 760, 300, 30, fill=1)  # stands in for a heading drawn as curves
+    c.setFont("Helvetica", 12)
+    c.drawString(72, 700, "Body text that the page does contain as characters.")
+    c.save()
+    regions = [LayoutRegion(RegionKind.HEADING, 70, 50, 380, 84, order=0, label="paragraph_title"),
+               LayoutRegion(RegionKind.TEXT, 70, 128, 520, 146, order=1, label="text")]
+    ocr = RecordingOcr([("Chapter One", (10, 10, 400, 60), 0.97)])
+    importer = NativePdfImporter(ocr_engine=ocr, layout_detector=OneRegionLayout(regions))
+    with JobWorkspace() as workspace:
+        doc = importer.import_document(pdf, workspace)
+    texts = _texts(doc)
+    assert ocr.calls == 1  # only the empty heading region, never the native text
+    assert texts.index("Chapter One") < texts.index("Body text that the page does contain as characters.")
