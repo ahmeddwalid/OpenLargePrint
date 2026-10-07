@@ -54,7 +54,8 @@ def test_merged_cells_survive_every_export(tmp_path):
     path = DocxExporter().export(ir, tmp_path / "merged.docx")
     assert 'w:gridSpan w:val="2"' in docx.Document(path).tables[0]._tbl.xml
     exporter = PdfExporter()
-    flow = exporter._build_platypus_table(table, ExportOptions(), exporter._create_typography_styles(ExportOptions()), 470, False)
+    exporter._prepare(ExportOptions(), 470, 700)
+    flow = exporter._grid(table, False, None)
     assert ('SPAN', (0, 0), (1, 0)) in flow._spanCmds
 
 

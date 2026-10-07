@@ -111,7 +111,7 @@ def test_milestone4_arabic_end_to_end(tmp_path: Path):
     assert pytest.approx(h, 1.0) == 841.89  # True A4 height
 
     pdf_text = page.get_textpage().get_text_range()
-    assert "Print at 100% / actual size" in pdf_text
+    assert "print at 100% (actual size)" in pdf_text
     # Arabic content rendered and present
     assert "ISO 27001" in pdf_text or "27001" in pdf_text
 
@@ -122,9 +122,8 @@ def test_milestone4_arabic_end_to_end(tmp_path: Path):
 
     html_content = reader_path.read_text(encoding="utf-8")
     assert 'dir="rtl"' in html_content
-    assert 'class="rtl"' in html_content
-    assert '--reading-font-arabic' in html_content
-    assert 'direction: rtl' in html_content
+    assert 'font-family: "Noto Sans Arabic"' in html_content  # embedded, works offline
+    assert '[dir="rtl"]' in html_content
     assert "عقد" in html_content
     assert "عقار" in html_content
     assert "القاهرة" in html_content

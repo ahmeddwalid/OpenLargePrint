@@ -4,7 +4,8 @@ from pathlib import Path
 import docx
 from docx.oxml.ns import qn
 import pypdfium2 as pdfium
-import pytest
+
+from conftest import effective_size
 
 from openlargeprint.exporters.base import ExportOptions, PaperSize, PresetName
 from openlargeprint.exporters.docx import DocxExporter
@@ -16,7 +17,6 @@ from openlargeprint.ir.models import (
     BoundingBox,
     DocumentIR,
     DocumentMetadata,
-    ExtractionMethod,
     PageClassification,
     PageMetadata,
     TableCell,
@@ -234,7 +234,7 @@ def test_milestone5_docx_export(tmp_path: Path):
     assert len(fn_paragraphs) >= 1
     fn_p = fn_paragraphs[0]
     assert len(fn_p.runs) > 0
-    fn_size = fn_p.runs[0].font.size.pt
+    fn_size = effective_size(fn_p)
     assert fn_size >= 14.0, f"Footnote size must be >= 14pt per FN-002, got {fn_size}pt"
 
 
@@ -279,23 +279,23 @@ def test_milestone5_reader_export(tmp_path: Path):
     html_content = html_path.read_text(encoding="utf-8")
 
     # 1. Semantic tables
-    assert '<table class="large-print-table"' in html_content
+    assert "<table>" in html_content
     assert '<th scope="col">Case Name</th>' in html_content
     assert "<td>Donoghue v Stevenson</td>" in html_content
     assert "<caption>Key Appellate Precedents</caption>" in html_content
 
     # 2. RTL table dir
-    assert 'class="large-print-table rtl" dir="rtl"' in html_content
+    assert '<table dir="rtl"><caption>أركان المسؤولية التقصيرية</caption>' in html_content
 
-    # 3. Visible warning banner (TBL-002)
-    assert 'class="table-warning"' in html_content
-    assert "Table with 6 columns" in html_content
+    # 3. A table too wide for large print is split into parts, with a visible note (TBL-002)
+    assert "Statutory Limitation Periods Across Commonwealth Jurisdictions (Part 1 of" in html_content
+    assert "This table is shown in parts so it stays large enough to read." in html_content
 
     # 4. Captions
-    assert '<figcaption class="caption-block"' in html_content
+    assert '<p class="caption">' in html_content
     assert "Table 1: Landmark Negligence Decisions" in html_content
 
     # 5. Footnotes with role="doc-footnote" (FN-001)
-    assert '<aside class="footnote-block" role="doc-footnote">' in html_content
+    assert '<p class="footnote" role="doc-footnote">' in html_content
     assert "Donoghue v Stevenson [1932]" in html_content
-    assert '<aside class="footnote-block rtl" dir="rtl" role="doc-footnote">' in html_content
+    assert '<p class="footnote" role="doc-footnote" dir="rtl">' in html_content

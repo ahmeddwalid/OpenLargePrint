@@ -8,10 +8,8 @@ from openlargeprint.exporters import ExportOptions, PaperSize, PdfExporter, Pres
 from openlargeprint.ir.models import (
     Block,
     BlockType,
-    BoundingBox,
     DocumentIR,
     DocumentMetadata,
-    ExtractionMethod,
     PageClassification,
     PageMetadata,
 )
@@ -72,8 +70,8 @@ def test_pdf_export_a4_dimensions(tmp_path: Path):
     tp = page.get_textpage()
     text = tp.get_text_range()
     assert "Inner Morality" in text
-    assert "Print at 100% / actual size" in text
-    assert "Original Page 1" in text
+    assert "print at 100% (actual size)" in text
+    assert "Original page 1" in text
 
 
 def test_pdf_export_a3_dimensions(tmp_path: Path):

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 import re
-import pytest
 
 from openlargeprint.exporters import ExportOptions, PresetName, ReaderExporter
 from openlargeprint.ir.models import (
@@ -10,7 +9,6 @@ from openlargeprint.ir.models import (
     BlockType,
     DocumentIR,
     DocumentMetadata,
-    ExtractionMethod,
     PageClassification,
     PageMetadata,
 )
@@ -49,23 +47,24 @@ def test_reader_export_accessible_html(tmp_path: Path):
     assert "<h1" in content
     assert "Equal Protection Under Law" in content
     assert "<blockquote>" in content
-    assert "— Original Page 1 —" in content
-    assert 'id="orig-page-1"' in content
-    assert 'id="orig-page-2"' in content
+    assert "Original page 1" in content
+    assert 'id="page-1"' in content
+    assert 'id="page-2"' in content
 
     # 2. Touch target accessibility: min 44px (A11Y-001)
-    assert "min-width: 44px" in content
-    assert "min-height: 44px" in content
+    assert "min-width: 48px" in content
+    assert "min-height: 48px" in content
 
     # 3. Themes supported (A11Y-004)
     assert '[data-theme="dark"]' in content
     assert '[data-theme="sepia"]' in content
 
     # 4. Instant re-styling controls present (OUT-002)
-    assert 'id="btn-size-dec"' in content
-    assert 'id="btn-size-inc"' in content
-    assert 'id="theme-dark"' in content
-    assert 'id="btn-print"' in content
+    assert 'id="smaller"' in content
+    assert 'id="larger"' in content
+    assert 'data-theme-choice="dark"' in content
+    assert 'id="print"' in content
+    assert 'role="toolbar"' in content
 
     # 5. Zero external network resources (SEC-009)
     # Check that no external script or stylesheet URLs are linked

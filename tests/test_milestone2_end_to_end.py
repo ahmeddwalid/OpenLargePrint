@@ -5,8 +5,9 @@ Scanned PDF -> PaddleOCR layout & recognition -> DocumentIR -> UNMODIFIED DocxEx
 from pathlib import Path
 from PIL import Image, ImageDraw
 import docx
-from docx.shared import Pt
 import pytest
+
+from conftest import effective_line_spacing, effective_size
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
@@ -74,7 +75,7 @@ def test_milestone2_scanned_pdf_to_docx_end_to_end(tmp_path: Path):
     doc_ir = result.document_ir
 
     # 2. Canonical DocumentIR assertions under OCR (DOC-001, PDF-003)
-    assert doc_ir.schema_version == "1.0.0"
+    assert doc_ir.schema_version == "1.1.0"
     assert doc_ir.metadata.page_count == 1
     assert doc_ir.pages[0].classification == PageClassification.SCANNED
 
@@ -112,8 +113,8 @@ def test_milestone2_scanned_pdf_to_docx_end_to_end(tmp_path: Path):
     body_paras = [p for p in doc.paragraphs if "liable" in p.text or "employer" in p.text]
     assert len(body_paras) > 0
     first_body = body_paras[0]
-    assert first_body.runs[0].font.size == Pt(20)
-    assert first_body.paragraph_format.line_spacing == 1.5
+    assert effective_size(first_body) == pytest.approx(20.0)
+    assert effective_line_spacing(first_body) == 1.5
 
     # Verify single-column reflow
     assert len(doc.tables) == 0

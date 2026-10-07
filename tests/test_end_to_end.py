@@ -5,8 +5,9 @@ Healthy digital PDF -> exact extraction & images -> DocumentIR -> 20pt DOCX.
 from pathlib import Path
 from PIL import Image
 import docx
-from docx.shared import Pt
 import pytest
+
+from conftest import effective_bold, effective_line_spacing, effective_size
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
@@ -96,7 +97,7 @@ def test_milestone1_end_to_end_conversion(tmp_path: Path):
     doc_ir = result.document_ir
 
     # 2. Canonical DocumentIR assertions (DOC-001..003)
-    assert doc_ir.schema_version == "1.0.0"
+    assert doc_ir.schema_version == "1.1.0"
     assert doc_ir.metadata.page_count == 2
     assert len(doc_ir.pages) == 2
     assert all(p.classification == PageClassification.NATIVE for p in doc_ir.pages)
@@ -136,21 +137,21 @@ def test_milestone1_end_to_end_conversion(tmp_path: Path):
     paragraphs = doc.paragraphs
 
     # Verify page markers are present (OUT-005)
-    page1_marker = next(p for p in paragraphs if "Original Page 1" in p.text)
-    page2_marker = next(p for p in paragraphs if "Original Page 2" in p.text)
+    page1_marker = next(p for p in paragraphs if "Original page 1" in p.text)
+    page2_marker = next(p for p in paragraphs if "Original page 2" in p.text)
     assert page1_marker is not None
     assert page2_marker is not None
 
     # Verify Title / Heading 1 typography (OUT-001)
     title_para = next(p for p in paragraphs if "Principles of Administrative Law" in p.text)
-    assert title_para.runs[0].font.bold is True
-    # H1 is 28pt for 20pt body
-    assert title_para.runs[0].font.size == Pt(28)
+    assert effective_bold(title_para) is True
+    # H1 is 1.55x the body size: 31pt for a 20pt body
+    assert effective_size(title_para) == pytest.approx(31.0)
 
     # Verify body typography: 20pt body, 1.5 line spacing (OUT-006)
     body_para = next(p for p in paragraphs if "Ultra vires" in p.text)
-    assert body_para.runs[0].font.size == Pt(20)
-    assert body_para.paragraph_format.line_spacing == 1.5
+    assert effective_size(body_para) == pytest.approx(20.0)
+    assert effective_line_spacing(body_para) == 1.5
 
     # Verify inline images (embedded picture element in document)
     xml = doc._element.xml
