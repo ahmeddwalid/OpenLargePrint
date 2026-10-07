@@ -18,7 +18,7 @@ import ctypes
 import statistics
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Tuple
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
@@ -97,6 +97,80 @@ def page_box(page: pdfium.PdfPage) -> Tuple[float, float, float, float]:
     return left, bottom, right, top
 
 
+class PageFrame:
+    """Page space for one page: points, origin top-left, y down, text running left to right.
+
+    PDFium's own page-to-device transform maps PDF user space into it, so the
+    page's /Rotate and any extra quarter turn (``quarter``, clockwise) are applied
+    the same way to glyphs, images, drawings and renders. Rendering with
+    ``rotation=frame.degrees`` gives a bitmap in this same frame.
+    """
+
+    GRID = 8  # device units per point (PDFium returns whole device units)
+
+    def __init__(self, page: pdfium.PdfPage, quarter: int = 0):
+        self.page = page
+        self.quarter = quarter % 4
+        width, height = page.get_size()  # as displayed, /Rotate applied
+        if self.quarter % 2:
+            width, height = height, width
+        self.width, self.height = float(width), float(height)
+
+    @property
+    def degrees(self) -> int:
+        return self.quarter * 90
+
+    @property
+    def area(self) -> float:
+        return max(1.0, self.width * self.height)
+
+    def point(self, x: float, y: float) -> Tuple[float, float]:
+        dx, dy = ctypes.c_int(0), ctypes.c_int(0)
+        pdfium_c.FPDF_PageToDevice(self.page, 0, 0, int(round(self.width * self.GRID)),
+                                   int(round(self.height * self.GRID)), self.quarter, x, y,
+                                   ctypes.byref(dx), ctypes.byref(dy))
+        return dx.value / self.GRID, dy.value / self.GRID
+
+    def rect(self, left: float, bottom: float, right: float, top: float) -> Tuple[float, float, float, float]:
+        (ax, ay), (bx, by) = self.point(left, bottom), self.point(right, top)
+        return min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
+
+
+def reading_quarter(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage) -> int:
+    """Clockwise quarter turns that make the page's Latin text run left to right.
+
+    A page displayed with its text running down (a landscape table printed
+    sideways in a portrait book, or a /Rotate page whose content was not turned)
+    is read in the turned frame. Right-to-left letters are not counted, since
+    they advance leftwards by nature; a page needs a clear majority to turn.
+    """
+    frame = PageFrame(page, 0)
+    votes = [0, 0, 0, 0]
+    previous = None
+    for index in range(min(textpage.count_chars(), 4000)):
+        code = pdfium_c.FPDFText_GetUnicode(textpage, index)
+        ch = chr(code) if 0 < code <= 0x10FFFF else " "
+        if not ch.isalnum() or is_rtl_char(ch):
+            previous = None
+            continue
+        x, y = ctypes.c_double(0), ctypes.c_double(0)
+        pdfium_c.FPDFText_GetCharOrigin(textpage, index, ctypes.byref(x), ctypes.byref(y))
+        point = frame.point(x.value, y.value)
+        if previous is not None:
+            dx, dy = point[0] - previous[0], point[1] - previous[1]
+            if 0.5 < abs(dx) + abs(dy) < 40:
+                if abs(dx) >= abs(dy):
+                    votes[0 if dx > 0 else 2] += 1
+                else:
+                    votes[3 if dy > 0 else 1] += 1
+        previous = point
+    best = max(range(4), key=lambda q: votes[q])
+    total = sum(votes)
+    if best and votes[best] >= 20 and votes[best] > 0.6 * total:
+        return best
+    return 0
+
+
 def _hidden_text_objects(page: pdfium.PdfPage, page_area: float) -> set:
     """Text objects painted before a picture that covers (almost) the whole page."""
     order: List[Tuple[int, int, int]] = []  # (draw index, type, pointer)
@@ -135,30 +209,15 @@ def _font_style(textpage, index: int, cache: Dict[int, Tuple[bool, bool, str]], 
 
 
 def extract_native_text(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage,
-                        page_height: float, crop: Sequence[float]) -> NativeText:
-    """Visible words on the page, in page space."""
+                        frame: PageFrame) -> NativeText:
+    """Visible words on the page, in the frame's page space."""
     result = NativeText()
     count = textpage.count_chars()
     if count <= 0:
         return result
-    cb_x0, cb_y0, cb_x1, cb_y1 = crop
-    page_area = max(1.0, (cb_x1 - cb_x0) * (cb_y1 - cb_y0))
-    hidden_objects = _hidden_text_objects(page, page_area)
+    hidden_objects = _hidden_text_objects(page, frame.area)
     style_cache: Dict[int, Tuple[bool, bool, str]] = {}
     mode_cache: Dict[int, bool] = {}
-    rotated = None
-    if page.get_rotation() % 360:
-        display_w, display_h = page.get_size()
-        grid = 8  # device units per point; PDFium returns whole device pixels
-
-        def rotated(px: float, py: float) -> Tuple[float, float]:
-            dx, dy = ctypes.c_int(0), ctypes.c_int(0)
-            pdfium_c.FPDF_PageToDevice(page, 0, 0, int(display_w * grid), int(display_h * grid), 0,
-                                       px, py, ctypes.byref(dx), ctypes.byref(dy))
-            return dx.value / grid, dy.value / grid
-
-        cb_x0, cb_y1 = 0.0, float(display_h)
-        cb_y0, cb_x1 = 0.0, float(display_w)
 
     chars: List[_Char] = []
     pending_space = False
@@ -183,41 +242,33 @@ def extract_native_text(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage,
             result.hidden_chars += 1
             continue
         left, bottom, right, top = textpage.get_charbox(index, loose=True)
-        if rotated is None and (right <= cb_x0 or left >= cb_x1 or top <= cb_y0 or bottom >= cb_y1):
-            continue
         if right - left <= 0 and top - bottom <= 0:
             continue
-        size = float(pdfium_c.FPDFText_GetFontSize(textpage, index)) or (top - bottom)
+        x0, y_top, x1, y_bottom = frame.rect(left, bottom, right, top)
+        if x1 <= 0 or x0 >= frame.width or y_bottom <= 0 or y_top >= frame.height:
+            continue  # outside the visible page
+        size = float(pdfium_c.FPDFText_GetFontSize(textpage, index)) or (y_bottom - y_top)
         x = ctypes.c_double(0)
         y = ctypes.c_double(0)
         pdfium_c.FPDFText_GetCharOrigin(textpage, index, ctypes.byref(x), ctypes.byref(y))
+        _, base = frame.point(x.value, y.value)
         bold, italic, font_name = _font_style(textpage, index, style_cache, key)
         mapped = map_symbol_char(ch, font_name)
         if mapped:
             ch = mapped
         # Typographic ligatures (fi, fl, ffi) are one glyph but two or three letters.
         ch = unicodedata.normalize("NFKC" if 0xFB00 <= ord(ch[0]) <= 0xFB06 else "NFC", ch)
-        if rotated is not None:
-            # /Rotate pages: map the glyph box into the page as it is displayed.
-            (ax, ay), (bx, by) = rotated(left, bottom), rotated(right, top)
-            left, right = min(ax, bx) + cb_x0, max(ax, bx) + cb_x0
-            top, bottom = cb_y1 - min(ay, by), cb_y1 - max(ay, by)
-            _, base_y = rotated(x.value, y.value)
-            y.value = cb_y1 - base_y
-        y_top = cb_y1 - top
-        y_bottom = cb_y1 - bottom
         # The nominal size is often 1pt with the real size in the text matrix, so the
         # glyph's loose box (ascent to descent, about 1.2 em) is the dependable measure.
         if y_bottom > y_top:
             size = (y_bottom - y_top) / 1.2
         size = max(1.0, size)
-        room = ((chars[-1].x0 - (right - cb_x0)) if chars and (is_rtl_char(ch) or is_rtl_char(chars[-1].ch))
-                else ((left - cb_x0) - chars[-1].x1) if chars else 0.0)
-        if pending_space and chars and abs((cb_y1 - y.value) - chars[-1].base) < 0.3 * size \
+        room = ((chars[-1].x0 - x1) if chars and (is_rtl_char(ch) or is_rtl_char(chars[-1].ch))
+                else (x0 - chars[-1].x1) if chars else 0.0)
+        if pending_space and chars and abs(base - chars[-1].base) < 0.3 * size \
                 and room < 0.06 * size:
             pending_space = False  # a space character with no room for it (inside a ligature)
-        chars.append(_Char(ch, left - cb_x0, y_top, right - cb_x0, y_bottom,
-                           cb_y1 - y.value, size, bold, italic, pending_space, font_name))
+        chars.append(_Char(ch, x0, y_top, x1, y_bottom, base, size, bold, italic, pending_space, font_name))
         pending_space = False
         result.visible_chars += 1
 

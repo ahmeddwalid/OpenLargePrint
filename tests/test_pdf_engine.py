@@ -356,3 +356,67 @@ def test_ir_1_1_fields_round_trip():
     assert again.blocks[0] == block
     with pytest.raises(ValueError):
         Block(id="x", type=BlockType.PARAGRAPH, source_page=1, indent_level=9)
+
+
+# -- rotated pages (PDF-007) ----------------------------------------------------------
+
+def _rotated_copy(source: Path, target: Path, degrees: int) -> Path:
+    import pikepdf
+
+    with pikepdf.open(source) as pdf:
+        pdf.pages[0].Rotate = degrees
+        pdf.save(target)
+    return target
+
+
+@pytest.mark.parametrize("degrees", [90, 180, 270])
+def test_text_shown_sideways_is_read_in_its_own_direction(tmp_path: Path, degrees: int):
+    """A page whose text runs down or up the screen must not become letter salad."""
+    source = tmp_path / "upright.pdf"
+    c = canvas.Canvas(str(source), pagesize=A4)
+    c.setFont("Helvetica", 12)
+    c.drawString(72, 760, "First line of the turned page.")
+    c.drawString(72, 740, "Second line follows it.")
+    c.save()
+    doc = _import(_rotated_copy(source, tmp_path / f"r{degrees}.pdf", degrees))
+    assert "First line of the turned page. Second line follows it." in _texts(doc)
+    assert doc.pages[0].details.get("reading_rotation") in (90, 180, 270)
+
+
+def test_landscape_page_made_upright_by_rotate_reads_normally(tmp_path: Path):
+    """The usual landscape page: content drawn turned, /Rotate shows it upright."""
+    source = tmp_path / "landscape.pdf"
+    c = canvas.Canvas(str(source), pagesize=A4)
+    c.translate(A4[0], 0)
+    c.rotate(90)  # text runs up the unrotated page
+    c.setFont("Helvetica", 12)
+    c.drawString(72, 500, "Landscape page text reads across.")
+    c.save()
+    doc = _import(_rotated_copy(source, tmp_path / "landscape_rotated.pdf", 90))
+    assert "Landscape page text reads across." in _texts(doc)
+    assert "reading_rotation" not in doc.pages[0].details
+    assert doc.pages[0].width > doc.pages[0].height
+
+
+def test_picture_on_rotated_page_keeps_its_place(tmp_path: Path):
+    picture = tmp_path / "pic.png"
+    Image.new("RGB", (120, 80), (200, 30, 30)).save(picture)
+    source = tmp_path / "pic.pdf"
+    c = canvas.Canvas(str(source), pagesize=A4)
+    c.setFont("Helvetica", 12)
+    for i in range(6):
+        c.drawString(72, 780 - 16 * i, f"Line {i} of text above the picture on this page.")
+    c.drawImage(str(picture), 72, 500, 120, 80)
+    c.drawString(72, 470, "Text below the picture.")
+    c.save()
+    importer = NativePdfImporter(layout_detector=HeuristicLayoutDetector())
+    with JobWorkspace() as workspace:
+        doc = importer.import_document(_rotated_copy(source, tmp_path / "pic90.pdf", 90), workspace)
+        blocks = [b for b in doc.blocks if b.type != BlockType.PAGE_MARKER]
+        kinds = [b.type for b in blocks]
+        assert BlockType.IMAGE in kinds
+        image_at = kinds.index(BlockType.IMAGE)
+        after = [b.text for b in blocks[image_at + 1:] if b.text]
+        assert any("Text below the picture." in t for t in after)
+        with Image.open(blocks[image_at].image_asset.file_path) as img:
+            assert img.size == (120, 80)  # original pixels, not a sideways render

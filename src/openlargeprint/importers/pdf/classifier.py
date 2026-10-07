@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Tuple
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 from openlargeprint.ir.models import PageClassification, PageMetadata

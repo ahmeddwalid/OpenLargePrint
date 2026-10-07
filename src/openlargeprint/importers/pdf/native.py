@@ -53,7 +53,7 @@ from .classifier import classify_pdf_page
 from .rules import find_rules
 from .scanned import ocr_words
 from .tables import build_table, ruled_table_regions
-from .textlayer import Word, extract_native_text, page_box
+from .textlayer import PageFrame, Word, extract_native_text, reading_quarter
 
 LAYOUT_DPI = 150.0
 FIGURE_MIN_DPI = 150.0
@@ -200,13 +200,18 @@ class NativePdfImporter(BaseImporter):
                       layout, language: str, cancel_check: Optional[CancelCheck], report, page_count: int,
                       ) -> Tuple[List[Block], Dict[str, float], List[float]]:
         page_num = meta.page_number
-        width, height = meta.width, meta.height
-        crop = page_box(page)
         textpage = page.get_textpage()
         try:
-            native = extract_native_text(page, textpage, height, crop)
+            # Read the page the way its text runs: a table printed sideways is
+            # turned upright first (everything below works in this frame).
+            frame = PageFrame(page, reading_quarter(page, textpage))
+            native = extract_native_text(page, textpage, frame)
         finally:
             textpage.close()
+        if frame.quarter:
+            meta.details["reading_rotation"] = frame.degrees
+        meta.width, meta.height = frame.width, frame.height
+        width, height = frame.width, frame.height
 
         broken = native.broken_chars > 0.15 * max(1, native.visible_chars)
         # Visible text is the document's own (PDF-002). On a page that is mostly a
@@ -227,7 +232,7 @@ class NativePdfImporter(BaseImporter):
                    else f"Reading page {page_num} of {page_count}")
 
         hi_scale = bounded_pdf_scale(width, height, self.ocr_dpi if recognise else LAYOUT_DPI)
-        bitmap = page.render(scale=hi_scale)
+        bitmap = page.render(scale=hi_scale, rotation=frame.degrees)
         try:
             image = bitmap.to_pil().convert("RGB")
         finally:
@@ -241,15 +246,15 @@ class NativePdfImporter(BaseImporter):
         if use_native:
             if page_layout.source != "model":
                 # Without the layout model, pictures are still found from the file itself.
-                regions = regions + self._image_objects(page, native.words, width, height, crop)
-            regions = regions + self._vector_artwork(page, regions, native.words, width, height, crop)
+                regions = regions + self._image_objects(page, native.words, frame)
+            regions = regions + self._vector_artwork(page, regions, native.words, frame)
         meta.details["layout"] = page_layout.source
 
         method = ExtractionMethod.NATIVE
         page_confidence = 1.0
         if use_native:
             words: List[Word] = list(native.words)
-            words.extend(self._recognise_empty_regions(page, regions, words, meta, language, cancel_check))
+            words.extend(self._recognise_empty_regions(page, frame, regions, words, meta, language, cancel_check))
             if any(w.confidence < 1.0 for w in words):
                 meta.classification = PageClassification.MIXED
         elif recognise:
@@ -286,11 +291,12 @@ class NativePdfImporter(BaseImporter):
                 # IMG-001: a picture that is exactly one embedded image, with nothing
                 # printed over it, is taken from the file at its own resolution.
                 if not any(coverage(w.box, region.box) > 0.5 for w in native.words):
-                    crop_img = self._embedded_picture(page, region, height, crop)
+                    crop_img = self._embedded_picture(page, region, frame)
                 if crop_img is None:
-                    dpi = self._figure_dpi(page, region, height, crop)
+                    dpi = self._figure_dpi(page, region, frame)
                     scale = bounded_pdf_scale(width, height, dpi)
-                    bm = page.render(scale=scale, crop=(box[0], height - box[3], width - box[2], box[1]))
+                    bm = page.render(scale=scale, rotation=frame.degrees,
+                                     crop=(box[0], height - box[3], width - box[2], box[1]))
                     try:
                         crop_img = bm.to_pil()
                     finally:
@@ -371,7 +377,7 @@ class NativePdfImporter(BaseImporter):
                 result, mean = alternative, statistics.mean(alt_conf)
         return ocr_words(result, scale), mean
 
-    def _recognise_empty_regions(self, page, regions: List[LayoutRegion], words: List[Word],
+    def _recognise_empty_regions(self, page, frame: PageFrame, regions: List[LayoutRegion], words: List[Word],
                                  meta: PageMetadata, language: str, cancel_check) -> List[Word]:
         """Mixed pages: text regions with no native text but painted as a picture (PDF-004)."""
         if self.routing_mode == RoutingMode.NATIVE_ONLY or meta.details.get("raster_coverage", 0) < 0.01:
@@ -388,7 +394,8 @@ class NativePdfImporter(BaseImporter):
         found: List[Word] = []
         for region in empty + pictures:
             box = (region.x0, region.y0, region.x1, region.y1)
-            bm = page.render(scale=scale, crop=(box[0], height - box[3], width - box[2], box[1]))
+            bm = page.render(scale=scale, rotation=frame.degrees,
+                             crop=(box[0], height - box[3], width - box[2], box[1]))
             try:
                 crop_img = bm.to_pil().convert("RGB")
             finally:
@@ -412,7 +419,7 @@ class NativePdfImporter(BaseImporter):
         return found
 
     @staticmethod
-    def _image_objects(page, words: List[Word], width: float, height: float, crop) -> List[LayoutRegion]:
+    def _image_objects(page, words: List[Word], frame: PageFrame) -> List[LayoutRegion]:
         """Embedded pictures as figure regions, used when no layout model is available (IMG-001).
 
         A picture that fills most of the page with text printed over it is a
@@ -425,11 +432,11 @@ class NativePdfImporter(BaseImporter):
             return []
         for obj in objects:
             try:
-                left, bottom, right, top = obj.get_bounds()
+                x0, y0, x1, y1 = frame.rect(*obj.get_bounds())
             except Exception:
                 continue
-            box = (max(0.0, left - crop[0]), max(0.0, crop[3] - top),
-                   min(width, right - crop[0]), min(height, crop[3] - bottom))
+            width, height = frame.width, frame.height
+            box = (max(0.0, x0), max(0.0, y0), min(width, x1), min(height, y1))
             if box[2] - box[0] < 6 or box[3] - box[1] < 6:
                 continue
             if (box[2] - box[0]) * (box[3] - box[1]) > 0.6 * width * height and any(
@@ -444,8 +451,8 @@ class NativePdfImporter(BaseImporter):
         return found
 
     @staticmethod
-    def _vector_artwork(page, regions: List[LayoutRegion], words: List[Word], width: float,
-                        height: float, crop) -> List[LayoutRegion]:
+    def _vector_artwork(page, regions: List[LayoutRegion], words: List[Word],
+                        frame: PageFrame) -> List[LayoutRegion]:
         """Drawings made of vector paths that the layout model did not mark (IMG-002).
 
         Paths are clustered; a cluster that is large, holds no text and lies
@@ -454,8 +461,7 @@ class NativePdfImporter(BaseImporter):
         boxes: List[List[float]] = []
         try:
             for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_PATH], max_depth=8):
-                left, bottom, right, top = obj.get_bounds()
-                boxes.append([left - crop[0], crop[3] - top, right - crop[0], crop[3] - bottom])
+                boxes.append(list(frame.rect(*obj.get_bounds())))
         except Exception:
             return []
         clusters: List[List[float]] = []
@@ -468,6 +474,7 @@ class NativePdfImporter(BaseImporter):
                     break
             else:
                 clusters.append(list(box))
+        width, height = frame.width, frame.height
         found: List[LayoutRegion] = []
         for x0, y0, x1, y1 in clusters:
             w, h = x1 - x0, y1 - y0
@@ -484,15 +491,14 @@ class NativePdfImporter(BaseImporter):
         return found
 
     @staticmethod
-    def _embedded_picture(page, region: LayoutRegion, height: float, crop) -> Optional[Image.Image]:
+    def _embedded_picture(page, region: LayoutRegion, frame: PageFrame) -> Optional[Image.Image]:
         """The decoded embedded image behind a figure, masks applied, at its own pixel size."""
         from openlargeprint.security.validator import validate_image_dimensions
 
         matches = []
         try:
             for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=8):
-                left, bottom, right, top = obj.get_bounds()
-                box = (left - crop[0], crop[3] - top, right - crop[0], crop[3] - bottom)
+                box = frame.rect(*obj.get_bounds())
                 if coverage(box, region.box) >= 0.85 and coverage(region.box, box) >= 0.85:
                     matches.append(obj)
                 elif coverage(box, region.box) > 0.2:
@@ -518,13 +524,13 @@ class NativePdfImporter(BaseImporter):
         return picture
 
     @staticmethod
-    def _figure_dpi(page, region: LayoutRegion, height: float, crop) -> float:
+    def _figure_dpi(page, region: LayoutRegion, frame: PageFrame) -> float:
         """Render figures at the resolution of the picture inside them, within sensible limits."""
         best = FIGURE_MIN_DPI
         try:
             for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=8):
                 left, bottom, right, top = obj.get_bounds()
-                box = (left - crop[0], crop[3] - top, right - crop[0], crop[3] - bottom)
+                box = frame.rect(left, bottom, right, top)
                 if coverage(region.box, box) < 0.3 and coverage(box, region.box) < 0.5:
                     continue
                 px_w, _ = obj.get_px_size()
