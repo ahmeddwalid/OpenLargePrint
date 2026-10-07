@@ -941,3 +941,159 @@ input[type="number"], textarea {
   cursor: pointer;
   font-weight: 600;
 }
+
+/* Header */
+.app-logo { width: 48px; height: 48px; object-fit: contain; }
+
+/* Step 3: format and paper side by side, then where it is saved, then convert */
+.choice-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 24px;
+}
+.choice-group { border: 0; min-width: 0; }
+.choice-legend {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.choice-row {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-color);
+}
+.choice-row .radio-card {
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  background: transparent;
+  min-height: 56px;
+  padding: 10px 16px 10px 48px;
+}
+[dir="rtl"] .choice-row .radio-card { padding: 10px 48px 10px 16px; }
+.choice-row .radio-card.selected { background: var(--bg-surface-raised); }
+.choice-row input[type="radio"] {
+  opacity: 1;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  inset-inline-start: 16px;
+  accent-color: var(--accent-primary);
+}
+
+.save-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-top: 20px;
+  padding: 14px 0;
+  border-block: 1px solid var(--border-color);
+}
+.save-target { display: flex; flex-direction: column; min-width: 0; }
+.save-label { font-size: 0.9375rem; color: var(--text-secondary); }
+.save-name { font-weight: 700; overflow-wrap: anywhere; }
+.save-folder { font-size: 0.9375rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.save-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+button.link-btn {
+  background: none;
+  border: 0;
+  padding: 10px 4px;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+button.link-btn:hover:not(:disabled) { background: none; color: var(--text-primary); }
+
+button.convert-btn { margin-top: 20px; min-width: min(100%, 18rem); }
+
+/* Form fields and checkboxes shared by More options and Settings */
+.advanced-options-section { margin-top: 8px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-weight: 600; }
+.field-help { font-size: 0.9375rem; color: var(--text-secondary); }
+.field-input {
+  width: 100%;
+  max-width: 22rem;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.number-input { width: 5.5rem; }
+.text-size-custom-input { display: inline-flex; align-items: center; gap: 8px; }
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.check-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  margin-top: 3px;
+  flex: none;
+  accent-color: var(--accent-primary);
+}
+.check-title { display: block; font-weight: 600; }
+.check-desc { display: block; font-size: 0.9375rem; color: var(--text-secondary); margin-top: 2px; }
+
+/* Settings menu in the header */
+.settings-menu { position: relative; }
+.settings-panel {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  width: min(22rem, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+.settings-update-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+/* In-app Reader: the same structure the exported files show */
+.reader-item {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 0.6em;
+  margin-bottom: 0.45em;
+}
+.reader-item-marker { min-width: 1.2em; }
+.reader-item.dialogue .reader-item-marker { font-weight: 700; }
+.reader-blank {
+  display: inline-block;
+  min-width: 5em;
+  height: 1em;
+  border-bottom: 2px solid currentColor;
+  vertical-align: -0.15em;
+}
+.reader-aside {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.5em 0.75em;
+  margin: 0 0 1em;
+}
+.reader-note {
+  display: block;
+  font-size: 0.85em;
+  font-style: italic;
+  color: var(--text-secondary);
+  margin: 0.2em 0 0.8em;
+}
+
+@media (max-width: 720px) {
+  .choice-columns { grid-template-columns: 1fr; }
+}

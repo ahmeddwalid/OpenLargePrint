@@ -6,7 +6,6 @@
 export type TextSize = 18 | 20 | 24 | 28;
 export type PaperSize = 'A4' | 'A3';
 export type OutputFormat = 'pdf' | 'docx' | 'html' | 'searchable_pdf';
-export type RoutingMode = 'auto' | 'native_only' | 'ocr_scanned_only' | 'max_accuracy';
 export type AppTheme = 'auto' | 'light' | 'sepia' | 'dark';
 
 export interface ImageAsset {
@@ -19,9 +18,18 @@ export interface ImageAsset {
   alt_text?: string;
 }
 
+/** Bold / italic / underline over [start, end) of a block's text (IR schema 1.1). */
+export interface InlineStyle {
+  start: number;
+  end: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+}
+
 export interface DocumentBlock {
   id: string;
-  block_type: 'heading' | 'paragraph' | 'list_item' | 'table' | 'figure' | 'caption' | 'quote' | 'page_marker' | 'code' | 'page_header' | 'page_footer' | 'footnote' | 'marginalia' | 'toc_entry' | 'decorative';
+  block_type: 'heading' | 'paragraph' | 'list_item' | 'table' | 'figure' | 'caption' | 'quote' | 'page_marker' | 'code' | 'page_header' | 'page_footer' | 'footnote' | 'marginalia' | 'toc_entry' | 'decorative' | 'aside';
   text?: string;
   source_page?: number;
   bbox?: [number, number, number, number];
@@ -32,6 +40,18 @@ export interface DocumentBlock {
   warnings?: string[];
   reading_order_index?: number;
   confidence?: number;
+  /** The source's own marker at the start of text ("1", "a)", "A:"). */
+  list_marker?: string | null;
+  indent_level?: number;
+  /** Finer meaning: "figure_text", "dialogue", "page_note", "contents", ... */
+  role?: string | null;
+  styles?: InlineStyle[];
+}
+
+export interface PageInfo {
+  page_number: number;
+  /** Page number printed in the book, when it differs from the file's page order. */
+  printed_page?: string;
 }
 
 export interface DocumentIR {
@@ -40,6 +60,7 @@ export interface DocumentIR {
   source_mime: string;
   page_count: number;
   blocks: DocumentBlock[];
+  pages?: PageInfo[];
   warnings?: string[];
   reading_order?: string[];
 }
@@ -62,11 +83,9 @@ export interface ConversionSettings {
   textEdits?: Record<string, string>;
   paperSize: PaperSize;
   outputFormat: OutputFormat;
-  routingMode: RoutingMode;
   pageRange: string;
   outputPath?: string;
   monochrome?: boolean;
-  preservePageArtwork?: boolean;
   pageBreakOnSourcePage?: boolean;
 }
 

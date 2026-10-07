@@ -23,6 +23,7 @@ const BACKEND_BLOCK_TYPE_MAP: Record<string, DocumentBlock['block_type']> = {
   figure: 'figure',
   caption: 'caption',
   page_marker: 'page_marker',
+  aside: 'aside',
 };
 
 export interface SidecarCallbacks {
@@ -44,18 +45,6 @@ function getTauri() {
 }
 
 export class SidecarClient {
-
-  public async hasEnglishAccuracyPack(): Promise<boolean> {
-    const t = getTauri();
-    if (!t?.invoke) return false;
-    try {
-      const health = await t.invoke('health_check');
-      return health?.status === 'ready' && health?.ocr_available === true &&
-        Array.isArray(health.accuracy_languages) && health.accuracy_languages.includes('en');
-    } catch {
-      return false;
-    }
-  }
 
   public async openFileDialog(): Promise<{ path: string; name: string; size: number } | null> {
     const t = getTauri();
@@ -278,6 +267,10 @@ export class SidecarClient {
                 warnings: b.warnings || [],
                 reading_order_index: b.reading_order_index,
                 confidence: b.confidence,
+                list_marker: b.list_marker ?? null,
+                indent_level: b.indent_level ?? 0,
+                role: b.role ?? null,
+                styles: Array.isArray(b.styles) ? b.styles : [],
               };
             });
 
@@ -287,6 +280,10 @@ export class SidecarClient {
               source_mime: 'application/pdf',
               page_count: p.page_count || p.document_ir.metadata?.page_count || 1,
               blocks: mappedBlocks,
+              pages: (p.document_ir.pages || []).map((page: any) => ({
+                page_number: page.page_number,
+                printed_page: page.details?.printed_page ? String(page.details.printed_page) : undefined,
+              })),
               warnings: p.warnings || p.document_ir.warnings || [],
             };
           } else {

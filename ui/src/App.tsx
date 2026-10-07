@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { AdvancedOptions } from './components/AdvancedOptions';
 import { DocumentTypeSelector } from './components/DocumentTypeSelector';
-import { ExportLocationPicker, LocationPreset } from './components/ExportLocationPicker';
 import { FilePicker } from './components/FilePicker';
 import { PaperSizeSelector } from './components/PaperSizeSelector';
 import { ProgressScreen } from './components/ProgressScreen';
 import { ReaderView } from './components/ReaderView';
 import { RecentDocuments, RecentDocumentItem } from './components/RecentDocuments';
 import { ReviewScreen } from './components/ReviewScreen';
+import { SaveLocation } from './components/SaveLocation';
+import { SettingsMenu } from './components/SettingsMenu';
 import { TextSizeSelector } from './components/TextSizeSelector';
 import { UpdateNotification } from './components/UpdateNotification';
 import { sidecar } from './api/sidecarClient';
 import { UpdateInfo, checkForUpdates, isUpdateDismissed } from './api/update-checker';
-import { useI18n, Locale } from './i18n/i18n';
+import { loadSettings, proposedOutputPath, saveSettings, SavedSettings } from './api/settings';
+import { useI18n } from './i18n/i18n';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import {
   AppTheme,
@@ -22,7 +24,6 @@ import {
   PaperSize,
   ProgressInfo,
   ReviewItem,
-  RoutingMode,
   TextSize,
 } from './types';
 
@@ -57,7 +58,7 @@ function saveRecentDocs(items: RecentDocumentItem[]) {
 
 export const App: React.FC = () => {
   // i18n for translations and direction
-  const { t, locale, direction, setLocale } = useI18n();
+  const { t, locale, direction } = useI18n();
 
   // Theme State (A11Y-004)
   const [theme, setTheme] = useState<AppTheme>(() => {
@@ -68,21 +69,25 @@ export const App: React.FC = () => {
     return 'sepia';
   });
 
-  // Document Selection & Settings State (UI-001, UI-006)
+  // Document Selection & Settings State (UI-001, UI-006). The three main
+  // choices are remembered; 20 pt, PDF and A4 are the first-run defaults.
+  const [initialSettings] = useState<SavedSettings>(loadSettings);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [textSize, setTextSize] = useState<TextSize>(20); // 20pt default per OUT-006
-  const [customBodyPt, setCustomBodyPt] = useState<number | null>(null);
-  const [paperSize, setPaperSize] = useState<PaperSize>('A4'); // A4 default per UI-006
-  const [outputFormat, setOutputFormat] = useState<OutputFormat>('pdf');
-  const [locationPreset, setLocationPreset] = useState<LocationPreset>('downloads');
+  const [textSize, setTextSize] = useState<TextSize>(initialSettings.textSize);
+  const [customBodyPt, setCustomBodyPt] = useState<number | null>(initialSettings.customBodyPt);
+  const [paperSize, setPaperSize] = useState<PaperSize>(initialSettings.paperSize);
+  const [mainFormat, setMainFormat] = useState<Exclude<OutputFormat, 'searchable_pdf'>>(initialSettings.outputFormat);
   const [customOutputPath, setCustomOutputPath] = useState<string | null>(null);
-  const [systemPaths, setSystemPaths] = useState<{ downloads: string; desktop: string; documents: string } | null>(null);
-  const [routingMode, setRoutingMode] = useState<RoutingMode>('auto');
-  const [accuracyAvailable, setAccuracyAvailable] = useState(false);
+  const [downloadsDir, setDownloadsDir] = useState<string | null>(null);
   const [pageRange, setPageRange] = useState<string>('');
   const [monochrome, setMonochrome] = useState<boolean>(false);
-  const [preservePageArtwork, setPreservePageArtwork] = useState<boolean>(false);
   const [pageBreakOnSourcePage, setPageBreakOnSourcePage] = useState<boolean>(false);
+  const [searchableOriginal, setSearchableOriginal] = useState<boolean>(false);
+  const outputFormat: OutputFormat = searchableOriginal ? 'searchable_pdf' : mainFormat;
+
+  useEffect(() => {
+    saveSettings({ textSize, customBodyPt, paperSize, outputFormat: mainFormat });
+  }, [textSize, customBodyPt, paperSize, mainFormat]);
 
   // Workflow State
   const [viewMode, setViewMode] = useState<ViewMode>('home');
@@ -102,11 +107,6 @@ export const App: React.FC = () => {
   // Load recent documents on startup
   useEffect(() => {
     setRecentDocs(loadRecentDocs());
-    let active = true;
-    sidecar.hasEnglishAccuracyPack().then(available => {
-      if (active) setAccuracyAvailable(available);
-    });
-    return () => { active = false; };
   }, []);
 
   // Synchronize theme to document element and persist preference
@@ -115,10 +115,10 @@ export const App: React.FC = () => {
     localStorage.setItem('openlargeprint_theme', theme);
   }, [theme]);
 
-  // Fetch native desktop system paths (Downloads, Desktop, Documents)
+  // The Downloads folder is the fallback when the original's folder is unknown.
   useEffect(() => {
     sidecar.getSystemPaths().then((paths) => {
-      setSystemPaths(paths);
+      setDownloadsDir(paths.downloads || null);
     });
   }, []);
 
@@ -151,58 +151,14 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  const getProposedExportPath = (): string => {
-    const ext = outputFormat === 'docx' ? 'docx' : outputFormat === 'html' ? 'html' : 'pdf';
-
-    if (locationPreset === 'custom' && customOutputPath) {
-      const lastDot = customOutputPath.lastIndexOf('.');
-      if (lastDot > 0) {
-        return `${customOutputPath.substring(0, lastDot)}.${ext}`;
-      }
-      return `${customOutputPath}.${ext}`;
-    }
-
-    const docName = selectedFile ? selectedFile.name : 'document';
-    const lastDot = docName.lastIndexOf('.');
-    const stem = lastDot > 0 ? docName.substring(0, lastDot) : docName;
-    const targetFileName = `${stem}-largeprint.${ext}`;
-
-    const nativePath = (selectedFile as any)?.nativePath;
-    const isWindows = typeof window !== 'undefined' && (Boolean(systemPaths?.downloads?.includes('\\')) || (nativePath && nativePath.includes('\\')));
-    const separator = isWindows ? '\\' : '/';
-
-    if (locationPreset === 'downloads' && systemPaths?.downloads) {
-      return `${systemPaths.downloads}${separator}${targetFileName}`;
-    }
-
-    if (locationPreset === 'desktop' && systemPaths?.desktop) {
-      return `${systemPaths.desktop}${separator}${targetFileName}`;
-    }
-
-    if (locationPreset === 'source' && nativePath) {
-      const parts = nativePath.split(separator);
-      parts.pop();
-      const parentDir = parts.join(separator);
-      return `${parentDir}${separator}${targetFileName}`;
-    }
-
-    // Default fallback to Downloads if available
-    if (systemPaths?.downloads) {
-      return `${systemPaths.downloads}${separator}${targetFileName}`;
-    }
-    return targetFileName;
-  };
-
-  const handleFormatChange = (newFormat: OutputFormat) => {
-    setOutputFormat(newFormat);
-    if (customOutputPath) {
-      const ext = newFormat === 'docx' ? 'docx' : newFormat === 'html' ? 'html' : 'pdf';
-      const lastDot = customOutputPath.lastIndexOf('.');
-      if (lastDot > 0) {
-        setCustomOutputPath(`${customOutputPath.substring(0, lastDot)}.${ext}`);
-      }
-    }
-  };
+  const getProposedExportPath = (): string =>
+    proposedOutputPath({
+      sourceName: selectedFile ? selectedFile.name : 'document',
+      sourcePath: (selectedFile as any)?.nativePath,
+      format: outputFormat,
+      customPath: customOutputPath,
+      downloadsDir,
+    });
 
   const handleStartConversion = async () => {
     if (!selectedFile) return;
@@ -213,20 +169,18 @@ export const App: React.FC = () => {
       currentPage: 0,
       totalPages: 0,
       stage: 'starting',
-      humanMessage: 'Inspecting document and preparing conversion...',
+      humanMessage: t('progress.starting'),
       percent: 0,
     });
 
-    const targetOutputPath = customOutputPath || getProposedExportPath();
+    const targetOutputPath = getProposedExportPath();
     const settings: ConversionSettings = {
       textSize,
       customBodyPt,
       paperSize,
       outputFormat,
-      routingMode,
       pageRange,
       monochrome,
-      preservePageArtwork,
       pageBreakOnSourcePage,
       outputPath: targetOutputPath,
     };
@@ -235,9 +189,6 @@ export const App: React.FC = () => {
     await sidecar.startConversion(targetDocPath, settings, {
       onProgress: (p) => {
         setProgress(p);
-      },
-      onCheckpoint: (page, count) => {
-        console.log(`Checkpoint saved: page ${page} with ${count} blocks`);
       },
       onError: (err) => {
         setErrorMessage(err);
@@ -377,7 +328,7 @@ export const App: React.FC = () => {
       return;
     }
 
-    const targetOutputPath = customOutputPath || getProposedExportPath();
+    const targetOutputPath = getProposedExportPath();
     const settings: ConversionSettings = {
       textSize,
       customBodyPt: selection.fontPt,
@@ -387,7 +338,6 @@ export const App: React.FC = () => {
         .map((block) => [block.id, block.text as string])),
       paperSize,
       outputFormat,
-      routingMode,
       pageRange: selection.pages ? selection.pages.join(',') : '',
       monochrome,
       pageBreakOnSourcePage,
@@ -434,8 +384,8 @@ export const App: React.FC = () => {
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).src = '/logo.png';
             }}
-            alt="OpenLargePrint Logo"
-            style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'contain' }}
+            alt=""
+            className="app-logo"
           />
           <div>
             <h1>{t('app.title')}</h1>
@@ -444,45 +394,7 @@ export const App: React.FC = () => {
         </div>
 
         <div className="header-controls">
-          <label htmlFor="global-theme-toggle" style={{ fontSize: '0.9375rem', fontWeight: 600 }}>
-            {t('theme.label')}
-          </label>
-          <select
-            id="global-theme-toggle"
-            value={theme}
-            onChange={(e) => setTheme(e.target.value as AppTheme)}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: 'var(--bg-primary)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'var(--radius-sm)',
-            }}
-          >
-            <option value="light">{t('theme.light')}</option>
-            <option value="auto">{t('theme.auto')}</option>
-            <option value="sepia">{t('theme.sepia')}</option>
-            <option value="dark">{t('theme.dark')}</option>
-          </select>
-
-          <label htmlFor="global-lang-select" style={{ fontSize: '0.9375rem', fontWeight: 600 }}>
-            {t('lang.label')}
-          </label>
-          <select
-            id="global-lang-select"
-            value={locale}
-            onChange={(e) => setLocale(e.target.value as Locale)}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: 'var(--bg-primary)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'var(--radius-sm)',
-            }}
-          >
-            <option value="en">{t('lang.en')}</option>
-            <option value="ar">{t('lang.ar')}</option>
-          </select>
+          <SettingsMenu theme={theme} onThemeChange={setTheme} />
         </div>
       </header>
 
@@ -524,7 +436,7 @@ export const App: React.FC = () => {
               }}
             />
 
-            {/* Step 2: Font size selection (OUT-006) */}
+            {/* Step 2: Text size (OUT-006) */}
             <TextSizeSelector
               value={textSize}
               onChange={(size) => setTextSize(size)}
@@ -532,73 +444,54 @@ export const App: React.FC = () => {
               onCustomBodyPtChange={setCustomBodyPt}
             />
 
-            {/* Step 3: Export Format Selector (Default: PDF) */}
-            <DocumentTypeSelector
-              value={outputFormat}
-              onChange={handleFormatChange}
-            />
-
-            {/* Step 2.5: Direct choice of A4 vs A3 paper size (UI-006) */}
-            <PaperSizeSelector value={paperSize} onChange={(size) => setPaperSize(size)} />
-
-            {/* Step 5: Convert Action */}
-            <div style={{ marginTop: '28px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+            {/* Step 3: Format, paper and where it is saved, then convert (UI-001, UI-006) */}
+            <section className="decision-step" aria-labelledby="step-3-label">
+              <h2 id="step-3-label" className="step-label">3. {t('step3.label')}</h2>
+              {!searchableOriginal && (
+                <div className="choice-columns">
+                  <DocumentTypeSelector value={mainFormat} onChange={setMainFormat} />
+                  <PaperSizeSelector value={paperSize} onChange={(size) => setPaperSize(size)} />
+                </div>
+              )}
+              {searchableOriginal && <p className="field-help">{t('export.searchable_active')}</p>}
+              {selectedFile && (
+                <SaveLocation
+                  outputPath={getProposedExportPath()}
+                  outputFormat={outputFormat}
+                  isCustom={customOutputPath !== null}
+                  onChoose={setCustomOutputPath}
+                  onReset={() => setCustomOutputPath(null)}
+                />
+              )}
               <button
                 type="button"
-                className="primary-btn"
+                className="primary-btn convert-btn"
                 disabled={!selectedFile}
                 onClick={handleStartConversion}
                 aria-label={
                   selectedFile
                     ? t('convert.aria_ready', {
                         fileName: selectedFile.name,
-                        textSize: String(textSize),
+                        textSize: String(customBodyPt ?? textSize),
                         paperSize,
-                        format: outputFormat.toUpperCase(),
+                        format: t(`format.${mainFormat}`),
                       })
                     : t('convert.aria_no_file')
                 }
               >
                 {t('convert.button')}
               </button>
-            </div>
+            </section>
 
-            <details className="output-options">
-              <summary>Save location</summary>
-            {/* Step 4: Export Location Picker */}
-            <ExportLocationPicker
-              outputPath={getProposedExportPath()}
-              defaultFileName={selectedFile ? selectedFile.name : 'document'}
-              outputFormat={outputFormat}
-              preset={locationPreset}
-              onPresetChange={(newPreset) => {
-                setLocationPreset(newPreset);
-                if (newPreset !== 'custom') {
-                  setCustomOutputPath(null);
-                }
-              }}
-              onCustomPathSelected={(chosenPath) => {
-                setCustomOutputPath(chosenPath);
-                setLocationPreset('custom');
-              }}
-            />
-
-            </details>
-
-            {/* Collapsible Disclosure for Advanced Settings (UI-001) */}
             <AdvancedOptions
-              routingMode={routingMode}
-              accuracyAvailable={accuracyAvailable}
-              onOpen={() => { void sidecar.hasEnglishAccuracyPack().then(setAccuracyAvailable); }}
-              onRoutingModeChange={setRoutingMode}
               pageRange={pageRange}
               onPageRangeChange={setPageRange}
               monochrome={monochrome}
               onMonochromeChange={setMonochrome}
-              preservePageArtwork={preservePageArtwork}
-              onPreservePageArtworkChange={setPreservePageArtwork}
               pageBreakOnSourcePage={pageBreakOnSourcePage}
               onPageBreakOnSourcePageChange={setPageBreakOnSourcePage}
+              searchableOriginal={searchableOriginal}
+              onSearchableOriginalChange={setSearchableOriginal}
             />
 
             {/* Recent Documents Shelf (UI-001) */}

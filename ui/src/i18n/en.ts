@@ -10,20 +10,16 @@ const en: Record<string, string> = {
   'app.skip_to_content': 'Skip to main content',
 
   // Theme selector
-  'theme.label': 'Theme:',
-  'theme.sepia': 'Sepia (Default)',
+  'theme.label': 'Colours',
+  'theme.sepia': 'Warm paper (default)',
   'theme.light': 'Light',
-  'theme.auto': 'Auto (follow system)',
+  'theme.auto': 'Follow the computer',
   'theme.dark': 'Dark',
 
   // Direction toggle
-  'dir.toggle_to_rtl': 'Switch layout reading direction to Right-to-Left',
-  'dir.toggle_to_ltr': 'Switch layout reading direction to Left-to-Right',
-  'dir.rtl_label': 'RTL',
-  'dir.ltr_label': 'LTR',
 
   // Language selector
-  'lang.label': 'Language:',
+  'lang.label': 'Language',
   'lang.en': 'English',
   'lang.ar': 'العربية',
 
@@ -36,7 +32,7 @@ const en: Record<string, string> = {
   'file.size_label': 'Size:',
 
   // Text size selector
-  'textsize.step_label': 'Text size',
+  'textsize.step_label': 'Choose text size',
   'textsize.comfortable': 'Comfortable',
   'textsize.comfortable_detail': '18 pt',
   'textsize.large': 'Large',
@@ -47,43 +43,32 @@ const en: Record<string, string> = {
   'textsize.very_large_detail': '28 pt',
 
   // Paper size selector
-  'paper.step_label': 'Paper size',
+  'paper.step_label': 'Paper',
   'paper.a4': 'A4',
-  'paper.a4_detail': '210 × 297 mm (default)',
+  'paper.a4_detail': 'Standard paper (default)',
   'paper.a3': 'A3',
-  'paper.a3_detail': '297 × 420 mm',
+  'paper.a3_detail': 'Twice the size, for wide tables',
 
   // Output format selector
-  'format.step_label': 'Output format',
+  'format.step_label': 'Format',
   'format.pdf': 'PDF',
-  'format.pdf_detail': 'Print-ready document',
-  'format.docx': 'Word',
-  'format.docx_detail': 'Editable document',
-  'format.html': 'Reader',
-  'format.html_detail': 'View in app',
+  'format.pdf_detail': 'Ready to print',
+  'format.docx': 'Word document',
+  'format.docx_detail': 'Can be edited',
+  'format.html': 'Reader page',
+  'format.html_detail': 'Read on screen, change size any time',
 
   // Export location
-  'export.step_label': 'Save to',
-  'export.downloads': 'Downloads',
-  'export.desktop': 'Desktop',
-  'export.source': 'Same folder as original',
-  'export.custom': 'Choose location...',
-  'export.output_path': 'Output file:',
 
   // Convert button
-  'convert.button': 'Convert to Large Print',
-  'convert.aria_ready': 'Convert {fileName} to {textSize} point large print on {paperSize} paper as {format}',
+  'convert.button': 'Make large print',
+  'convert.aria_ready': 'Make a {textSize} point large-print {format} of {fileName} on {paperSize} paper',
   'convert.aria_no_file': 'Choose a document first to convert',
 
   // Advanced options
   'advanced.toggle': 'More options',
-  'advanced.routing_label': 'Processing mode',
-  'advanced.routing_auto': 'Automatic',
-  'advanced.routing_native': 'Native text only',
-  'advanced.routing_ocr': 'OCR scanned only',
-  'advanced.routing_max': 'Maximum accuracy',
-  'advanced.page_range_label': 'Page range',
-  'advanced.page_range_placeholder': 'e.g. 1-10, 15, 20-30',
+  'advanced.page_range_label': 'Only some pages',
+  'advanced.page_range_placeholder': 'For example 1-10, 15',
 
   // Progress screen
   'progress.starting': 'Inspecting document and preparing conversion...',
@@ -167,12 +152,39 @@ const en: Record<string, string> = {
   'file.saved_file': 'Saved file:',
 
   // Export & Print options
-  'export.monochrome_label': 'Monochrome output (for black-and-white laser printers)',
-  'export.monochrome_desc': 'Converts all figures, charts, and colors to pure high-contrast black and white for clean laser printing without halftone dithering.',
-  'export.artwork_label': 'Keep page artwork (full-page backgrounds and scans)',
-  'export.artwork_desc': 'By default a picture that covers a whole page is left out, because it is usually the scanned page itself or a background. Turn this on to keep those pictures as figures in the converted document.',
+  'export.monochrome_label': 'Black and white pictures',
+  'export.monochrome_desc': 'For black-and-white laser printers: pictures are printed in clear greys instead of colour.',
   'export.page_break_label': 'Start each original page on a new sheet',
-  'export.page_break_desc': 'Inserts a page break before each original page marker in exported PDFs and Word documents, keeping pages isolated instead of flowing continuously.',
+  'export.page_break_desc': 'Keeps each page of the book separate instead of letting the text flow on.',
+  'textsize.18': 'Large print',
+  'textsize.20': 'Recommended',
+  'textsize.24': 'Bigger',
+  'textsize.28': 'Biggest',
+  'textsize.custom': 'Other size',
+  'textsize.custom_label': 'Size in points',
+  'textsize.custom_aria': 'Custom body text size in points',
+  'textsize.group_aria': 'Text size options',
+  'step3.label': 'Make the large-print copy',
+  'save.label': 'Saves as',
+  'save.in_folder': 'in {folder}',
+  'save.change': 'Save somewhere else…',
+  'save.reset': 'Save next to the original',
+  'advanced.page_range_help': 'Leave empty to convert the whole document.',
+  'export.searchable_label': 'Searchable copy of the original instead',
+  'export.searchable_desc': 'Keeps the original pages and their size, and adds text that can be searched and copied. The text is not made larger.',
+  'export.searchable_active': 'A searchable copy of the original PDF will be made. Its text stays the original size.',
+  'settings.button': 'Settings',
+  'settings.updates': 'Updates',
+  'settings.update_auto': 'Look for a new version when the app starts',
+  'settings.update_check': 'Look for a new version now',
+  'settings.update_checking': 'Looking…',
+  'settings.update_available': 'Version {version} is available.',
+  'settings.update_current': 'You have the newest version ({version}).',
+  'settings.update_failed': 'Could not look for a new version. Check the internet connection.',
+  'settings.version': 'OpenLargePrint {version}',
+  'reader.in_picture': 'In the picture:',
+  'reader.page_marker': 'Original page {page}',
+  'reader.page_marker_printed': 'Original page {page} (printed {printed})',
 };
 
 export default en;

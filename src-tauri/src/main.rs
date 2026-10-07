@@ -19,7 +19,6 @@ pub struct ConversionSettingsPayload {
     pub text_size: Option<u32>,
     pub paper_size: Option<String>,
     pub output_format: Option<String>,
-    pub routing_mode: Option<String>,
     pub page_range: Option<String>,
     pub page_break_on_source_page: Option<bool>,
 }
@@ -807,17 +806,9 @@ async fn start_conversion(
         .get("paperSize")
         .and_then(|p| p.as_str())
         .unwrap_or("A4");
-    let routing_mode = settings
-        .get("routingMode")
-        .and_then(|m| m.as_str())
-        .unwrap_or("automatic");
     let monochrome = settings
         .get("monochrome")
         .and_then(|m| m.as_bool())
-        .unwrap_or(false);
-    let preserve_page_artwork = settings
-        .get("preservePageArtwork")
-        .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let page_break_on_source_page = settings
         .get("pageBreakOnSourcePage")
@@ -835,10 +826,10 @@ async fn start_conversion(
         "preset": preset,
         "paper_size": paper_size,
         "export_format": out_fmt,
-        "routing_mode": routing_mode,
+        // One recognition pipeline: the engine decides per page (never OCRs native text).
+        "routing_mode": "automatic",
         "include_page_markers": true,
         "monochrome": monochrome,
-        "preserve_page_artwork": preserve_page_artwork,
         "page_break_on_source_page": page_break_on_source_page,
     });
 

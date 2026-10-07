@@ -1,39 +1,36 @@
 import React from 'react';
 import { PaperSize } from '../types';
+import { useI18n } from '../i18n/i18n';
 
 interface PaperSizeSelectorProps {
   value: PaperSize;
   onChange: (size: PaperSize) => void;
 }
 
-const PAPERS: { size: PaperSize; label: string; description: string }[] = [
-  { size: 'A4', label: 'A4 Paper (Default)', description: 'Standard size for ordinary office & home printers' },
-  { size: 'A3', label: 'A3 Paper', description: 'Large format sheet, recommended for wide tables' },
-];
+const SIZES: PaperSize[] = ['A4', 'A3'];
 
+/** A4 is the default; A3 is a first-class choice next to it, never hidden (OUT-007, UI-006). */
 export const PaperSizeSelector: React.FC<PaperSizeSelectorProps> = ({ value, onChange }) => {
+  const { t } = useI18n();
   return (
-    <fieldset className="decision-step" style={{ border: 'none', padding: 0 }}>
-      <legend className="step-label">Paper format</legend>
-      <div className="radio-group-grid" role="radiogroup" aria-label="Paper size options">
-        {PAPERS.map((item) => {
-          const isSelected = value === item.size;
+    <fieldset className="choice-group">
+      <legend className="choice-legend">{t('paper.step_label')}</legend>
+      <div className="choice-row" role="radiogroup" aria-label={t('paper.step_label')}>
+        {SIZES.map((size) => {
+          const selected = value === size;
+          const key = size.toLowerCase();
           return (
-            <label
-              key={item.size}
-              className={`radio-card ${isSelected ? 'selected' : ''}`}
-              htmlFor={`paper-${item.size}`}
-            >
+            <label key={size} className={`radio-card ${selected ? 'selected' : ''}`} htmlFor={`paper-${size}`}>
               <input
                 type="radio"
-                id={`paper-${item.size}`}
+                id={`paper-${size}`}
                 name="paper-size"
-                value={item.size}
-                checked={isSelected}
-                onChange={() => onChange(item.size)}
+                value={size}
+                checked={selected}
+                onChange={() => onChange(size)}
               />
-              <span className="radio-title">{item.label}</span>
-              <span className="radio-sub">{item.description}</span>
+              <span className="radio-title">{t(`paper.${key}`)}</span>
+              <span className="radio-sub">{t(`paper.${key}_detail`)}</span>
             </label>
           );
         })}

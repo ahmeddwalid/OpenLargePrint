@@ -10,20 +10,16 @@ const ar: Record<string, string> = {
   'app.skip_to_content': 'تخطي إلى المحتوى الرئيسي',
 
   // Theme selector
-  'theme.label': 'المظهر:',
-  'theme.sepia': 'بني داكن (افتراضي)',
+  'theme.label': 'الألوان',
+  'theme.sepia': 'ورق دافئ (افتراضي)',
   'theme.light': 'فاتح',
-  'theme.auto': 'تلقائي (حسب النظام)',
+  'theme.auto': 'حسب إعدادات الحاسوب',
   'theme.dark': 'داكن',
 
   // Direction toggle
-  'dir.toggle_to_rtl': 'تبديل اتجاه القراءة إلى اليمين لليسار',
-  'dir.toggle_to_ltr': 'تبديل اتجاه القراءة إلى اليسار لليمين',
-  'dir.rtl_label': 'عربي',
-  'dir.ltr_label': 'LTR',
 
   // Language selector
-  'lang.label': 'اللغة:',
+  'lang.label': 'اللغة',
   'lang.en': 'English',
   'lang.ar': 'العربية',
 
@@ -36,7 +32,7 @@ const ar: Record<string, string> = {
   'file.size_label': 'الحجم:',
 
   // Text size selector
-  'textsize.step_label': 'حجم الخط',
+  'textsize.step_label': 'اختر حجم الخط',
   'textsize.comfortable': 'مريح',
   'textsize.comfortable_detail': '18 نقطة',
   'textsize.large': 'كبير',
@@ -47,43 +43,32 @@ const ar: Record<string, string> = {
   'textsize.very_large_detail': '28 نقطة',
 
   // Paper size selector
-  'paper.step_label': 'حجم الورق',
+  'paper.step_label': 'الورق',
   'paper.a4': 'A4',
-  'paper.a4_detail': '210 × 297 ملم (افتراضي)',
+  'paper.a4_detail': 'الورق العادي (افتراضي)',
   'paper.a3': 'A3',
-  'paper.a3_detail': '297 × 420 ملم',
+  'paper.a3_detail': 'ضعف المساحة، للجداول العريضة',
 
   // Output format selector
-  'format.step_label': 'صيغة الإخراج',
+  'format.step_label': 'الصيغة',
   'format.pdf': 'PDF',
-  'format.pdf_detail': 'مستند جاهز للطباعة',
-  'format.docx': 'Word',
-  'format.docx_detail': 'مستند قابل للتحرير',
-  'format.html': 'قارئ',
-  'format.html_detail': 'عرض في التطبيق',
+  'format.pdf_detail': 'جاهز للطباعة',
+  'format.docx': 'مستند Word',
+  'format.docx_detail': 'قابل للتعديل',
+  'format.html': 'صفحة قراءة',
+  'format.html_detail': 'للقراءة على الشاشة مع تغيير الحجم في أي وقت',
 
   // Export location
-  'export.step_label': 'حفظ في',
-  'export.downloads': 'التنزيلات',
-  'export.desktop': 'سطح المكتب',
-  'export.source': 'نفس مجلد الملف الأصلي',
-  'export.custom': 'اختر موقعًا...',
-  'export.output_path': 'ملف الإخراج:',
 
   // Convert button
-  'convert.button': 'تحويل إلى طباعة كبيرة',
-  'convert.aria_ready': 'تحويل {fileName} إلى طباعة كبيرة بحجم {textSize} نقطة على ورق {paperSize} بصيغة {format}',
+  'convert.button': 'أنشئ الطباعة الكبيرة',
+  'convert.aria_ready': 'إنشاء نسخة {format} بطباعة كبيرة بحجم {textSize} نقطة من {fileName} على ورق {paperSize}',
   'convert.aria_no_file': 'اختر مستندًا أولًا للتحويل',
 
   // Advanced options
   'advanced.toggle': 'خيارات إضافية',
-  'advanced.routing_label': 'وضع المعالجة',
-  'advanced.routing_auto': 'تلقائي',
-  'advanced.routing_native': 'نص أصلي فقط',
-  'advanced.routing_ocr': 'التعرف الضوئي فقط',
-  'advanced.routing_max': 'أقصى دقة',
-  'advanced.page_range_label': 'نطاق الصفحات',
-  'advanced.page_range_placeholder': 'مثال: 1-10، 15، 20-30',
+  'advanced.page_range_label': 'صفحات محددة فقط',
+  'advanced.page_range_placeholder': 'مثال: 1-10، 15',
 
   // Progress screen
   'progress.starting': 'فحص المستند وتجهيز التحويل...',
@@ -167,12 +152,39 @@ const ar: Record<string, string> = {
   'file.saved_file': 'الملف المحفوظ:',
 
   // Export & Print options
-  'export.monochrome_label': 'تصدير أحادي اللون (لطابعات الليزر الأبيض والأسود)',
-  'export.monochrome_desc': 'تحويل كافة الصور والعناصر لتباين أبيض وأسود نقي للطباعة بالليزر دون تدرجات ضبابية.',
-  'export.artwork_label': 'الحفاظ على رسومات الصفحة (الخلفيات والمسح الكامل للصفحة)',
-  'export.artwork_desc': 'افتراضياً تُحذف الصورة التي تغطي الصفحة بالكامل لأنها غالباً صفحة المسح نفسها أو خلفية. فعّل هذا الخيار للإبقاء على تلك الصور كعناصر في المستند المحوَّل.',
-  'export.page_break_label': 'بدء كل صفحة أصلية في ورقة جديدة',
-  'export.page_break_desc': 'إدراج فاصل صفحات قبل محدد كل صفحة أصلية في مستندات PDF و Word المصدرة، للحفاظ على الصفحات منفصلة بدلاً من التدفق المستمر.',
+  'export.monochrome_label': 'صور بالأبيض والأسود',
+  'export.monochrome_desc': 'لطابعات الليزر بالأبيض والأسود: تُطبع الصور بدرجات رمادية واضحة بدل الألوان.',
+  'export.page_break_label': 'ابدأ كل صفحة أصلية في ورقة جديدة',
+  'export.page_break_desc': 'يبقي كل صفحة من الكتاب منفصلة بدل أن يتدفق النص متصلًا.',
+  'textsize.18': 'طباعة كبيرة',
+  'textsize.20': 'الموصى به',
+  'textsize.24': 'أكبر',
+  'textsize.28': 'الأكبر',
+  'textsize.custom': 'حجم آخر',
+  'textsize.custom_label': 'الحجم بالنقاط',
+  'textsize.custom_aria': 'حجم نص مخصص بالنقاط',
+  'textsize.group_aria': 'خيارات حجم الخط',
+  'step3.label': 'أنشئ نسخة الطباعة الكبيرة',
+  'save.label': 'يُحفظ باسم',
+  'save.in_folder': 'في {folder}',
+  'save.change': 'احفظ في مكان آخر…',
+  'save.reset': 'احفظ بجانب الملف الأصلي',
+  'advanced.page_range_help': 'اتركه فارغًا لتحويل المستند كله.',
+  'export.searchable_label': 'نسخة من الأصل قابلة للبحث بدلًا من ذلك',
+  'export.searchable_desc': 'تبقى الصفحات الأصلية بحجمها، ويُضاف نص يمكن البحث فيه ونسخه. لا يُكبَّر النص.',
+  'export.searchable_active': 'ستُنشأ نسخة قابلة للبحث من ملف PDF الأصلي. يبقى النص بحجمه الأصلي.',
+  'settings.button': 'الإعدادات',
+  'settings.updates': 'التحديثات',
+  'settings.update_auto': 'ابحث عن إصدار جديد عند تشغيل البرنامج',
+  'settings.update_check': 'ابحث عن إصدار جديد الآن',
+  'settings.update_checking': 'جارٍ البحث…',
+  'settings.update_available': 'الإصدار {version} متاح.',
+  'settings.update_current': 'لديك أحدث إصدار ({version}).',
+  'settings.update_failed': 'تعذّر البحث عن إصدار جديد. تحقق من الاتصال بالإنترنت.',
+  'settings.version': 'OpenLargePrint {version}',
+  'reader.in_picture': 'في الصورة:',
+  'reader.page_marker': 'الصفحة الأصلية {page}',
+  'reader.page_marker_printed': 'الصفحة الأصلية {page} (المطبوعة {printed})',
 };
 
 export default ar;

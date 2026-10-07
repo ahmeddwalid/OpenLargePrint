@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppTheme, DocumentBlock, DocumentIR } from '../types';
+import { AppTheme, DocumentBlock, DocumentIR, InlineStyle } from '../types';
 import { sidecar } from '../api/sidecarClient';
 import { useI18n } from '../i18n/i18n';
 
@@ -55,6 +55,53 @@ const HighlightedText: React.FC<{
   );
 };
 
+const BLANK_TOKEN = '______';
+
+/**
+ * Block text with its emphasis (bold / italic / underline spans from the IR),
+ * answer blanks drawn as lines, and search highlighting.
+ */
+const RichText: React.FC<{
+  text: string;
+  styles?: InlineStyle[];
+  offset?: number;
+  searchQuery: string;
+  isActiveMatch?: boolean;
+}> = ({ text, styles = [], offset = 0, searchQuery, isActiveMatch = false }) => {
+  const cuts = new Set<number>([0, text.length]);
+  for (const style of styles) {
+    for (const edge of [style.start - offset, style.end - offset]) {
+      if (edge > 0 && edge < text.length) cuts.add(edge);
+    }
+  }
+  const edges = Array.from(cuts).sort((a, b) => a - b);
+  const pieces: React.ReactNode[] = [];
+  for (let i = 0; i < edges.length - 1; i++) {
+    const start = edges[i];
+    const end = edges[i + 1];
+    const covering = styles.filter((st) => st.start - offset <= start && st.end - offset >= end);
+    const parts = text.substring(start, end).split(BLANK_TOKEN);
+    let node: React.ReactNode = parts.map((part, index) => (
+      <React.Fragment key={index}>
+        {index > 0 && <span className="reader-blank" role="img" aria-label="blank" />}
+        <HighlightedText text={part} searchQuery={searchQuery} isActiveMatch={isActiveMatch} />
+      </React.Fragment>
+    ));
+    if (covering.some((st) => st.underline)) node = <u>{node}</u>;
+    if (covering.some((st) => st.italic)) node = <em>{node}</em>;
+    if (covering.some((st) => st.bold)) node = <strong>{node}</strong>;
+    pieces.push(<React.Fragment key={start}>{node}</React.Fragment>);
+  }
+  return <>{pieces}</>;
+};
+
+/** Plain-language note under a block that needs checking against the original. */
+const BlockNote: React.FC<{ block: DocumentBlock }> = ({ block }) => {
+  const warning = block.warnings?.[0];
+  if (!warning) return null;
+  return <p className="reader-note">{warning}</p>;
+};
+
 const HeadingBlock: React.FC<{
   id: string;
   level?: number;
@@ -63,7 +110,8 @@ const HeadingBlock: React.FC<{
   className?: string;
   searchQuery?: string;
   isActiveMatch?: boolean;
-}> = ({ id, level = 1, fontSize, text = '', className, searchQuery = '', isActiveMatch = false }) => {
+  styles?: InlineStyle[];
+}> = ({ id, level = 1, fontSize, text = '', className, searchQuery = '', isActiveMatch = false, styles }) => {
   const boundedLevel = Math.min(6, Math.max(1, level));
   const style: React.CSSProperties = {
     marginTop: '1.2em',
@@ -71,7 +119,7 @@ const HeadingBlock: React.FC<{
     fontSize: `${fontSize / 12 * (boundedLevel === 1 ? 1.4 : 1.2)}rem`,
     fontWeight: 700,
   };
-  const content = <HighlightedText text={text} searchQuery={searchQuery} isActiveMatch={isActiveMatch} />;
+  const content = <RichText text={text} styles={styles} searchQuery={searchQuery} isActiveMatch={isActiveMatch} />;
 
   switch (boundedLevel) {
     case 1:
@@ -132,6 +180,15 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   const handleZoomOut = () => {
     setFontSize((prev) => Math.max(14, prev - 2));
+  };
+
+  const printedPages = new Map((documentIR.pages || []).map((p) => [p.page_number, p.printed_page]));
+  const pageLabel = (block: DocumentBlock): string => {
+    const page = block.source_page ?? 0;
+    const printed = printedPages.get(page);
+    return printed && printed !== String(page)
+      ? t('reader.page_marker_printed', { page, printed })
+      : t('reader.page_marker', { page });
   };
 
   const filteredBlocks = selectedPageFilter === 'all'
@@ -858,6 +915,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   level={block.heading_level}
                   fontSize={fontSize}
                   text={block.text}
+                  styles={block.styles}
                   className={speakingClass}
                   searchQuery={searchQuery}
                   isActiveMatch={isSearchMatch}
@@ -956,7 +1014,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   id={block.id}
                   tabIndex={-1}
                   role="separator"
-                  aria-label={block.text || `Original page ${block.source_page}`}
+                  aria-label={pageLabel(block)}
                   className={speakingClass}
                   style={{
                     margin: '2em 0 1.2em 0',
@@ -969,7 +1027,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                     color: 'var(--text-muted)',
                   }}
                 >
-                  {block.text || `Original page ${block.source_page}`}
+                  {pageLabel(block)}
                 </div>
               );
             }
@@ -1014,6 +1072,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                       />
                     </figcaption>
                   )}
+                  <BlockNote block={block} />
                 </figure>
               );
             }
@@ -1037,12 +1096,32 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                     marginBottom: '1em',
                   }}
                 >
-                  <HighlightedText
+                  <RichText
                     text={block.text || ''}
+                    styles={block.styles}
                     searchQuery={searchQuery}
                     isActiveMatch={isSearchMatch}
                   />
                 </aside>
+              );
+            }
+
+            // Boxed notes and page notes (ASIDE)
+            if (block.block_type === 'aside') {
+              return (
+                <div
+                  key={block.id}
+                  id={block.id}
+                  tabIndex={-1}
+                  className={[block.role === 'page_note' ? 'reader-note' : 'reader-aside', speakingClass].filter(Boolean).join(' ')}
+                >
+                  <RichText
+                    text={block.text || ''}
+                    styles={block.styles}
+                    searchQuery={searchQuery}
+                    isActiveMatch={isSearchMatch}
+                  />
+                </div>
               );
             }
 
@@ -1055,14 +1134,16 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   tabIndex={-1}
                   className={speakingClass}
                   style={{
-                    fontWeight: 700,
+                    fontStyle: 'italic',
                     fontSize: '0.9em',
-                    textAlign: 'center',
-                    margin: '12px 0 6px 0',
+                    color: 'var(--text-secondary)',
+                    margin: '6px 0 1em 0',
                   }}
                 >
-                  <HighlightedText
+                  {block.role === 'figure_text' && <strong>{t('reader.in_picture')} </strong>}
+                  <RichText
                     text={block.text || ''}
+                    styles={block.styles}
                     searchQuery={searchQuery}
                     isActiveMatch={isSearchMatch}
                   />
@@ -1086,8 +1167,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                     color: 'var(--text-muted)',
                   }}
                 >
-                  <HighlightedText
+                  <RichText
                     text={block.text || ''}
+                    styles={block.styles}
                     searchQuery={searchQuery}
                     isActiveMatch={isSearchMatch}
                   />
@@ -1095,28 +1177,30 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               );
             }
 
-            // List items — rendered individually with a visible bullet
+            // List items keep the source's own marker ("1", "a)", "A:"), with a hanging indent.
             if (block.block_type === 'list_item') {
+              const text = block.text || '';
+              const marker = block.list_marker && text.startsWith(block.list_marker) ? block.list_marker : null;
+              const rest = marker ? text.substring(marker.length).replace(/^\s+/, '') : text;
+              const offset = text.length - rest.length;
               return (
                 <div
                   key={block.id}
                   id={block.id}
                   tabIndex={-1}
-                  className={speakingClass}
-                  style={{
-                    display: 'flex',
-                    gap: '0.6em',
-                    marginBottom: '0.4em',
-                    paddingLeft: '0.5em',
-                  }}
+                  className={['reader-item', block.role === 'dialogue' ? 'dialogue' : '', speakingClass].filter(Boolean).join(' ')}
+                  style={{ marginInlineStart: `${Math.min(4, block.indent_level || 0) * 1.6}em` }}
                 >
-                  <span aria-hidden="true">•</span>
+                  <span className="reader-item-marker">{marker ?? ''}</span>
                   <span>
-                    <HighlightedText
-                      text={block.text || ''}
+                    <RichText
+                      text={rest}
+                      styles={block.styles}
+                      offset={offset}
                       searchQuery={searchQuery}
                       isActiveMatch={isSearchMatch}
                     />
+                    <BlockNote block={block} />
                   </span>
                 </div>
               );
@@ -1128,13 +1212,15 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 id={block.id}
                 tabIndex={-1}
                 className={speakingClass}
-                style={{ marginBottom: '1em' }}
+                style={{ marginBottom: '1em', whiteSpace: 'pre-line' }}
               >
-                <HighlightedText
+                <RichText
                   text={block.text || ''}
+                  styles={block.styles}
                   searchQuery={searchQuery}
                   isActiveMatch={isSearchMatch}
                 />
+                <BlockNote block={block} />
               </p>
             );
           })}
