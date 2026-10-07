@@ -145,7 +145,6 @@ class SidecarRunner:
     def _handle_health(self) -> None:
         """Respond to health check request."""
         from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
-        from openlargeprint.ocr.router import OcrRouter
         with self._health_lock:
             if self._health_ready is None:
                 probe = PaddleRapidOcrEngine(use_gpu=False)
@@ -161,7 +160,6 @@ class SidecarRunner:
                 status="ready" if self._health_ready else "unavailable",
                 engine_version=ENGINE_VERSION,
                 ocr_available=bool(self._health_ready),
-                accuracy_languages=OcrRouter.available_accuracy_languages() if self._health_ready else [],
             )
         )
 

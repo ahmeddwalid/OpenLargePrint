@@ -17,7 +17,6 @@ dependencies = [
     "rapidocr==3.9.2",
     "rapid-layout==1.2.1",
     "onnxruntime>=1.18.0",
-    "opencv-python-headless>=4.8.0",
     "reportlab>=4.0.0",
     "arabic-reshaper>=3.0.1",
     "python-pptx>=1.0.0",

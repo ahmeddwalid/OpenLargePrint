@@ -43,8 +43,3 @@ class OcrRouter:
         if script not in self._engines:
             self._engines[script] = PaddleRapidOcrEngine(language=script)
         return self._engines[script]
-
-    @staticmethod
-    def available_accuracy_languages() -> list[str]:
-        """Kept for the desktop health check; recognition is no longer split into packs."""
-        return []

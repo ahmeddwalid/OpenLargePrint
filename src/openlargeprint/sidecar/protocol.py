@@ -60,9 +60,6 @@ class ConvertCommand(BaseModel):
     monochrome: bool = False
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
-    # Advanced, off by default: carrying page-filling images into the output would
-    # turn the reflow back into screenshots of the original page (SPEC 2).
-    preserve_page_artwork: bool = False
     page_break_on_source_page: bool = False
 
 
@@ -111,7 +108,6 @@ class HealthCheckEvent(BaseModel):
     status: str = "ready"
     engine_version: str = ENGINE_VERSION
     ocr_available: bool = True
-    accuracy_languages: List[str] = Field(default_factory=list)
 
 
 class ProgressEvent(BaseModel):

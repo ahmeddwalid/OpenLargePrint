@@ -34,8 +34,32 @@ def test_onefile_build_refuses_missing_output(tmp_path, monkeypatch):
     monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: object())
     monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: None)
     monkeypatch.setattr(sys, "argv", ["build_sidecar.py"])
+    monkeypatch.setattr(module, "require_models", lambda root: None)
     with pytest.raises(RuntimeError, match="expected executable"):
         module.build_sidecar()
+
+
+def test_build_refuses_to_package_without_verified_models(tmp_path, monkeypatch):
+    """An installer without its models would fail on every scanned page (PKG-002, SEC-006)."""
+    import importlib.util
+    import pytest
+    from openlargeprint.models import manager as manager_module
+
+    packaging_dir = Path(__file__).parents[1] / "packaging"
+    monkeypatch.syspath_prepend(str(packaging_dir))
+    spec = importlib.util.spec_from_file_location("build_sidecar_models", packaging_dir / "build_sidecar.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def missing(self, key, verify=True):
+        raise FileNotFoundError(key)
+
+    monkeypatch.setattr(manager_module.ModelManager, "get_model_path", missing)
+    ran = []
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: ran.append(a))
+    with pytest.raises(RuntimeError, match="Models missing or damaged: pp_doc_layoutv2"):
+        module.build_sidecar()
+    assert ran == []  # PyInstaller never started
 
 
 def test_hook_changes_invalidate_frozen_sidecar(tmp_path):
