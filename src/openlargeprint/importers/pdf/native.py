@@ -62,6 +62,8 @@ LOW_PAGE_CONFIDENCE = 0.5
 REVIEW_CONFIDENCE = 0.75
 SHOW_ORIGINAL_CONFIDENCE = 0.7
 MIN_NATIVE_CHARS = 40
+# Clean print reads above 0.9; below this the other script's recogniser is tried too.
+SECOND_SCRIPT_BELOW = 0.8
 
 
 def _save_image(image: Image.Image, path_stem: Path, alt: str) -> ImageAsset:
@@ -361,20 +363,42 @@ class NativePdfImporter(BaseImporter):
     # ------------------------------------------------------------------
     def _recognise(self, image: Image.Image, scale: float, page_num: int, language: str,
                    cancel_check: Optional[CancelCheck]) -> Tuple[List[Word], float]:
-        engine = self._engine_for(language)
-        result = engine.analyze_page(image, page_num=page_num, language_hints=(language,),
-                                     cancellation=CancellationToken(cancel_check))
-        if result.cancelled or (cancel_check and cancel_check()):
-            raise InterruptedError("Conversion cancelled.")
-        confidences = [line.confidence for line in result.lines]
-        mean = statistics.mean(confidences) if confidences else 0.0
-        if self._injected_engine is None and language == "en" and len(result.lines) >= 3 and mean < 0.65:
-            # Possibly Arabic: try the Arabic recogniser and keep whichever reads better.
-            alternative = self._engine_for("ar").analyze_page(
-                image, page_num=page_num, language_hints=("ar",), cancellation=CancellationToken(cancel_check))
-            alt_conf = [line.confidence for line in alternative.lines]
-            if alt_conf and statistics.mean(alt_conf) > mean + 0.1:
-                result, mean = alternative, statistics.mean(alt_conf)
+        """Recognise a page; when one script reads poorly, try the other and keep the better.
+
+        The first guess (file name, earlier pages) is only a guess: an Arabic file
+        name often holds an English book and the reverse, so a weak result in one
+        script is always compared with the other.
+        """
+        def run(script: str):
+            engine = self._engine_for(script)
+            result = engine.analyze_page(image, page_num=page_num, language_hints=(script,),
+                                         cancellation=CancellationToken(cancel_check))
+            if result.cancelled or (cancel_check and cancel_check()):
+                raise InterruptedError("Conversion cancelled.")
+            confidences = [line.confidence for line in result.lines]
+            return result, (statistics.mean(confidences) if confidences else 0.0)
+
+        try:
+            result, mean = run(language)
+        except InterruptedError:
+            raise
+        except Exception as exc:
+            if self._injected_engine is not None or language == "en":
+                raise
+            # The Arabic recogniser could not start: read the page with the Latin one.
+            log_safe_info(f"Arabic recognition unavailable on page {page_num} ({type(exc).__name__})")
+            language = "en"
+            result, mean = run(language)
+        if self._injected_engine is None and mean < SECOND_SCRIPT_BELOW:
+            other = "en" if language == "ar" else "ar"
+            try:
+                alternative, alt_mean = run(other)
+                if alt_mean > mean + 0.1:
+                    result, mean = alternative, alt_mean
+            except InterruptedError:
+                raise
+            except Exception as exc:
+                log_safe_info(f"Second recognition pass skipped on page {page_num} ({type(exc).__name__})")
         return ocr_words(result, scale), mean
 
     def _recognise_empty_regions(self, page, frame: PageFrame, regions: List[LayoutRegion], words: List[Word],
@@ -402,9 +426,19 @@ class NativePdfImporter(BaseImporter):
                 bm.close()
             if crop_img.width < 8 or crop_img.height < 8:
                 continue
-            engine = self._engine_for(language)
-            result = engine.analyze_page(crop_img, page_num=meta.page_number, language_hints=(language,),
-                                         cancellation=CancellationToken(cancel_check))
+            try:
+                result = self._engine_for(language).analyze_page(
+                    crop_img, page_num=meta.page_number, language_hints=(language,),
+                    cancellation=CancellationToken(cancel_check))
+            except InterruptedError:
+                raise
+            except Exception:
+                if self._injected_engine is not None or language == "en":
+                    raise
+                language = "en"  # Arabic recogniser unavailable: the Latin one still reads the region
+                result = self._engine_for(language).analyze_page(
+                    crop_img, page_num=meta.page_number, language_hints=(language,),
+                    cancellation=CancellationToken(cancel_check))
             if result.cancelled:
                 raise InterruptedError("Conversion cancelled.")
             if region in pictures:

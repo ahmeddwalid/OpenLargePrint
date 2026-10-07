@@ -420,3 +420,49 @@ def test_picture_on_rotated_page_keeps_its_place(tmp_path: Path):
         assert any("Text below the picture." in t for t in after)
         with Image.open(blocks[image_at].image_asset.file_path) as img:
             assert img.size == (120, 80)  # original pixels, not a sideways render
+
+
+# -- recognition routing (OCR-001, LANG-002) --------------------------------------------
+
+def _scan_pdf(path: Path) -> Path:
+    page_image = path.with_suffix(".png")
+    Image.new("RGB", (600, 840), "white").save(page_image)
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.drawImage(str(page_image), 0, 0, *A4)
+    c.save()
+    return path
+
+
+def _route(monkeypatch, engines):
+    from openlargeprint.ocr.router import OcrRouter
+
+    monkeypatch.setattr(OcrRouter, "get_engine", lambda self, mode=None, language="en": engines[language])
+
+
+class FailingOcr(RecordingOcr):
+    def analyze_page(self, image, **kwargs):
+        self.calls += 1
+        raise FileNotFoundError("model not installed")
+
+
+def test_arabic_file_name_with_latin_scan_keeps_the_better_reading(tmp_path: Path, monkeypatch):
+    """A file name is only a guess: a weak Arabic reading is compared with the Latin one."""
+    arabic = RecordingOcr([("ـــ", (300, 300, 1200, 360), 0.31)])
+    latin = RecordingOcr([("Judicial review", (300, 300, 1200, 360), 0.96)])
+    _route(monkeypatch, {"ar": arabic, "en": latin})
+    importer = NativePdfImporter(layout_detector=HeuristicLayoutDetector())
+    with JobWorkspace() as workspace:
+        doc = importer.import_document(_scan_pdf(tmp_path / "قراءة كتاب.pdf"), workspace)
+    assert arabic.calls == 1 and latin.calls == 1
+    assert "Judicial review" in _texts(doc)
+
+
+def test_missing_arabic_recogniser_falls_back_instead_of_losing_the_page(tmp_path: Path, monkeypatch):
+    arabic = FailingOcr()
+    latin = RecordingOcr([("Judicial review", (300, 300, 1200, 360), 0.96)])
+    _route(monkeypatch, {"ar": arabic, "en": latin})
+    importer = NativePdfImporter(layout_detector=HeuristicLayoutDetector())
+    with JobWorkspace() as workspace:
+        doc = importer.import_document(_scan_pdf(tmp_path / "قراءة كتاب.pdf"), workspace)
+    assert "Judicial review" in _texts(doc)
+    assert not any(b.id.endswith("_retained") for b in doc.blocks)
