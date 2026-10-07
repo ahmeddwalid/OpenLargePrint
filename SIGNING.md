@@ -1,61 +1,54 @@
-# Windows signing and Smart App Control acceptance
+# Windows code signing
 
-Public Windows releases require an identity from a trusted signing provider. None
-is currently provisioned. A development certificate is not acceptance evidence.
-Microsoft's current guidance accepts RSA and ECC certificates:
-[signing guidance](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control).
+## Current state
 
-## Build and verification
+Windows releases are **unsigned**. No publicly trusted code-signing identity is
+configured yet. The effect for users:
 
-Provision certificate/private-key access on the build host, set
-OLP_CODESIGN_THUMBPRINT to its 40-character certificate thumbprint, then run
-packaging/build_windows_app.ps1. Public mode is the default and fails without a
-publicly trusted identity. Signing-service provisioning is an external prerequisite;
-the script expects a SignTool-compatible certificate-store identity.
+- **SmartScreen** shows "Windows protected your PC" the first time. **More info**
+  then **Run anyway** continues. This is expected for unsigned software.
+- **Smart App Control** (Windows 11), when enforced, blocks unsigned apps with no
+  override. The app cannot run on such a computer until a signed release exists.
 
-The pipeline fingerprints and rebuilds the one-directory Python sidecar, checks
-actual health/version, builds the desktop, and signs application executables and
-native EXE/DLL/PYD files before NSIS packaging. Existing vendor signatures are
-preserved only if public trust and timestamp verification pass. Application-owned
-files must match the configured identity. SHA-256 signatures and RFC 3161 timestamps
-are required. Tauri's Windows signCommand signs during NSIS packaging, including
-the generated uninstaller; actual installed uninstall.exe verification remains
-mandatory. Configuration alone does not demonstrate installed acceptance.
+A development or self-signed certificate does not help users: their computers do
+not trust it. Never publish with one, and never ask users to trust a
+development root.
 
-packaging/verify_signatures.ps1 -RequirePublicTrust checks Authenticode status,
-timestamps, chains, Microsoft AuthRoot membership and optional identity matches.
-WinTrust validates timestamped signatures; today's expiry date alone does not
-invalidate a correctly timestamped vendor signature. Signing preparation may use
-network services for timestamps/revocation. Document conversion remains offline.
+## Turning signing on
 
--DevelopmentUnsigned explicitly writes local builds to packaging/dist/development.
-Those builds cannot be published through the release job. Enforced application
-control on this machine blocks new Rust build tools (OS error 4551). Use an
-appropriately provisioned build host; changing protection is outside this task.
+Signing is already wired into the build and switches on when an identity exists:
 
-## Installed acceptance and publication
+1. Get a publicly trusted code-signing identity usable by SignTool on a Windows
+   build host (an Authenticode certificate, or a signing service such as Azure
+   Trusted Signing that exposes one). Microsoft's guidance for Smart App Control:
+   [code signing for Smart App Control](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control).
+2. Make the certificate available on the release runner and set the repository
+   variable `OLP_CODESIGN_THUMBPRINT` to its 40-character thumbprint.
+3. Tag a release as usual.
 
-Test on Windows 11 with Smart App Control enforced, following
-[Microsoft testing guidance](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/test-your-app-with-smart-app-control).
-Verify installation, launch, OCR subprocess execution, update, and Settings > Apps
-removal. Convert all eight test PDFs through the rebuilt GUI and verify final export.
-Inspect Code Integrity events for blocked files. After installation, run
-packaging/verify_installed_windows.ps1 with the actual install directory and expected
-publisher. Record the actual uninstall.exe SHA-256 before removal.
+With the thumbprint set, `packaging/build_windows_app.ps1`:
 
-The workflow uploads signed candidates first. Publication uses the protected GitHub
-environment windows-sac-accepted. Configure required human reviewers and supply
-OLP_SAC_ACCEPTANCE_JSON only after testing the exact candidates. The contract in
-packaging/release_acceptance.py requires:
+- signs the desktop executable, the engine executable and every EXE, DLL and PYD
+  in the engine runtime **before** the installer is assembled, so the installed
+  files are signed and not only the installer;
+- signs the generated uninstaller through Tauri's `signCommand` hook;
+- signs the installer itself;
+- uses SHA-256 digests and RFC 3161 timestamps, and checks every signature with
+  `packaging/verify_signatures.ps1 -RequirePublicTrust` (Authenticode status,
+  timestamp, chain to a Microsoft AuthRoot certificate, expected thumbprint).
 
-- enforced: true; nonempty tested_by, tested_at, evidence_url.
-- signing_thumbprint matching the configured identity.
-- installer_sha256 and portable_sha256 matching the exact candidates.
-- uninstaller_sha256 for the actual installed uninstaller.
-- checks with installation, launch, ocr, update, settings_removal,
-  installed_signatures, installed_uninstaller, code_integrity_no_blocks, and
-  full_gui_corpus all true.
+Set `OLP_REQUIRE_SIGNING=1` to make an unsigned build fail instead of continuing.
+`-DevelopmentUnsigned` writes local test builds to `packaging/dist/development`.
 
-Missing credentials, invalid signatures, absent acceptance, or artifact hash changes
-stop publication. Disabling Smart App Control or trusting a development root does
-not satisfy acceptance. No accepted public installer has been delivered in this pass.
+Signing contacts the timestamp and revocation services. Document conversion stays
+offline.
+
+## Before announcing a signed release
+
+Test the signed installer on Windows 11 with Smart App Control enforced
+([Microsoft's test guidance](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/test-your-app-with-smart-app-control)):
+install, start, convert a scanned PDF (this starts the recognition subprocess),
+update, and remove through Settings > Apps, and check the Code Integrity event log
+for blocked files. `packaging/verify_installed_windows.ps1` checks the installed
+files' signatures; `packaging/release_acceptance.py` can record that test against
+the exact installer and zip hashes.

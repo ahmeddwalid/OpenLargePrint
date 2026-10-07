@@ -2,7 +2,7 @@
 
 Status: Draft v0.1
 Audience: any AI coding agent or human contributor implementing this product
-Role of this document: this is the **source of truth for what the product must do**. `DESIGN.md` explains *how* it is built; `AGENTS.md` and `CLAUDE.md` explain *how agents must behave* while building it. If code conflicts with this file, the code is wrong.
+Role of this document: this is the **source of truth for what the product must do**. `DESIGN.md` explains *how* it is built; `AGENTS.md` and `CONTRIBUTING.md` explain *how changes are made*. If code conflicts with this file, the code is wrong.
 
 Every requirement below has a stable ID. Reference these IDs in commits, PR descriptions, tests, and issue trackers (e.g. `Implements PDF-002`, `Fixes A11Y-003 regression`).
 
@@ -50,8 +50,8 @@ Print target for the large-print PDF/DOCX: **A4 by default**, with **A3** as a f
 ### 4.2 OCR and recognition (`OCR-xxx`)
 
 - **OCR-001** — OCR engines must be implemented behind a common interface (capabilities + `analyze_page`) so any engine can be swapped without touching the rest of the pipeline.
-- **OCR-002** — The system must ship at least one CPU-friendly OCR/layout pipeline as the default ("Automatic"/"Fast" modes) and support an optional higher-accuracy model pack for "Maximum accuracy" mode.
-- **OCR-003** — The higher-accuracy model pack must be an optional download, never bundled in the base installer.
+- **OCR-002** — The system must ship a CPU-friendly layout and recognition pipeline that runs without a GPU, and must let a difficult page be recognised again at higher resolution from the review screen.
+- **OCR-003** — Every model shipped in the installer must be pinned and verified by SHA-256 before use and recorded with its license (`LIC-001`). Conversion never downloads a model. A heavier model, if one is ever offered, must be an optional, separately verified download.
 - **OCR-004** — OCR output must carry per-block confidence and warning metadata.
 - **OCR-005** — A page whose recognized output is dominated by replacement/gibberish characters, has implausible reading order, or duplicates native text must be flagged for review rather than accepted silently.
 - **OCR-006** — OCR must run entirely on-device for the default engine pack; any engine requiring a GPU-only or cloud dependency must be optional and never the default.

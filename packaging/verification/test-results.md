@@ -7,7 +7,7 @@
   PDF/DOCX, selected pages, health/version, icons/frontend smoke passed.
 - packaging/sidecar_freshness.py: final rebuilt sidecar source/binary fingerprint verified; packaging hooks participate in invalidation.
 - packaging/verify_accuracy_runtime.py: frozen verified capability, exact native text, spawned second-page English recognition, PDF export and optional-profile provenance passed.
-- Advanced screen: keyboard/visible focus, 48px control, 200% text, narrow viewport, high contrast/reduced motion and RTL passed; screenshots and measured checks attached in REPORT.md.
+- Advanced screen: keyboard/visible focus, 48px control, 200% text, narrow viewport, high contrast/reduced motion and RTL passed.
 - packaging/verify_benchmark.py: 16 execution passes, zero expectation mismatches; baseline and optional-English per-metric JSON and Markdown persisted; table sample improves but skewed sample regresses, so the default remains unchanged. Fidelity acceptance remains separate.
 - cargo fmt --manifest-path src-tauri/Cargo.toml --check: passed.
 - PowerShell AST parse of development/build/signature/installed checks: passed.

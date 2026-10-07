@@ -86,3 +86,4 @@ scratch-*.log
 :memory:.ses
 
 src/openlargeprint/models/weights/
+.claude/
