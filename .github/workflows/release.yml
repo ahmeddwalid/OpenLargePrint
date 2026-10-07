@@ -77,7 +77,15 @@ jobs:
         run: uv run python packaging/build_sidecar.py --onedir
 
       - name: Build installer and portable zip (converts test documents with the packaged engine)
-        run: powershell -ExecutionPolicy Bypass -File packaging/build_windows_app.ps1 -SkipSidecarBuild
+        shell: pwsh
+        run: |
+          # On failure the end of the output becomes an annotation on the run summary.
+          powershell -ExecutionPolicy Bypass -File packaging/build_windows_app.ps1 -SkipSidecarBuild *>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content build.log -Tail 60) -join '%0A'
+            Write-Output "::error title=Windows packaging failed::$tail"
+            exit 1
+          }
 
       - name: Give the installer its stable name
         shell: pwsh
@@ -169,9 +177,11 @@ jobs:
 
       - name: Build interface and check the packaged engine converts documents
         run: |
+          set -o pipefail
           npm --prefix ui run build
           uv run python packaging/generate_icons.py
-          cd packaging && uv run python verify_packaging.py
+          (cd packaging && uv run python verify_packaging.py) 2>&1 | tee verify.log || {
+            echo "::error title=Packaged engine check failed::$(tail -n 60 verify.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
 
       - name: Build Linux packages
         working-directory: src-tauri
