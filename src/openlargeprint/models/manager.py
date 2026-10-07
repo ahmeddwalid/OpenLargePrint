@@ -7,7 +7,7 @@ import hmac
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from openlargeprint.models.manifest import (
     ModelArtifact,
@@ -16,6 +16,10 @@ from openlargeprint.models.manifest import (
 )
 from openlargeprint.security.isolation import log_safe_info
 from openlargeprint.security.validator import SecurityValidationError
+
+
+BUNDLED_WEIGHTS_DIR = Path(__file__).resolve().parent / "weights"
+_VERIFIED: set = set()
 
 
 class ModelIntegrityError(SecurityValidationError):
@@ -51,6 +55,32 @@ class ModelManager:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
+    def candidate_paths(self, artifact: ModelArtifact) -> List[Path]:
+        """Where a model may live, most specific first.
+
+        1. ``OPENLARGEPRINT_MODEL_DIR`` or the configured cache directory
+        2. ``weights/`` next to this module (bundled in the installer and filled by
+           ``scripts/fetch_models.py`` in a development checkout)
+        3. the owning Python package, for models that ship inside a wheel
+        """
+        paths: List[Path] = []
+        explicit = self._cache_dir or (Path(os.environ["OPENLARGEPRINT_MODEL_DIR"])
+                                       if os.getenv("OPENLARGEPRINT_MODEL_DIR") else None)
+        if explicit is not None:
+            paths.append(Path(explicit) / f"{artifact.key}.onnx")
+        paths.append(BUNDLED_WEIGHTS_DIR / f"{artifact.key}.onnx")
+        if artifact.package:
+            try:
+                import importlib.util
+                spec = importlib.util.find_spec(artifact.package)
+                if spec is not None and spec.origin:
+                    paths.append(Path(spec.origin).parent / artifact.file_name)
+            except (ImportError, ValueError):
+                pass
+        if explicit is None:
+            paths.append(Path.home() / ".cache" / "openlargeprint" / "models" / f"{artifact.key}.onnx")
+        return paths
+
     @staticmethod
     def compute_sha256(file_path: Path | str) -> str:
         """Compute SHA-256 checksum of a file in 64KB blocks."""
@@ -81,18 +111,20 @@ class ModelManager:
         if not artifact:
             raise KeyError(f"Unknown model artifact: {key}")
 
-        model_file = self.cache_dir / f"{key}.onnx"
-        if not model_file.exists():
-            raise FileNotFoundError(
-                f"Model '{artifact.name}' ({key}) is not installed locally in {self.cache_dir}."
-            )
+        model_file = next((p for p in self.candidate_paths(artifact) if p.is_file()), None)
+        if model_file is None:
+            raise FileNotFoundError(f"Model '{artifact.name}' ({key}) is not installed.")
 
         if verify:
-            if not self.verify_file(model_file, artifact.sha256):
+            stat = model_file.stat()
+            stamp = (str(model_file), stat.st_size, stat.st_mtime_ns, artifact.sha256)
+            if stamp in _VERIFIED:
+                return model_file
+            if stat.st_size != artifact.file_size_bytes or not self.verify_file(model_file, artifact.sha256):
                 raise ModelIntegrityError(
-                    f"Model '{key}' failed integrity verification! Expected SHA-256 {artifact.sha256}, "
-                    f"got {self.compute_sha256(model_file)}. Possible corruption or tampering."
+                    f"Model '{key}' failed integrity verification. Reinstall the application."
                 )
+            _VERIFIED.add(stamp)
 
         return model_file
 

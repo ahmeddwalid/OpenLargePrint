@@ -46,15 +46,10 @@ def _recognize(
     backend: str = "baseline",
 ) -> None:
     sys.addaudithook(_deny_worker_network)
-    if backend == "modern":
-        from .modern_engine import ModernRapidOcrEngine
-        engine = ModernRapidOcrEngine(rec_model_path=rec_model_path, language=language)
-    elif backend == "baseline":
-        from .paddle_engine import PaddleRapidOcrEngine
-        engine = PaddleRapidOcrEngine(use_gpu=use_gpu, rec_model_path=rec_model_path,
-                                      rec_keys_path=rec_keys_path, language=language)
-    else:
+    if backend != "baseline":
         raise ValueError("Unsupported recognition backend")
+    from .paddle_engine import PaddleRapidOcrEngine
+    engine = PaddleRapidOcrEngine(use_gpu=use_gpu, language=language)
     try:
         while True:
             try:
@@ -84,7 +79,7 @@ class OcrWorker:
         language: str = "en",
         backend: str = "baseline",
     ):
-        if backend not in ("baseline", "modern"):
+        if backend != "baseline":
             raise ValueError("Unsupported recognition backend")
         self.backend = backend
         self.use_gpu = use_gpu

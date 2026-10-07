@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -401,6 +401,7 @@ version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "arabic-reshaper" },
+    { name = "onnxruntime" },
     { name = "opencv-python-headless" },
     { name = "pikepdf" },
     { name = "pillow" },
@@ -408,14 +409,12 @@ dependencies = [
     { name = "pypdfium2" },
     { name = "python-docx" },
     { name = "python-pptx" },
-    { name = "rapidocr-onnxruntime" },
+    { name = "rapid-layout" },
+    { name = "rapidocr" },
     { name = "reportlab" },
 ]
 
 [package.optional-dependencies]
-accuracy = [
-    { name = "rapidocr" },
-]
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -429,6 +428,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arabic-reshaper", specifier = ">=3.0.1" },
+    { name = "onnxruntime", specifier = ">=1.18.0" },
     { name = "opencv-python-headless", specifier = ">=4.8.0" },
     { name = "pikepdf", specifier = ">=8.0.0" },
     { name = "pillow", specifier = ">=10.0.0" },
@@ -438,11 +438,11 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "python-docx", specifier = ">=1.1.0" },
     { name = "python-pptx", specifier = ">=1.0.0" },
-    { name = "rapidocr", marker = "extra == 'accuracy'", specifier = "==3.9.2" },
-    { name = "rapidocr-onnxruntime", specifier = "==1.4.4" },
+    { name = "rapid-layout", specifier = "==1.2.1" },
+    { name = "rapidocr", specifier = "==3.9.2" },
     { name = "reportlab", specifier = ">=4.0.0" },
 ]
-provides-extras = ["accuracy", "dev"]
+provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pyinstaller", specifier = ">=6.22.3" }]
@@ -820,6 +820,24 @@ wheels = [
 ]
 
 [[package]]
+name = "rapid-layout"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorlog" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "omegaconf" },
+    { name = "opencv-python" },
+    { name = "pillow" },
+    { name = "requests" },
+    { name = "tqdm" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/0f/81d8f160f2b44b3fe42edfd4565d330e1119d4f6f8481435be504999c447/rapid_layout-1.2.1-py3-none-any.whl", hash = "sha256:7d424dcaa92c7cfd9c1c45bc6b323293a6461cf95cad605958fd0961f2397acf", size = 6875844, upload-time = "2026-03-24T01:53:27.043Z" },
+]
+
+[[package]]
 name = "rapidocr"
 version = "3.9.2"
 source = { registry = "https://pypi.org/simple" }
@@ -839,26 +857,6 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/55/ed/0ee9b9281986974be9d2406ae0134c8d7c91d2fc613f16ffda9701eeda6f/rapidocr-3.9.2-py3-none-any.whl", hash = "sha256:04d6b8d151f823d930bd91910555f57bea897c0c44fa6794267b94cf9c1ef9a0", size = 27275208, upload-time = "2026-07-21T10:59:01.599Z" },
-]
-
-[[package]]
-name = "rapidocr-onnxruntime"
-version = "1.4.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "onnxruntime" },
-    { name = "opencv-python" },
-    { name = "pillow" },
-    { name = "pyclipper" },
-    { name = "pyyaml" },
-    { name = "shapely" },
-    { name = "six" },
-    { name = "tqdm" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ba/12/1e5497183bdbe782dbb91bad1d0d2297dba4d2831b2652657f7517bfc6df/rapidocr_onnxruntime-1.4.4-py3-none-any.whl", hash = "sha256:971d7d5f223a7a808662229df1ef69893809d8457d834e6373d3854bc1782cbf", size = 14915192, upload-time = "2025-01-17T01:48:25.104Z" },
 ]
 
 [[package]]

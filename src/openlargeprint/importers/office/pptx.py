@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import List, Optional
 
 import pptx
 from PIL import Image
 
-from openlargeprint.importers.base import BaseImporter
+from openlargeprint.ir.models import SCHEMA_VERSION
 from openlargeprint.ir.models import (
     Block,
     BlockType,
@@ -220,7 +219,7 @@ class PptxImporter(BaseImporter):
         )
 
         return DocumentIR(
-            schema_version="1.0.0",
+            schema_version=SCHEMA_VERSION,
             metadata=metadata,
             pages=pages,
             blocks=blocks,

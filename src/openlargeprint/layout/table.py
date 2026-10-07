@@ -90,6 +90,32 @@ def estimate_column_widths(
     return col_widths
 
 
+def wrapped_column_widths(table: TableStructure, font_pt: float, available_width: float,
+                          padding_pt: float = 14.0) -> Optional[List[float]]:
+    """Column widths that let every cell wrap, or ``None`` if the longest words cannot fit."""
+    columns = table.column_count
+    if not columns:
+        return None
+    char_w = font_pt * 0.56
+    longest = [0] * columns
+    volume = [0] * columns
+    for row in table.rows:
+        for c, cell in enumerate(row[:columns]):
+            text = (cell.text or "").strip()
+            volume[c] += len(text)
+            for word in text.split():
+                longest[c] = max(longest[c], len(word))
+    minimum = [max(longest[c] * char_w, 2.2 * font_pt) + padding_pt for c in range(columns)]
+    if sum(minimum) > available_width:
+        return None
+    if available_width / columns < 4.5 * font_pt:
+        return None  # too many columns: every cell would wrap a word per line
+    spare = available_width - sum(minimum)
+    weight = [max(1, v) ** 0.5 for v in volume]
+    total = sum(weight)
+    return [round(minimum[c] + spare * weight[c] / total, 2) for c in range(columns)]
+
+
 def split_table_by_columns(
     table: TableStructure,
     max_data_cols: int = 2,
@@ -166,6 +192,14 @@ def evaluate_table_fit(
             available_width=available_width,
         )
 
+    # Cells wrap, so a table fits when the longest word of each column fits;
+    # remaining width goes to the columns with the most text.
+    for size in (font_pt, min_readable_pt):
+        widths = wrapped_column_widths(table, size, available_width)
+        if widths is not None:
+            return TableFitEvaluation(tier=TableTier.ENLARGED, column_widths=widths,
+                                      total_width=sum(widths), available_width=available_width)
+
     # 1. Check fit at requested large font size
     est_widths = estimate_column_widths(table, font_pt)
     total_w = sum(est_widths)
@@ -220,14 +254,13 @@ def evaluate_table_fit(
                 total_width=min_total_w,
                 available_width=available_width,
                 split_tables=split_tables,
-                warning="Table split across sub-tables to maintain large-print readability (TBL-001)",
+                warning="This table is shown in parts so it stays large enough to read.",
             )
 
     # 4. Fall back to Tier 3: Accessible Linearized Representation (TBL-001, TBL-002)
     linearized = table.to_linearized_text()
     warning_msg = (
-        f"Table with {table.column_count} columns linearized: column widths exceed page width "
-        f"at minimum readable {min_readable_pt}pt size (TBL-001, TBL-002)"
+        "This table is too wide for the page at this text size, so each row is listed on its own."
     )
     return TableFitEvaluation(
         tier=TableTier.LINEARIZE,

@@ -36,7 +36,6 @@ from openlargeprint.sidecar.protocol import (
     FlaggedPageReview,
     HealthCheckEvent,
     InspectResultEvent,
-    ProgressEvent,
     ReviewDataEvent,
     SuccessEvent,
 )
@@ -272,10 +271,7 @@ class SidecarRunner:
             except ValueError:
                 routing_enum = RoutingMode.AUTOMATIC
 
-        orchestrator = PipelineOrchestrator(
-            routing_mode=routing_enum,
-            preserve_page_artwork=bool(data.get("preserve_page_artwork", False)),
-        )
+        orchestrator = PipelineOrchestrator(routing_mode=routing_enum)
 
         # Persist extracted media outside the disposable workspace (IMG-001)
         asset_store = JobAssetStore(job_id=job_id)

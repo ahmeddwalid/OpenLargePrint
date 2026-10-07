@@ -6,10 +6,10 @@ from .base import (
     EngineCapabilities,
     EnginePageResult,
     OcrDetectedLine,
+    OcrWord,
 )
 from .paddle_engine import PaddleRapidOcrEngine
 from .router import OcrRouter, RoutingMode
-from .vlm_engine import PaddleOcrVlEngine
 
 __all__ = [
     "CancellationToken",
@@ -18,7 +18,7 @@ __all__ = [
     "EnginePageResult",
     "OcrDetectedLine",
     "OcrRouter",
-    "PaddleOcrVlEngine",
+    "OcrWord",
     "PaddleRapidOcrEngine",
     "RoutingMode",
 ]

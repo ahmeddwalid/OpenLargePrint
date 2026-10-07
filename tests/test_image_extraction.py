@@ -29,8 +29,9 @@ def test_distinct_same_sized_figures_keep_their_positions(tmp_path):
         for figure in figures:
             with Image.open(figure.image_asset.file_path) as image:
                 by_color[image.convert("RGB").getpixel((0, 0))] = figure.source_bounding_box.y0
-        assert by_color[(255, 0, 0)] == pytest.approx(500)
-        assert by_color[(0, 128, 0)] == pytest.approx(250)
+        # Region boxes come from layout detection: within a few points of the drawing.
+        assert by_color[(255, 0, 0)] == pytest.approx(500, abs=4)
+        assert by_color[(0, 128, 0)] == pytest.approx(250, abs=4)
 
 
 def test_lossless_image_extraction(tmp_path: Path):

@@ -84,3 +84,5 @@ scratch-*.log
 
 .playwright-mcp/
 :memory:.ses
+
+src/openlargeprint/models/weights/

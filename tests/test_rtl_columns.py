@@ -1,8 +1,6 @@
 """Tests for RTL multi-column reading order reconstruction (PDF-003, LANG-002)."""
 
 from pathlib import Path
-import pypdfium2 as pdfium
-import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -81,29 +79,13 @@ def test_rtl_multi_column_reading_order(tmp_path: Path):
 
     full_text = " ".join(b.text for b in text_blocks)
 
-    # This fixture deliberately embeds display-order presentation forms, not
-    # logical Unicode. Native import must preserve those source characters;
-    # guessing words to reverse also corrupts valid logical Arabic (PDF-002).
-    # PDFium can normalize presentation glyph mappings itself. Its extracted
-    # source stream is the native-character oracle, independent of our grouping.
-    with pdfium.PdfDocument(pdf_path) as source:
-        page = source[0]
-        text_page = page.get_textpage()
-        try:
-            source_lines = text_page.get_text_range().splitlines()
-            right_source = next(line for line in source_lines if "للاجتهاد" in line)
-            left_source = next(line for line in source_lines if "القديم" in line)
-        finally:
-            text_page.close()
-            page.close()
-    pos_right_col = full_text.find(right_source)
-    pos_left_col = full_text.find(left_source)
+    # Glyphs are drawn right to left, so whole words come back in reading order
+    # (the source characters themselves are never altered).
+    for phrase in ("لا مساغ للاجتهاد في مورد النص", "القديم يترك على قدمه", "الضرر لا يزال بمثله"):
+        assert phrase in full_text
 
-    assert pos_right_col != -1, "Right column content must be present"
-    assert pos_left_col != -1, "Left column content must be present"
-    assert pos_right_col < pos_left_col, (
-        f"Right column (Column 1) must be read BEFORE Left column (Column 2) in Arabic RTL documents! "
-        f"pos_right={pos_right_col}, pos_left={pos_left_col}"
-    )
-    assert any("reading order" in warning for block in text_blocks for warning in block.warnings)
-    assert any(block.image_asset for block in doc_ir.blocks), "Ambiguous native encoding retains the original page"
+    # The right-hand column is read completely before the left-hand one.
+    article = [full_text.find(p) for p in ("مساغ للاجتهاد", "باليقين", "الأصل بقاء", "القديم يترك", "الضرر لا", "درء المفاسد")]
+    assert all(pos != -1 for pos in article)
+    assert article == sorted(article), "Right column (articles 1-3) must precede the left column (articles 4-6)"
+    assert full_text.find("مجلة الأحكام") < article[0], "The title comes first"

@@ -14,7 +14,9 @@ dependencies = [
     "pikepdf>=8.0.0",
     "python-docx>=1.1.0",
     "pillow>=10.0.0",
-    "rapidocr-onnxruntime==1.4.4",
+    "rapidocr==3.9.2",
+    "rapid-layout==1.2.1",
+    "onnxruntime>=1.18.0",
     "opencv-python-headless>=4.8.0",
     "reportlab>=4.0.0",
     "arabic-reshaper>=3.0.1",
@@ -22,9 +24,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-accuracy = [
-    "rapidocr==3.9.2",
-]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",

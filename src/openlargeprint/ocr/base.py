@@ -19,11 +19,20 @@ class EngineCapabilities:
 
 
 @dataclass
+class OcrWord:
+    """One recognised token with its pixel-space box (used for blanks and table columns)."""
+    text: str
+    polygon: List[Tuple[float, float]]
+    confidence: float = 1.0
+
+
+@dataclass
 class OcrDetectedLine:
     """Single line of recognized text with pixel-space geometry and confidence."""
     text: str
     polygon: List[Tuple[float, float]]  # List of 4 (x, y) vertices in image pixels
     confidence: float
+    words: List[OcrWord] = field(default_factory=list)
 
     @property
     def x0(self) -> float:

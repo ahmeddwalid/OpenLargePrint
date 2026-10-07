@@ -18,11 +18,21 @@ from openlargeprint.models import (
 def test_model_catalog_defaults():
     """Verify pinned model catalog includes required default models."""
     defaults = PINNED_MODELS.list_defaults()
-    assert "ch_PP-OCRv4_det" in defaults
-    assert "ch_PP-OCRv4_rec" in defaults
-    assert "ch_ppocr_mobile_v2.0_cls" in defaults
-    assert len(defaults) == 3
-    assert "paddleocr_vl_1.6" not in PINNED_MODELS.models
+    # Everything a conversion uses ships with the application (SEC-009).
+    assert set(defaults) == {
+        "pp_doc_layoutv2", "PP-OCRv6_det_small", "PP-OCRv6_rec_small",
+        "ch_ppocr_mobile_v2.0_cls", "arabic_PP-OCRv5_rec_mobile",
+    }
+    for artifact in defaults.values():
+        assert artifact.code_license == "Apache-2.0" and artifact.weight_license == "Apache-2.0"
+        assert len(artifact.sha256) == 64 and artifact.file_size_bytes > 0
+
+
+def test_bundled_models_resolve_and_verify():
+    """Models in the wheel or the bundled weights folder are found and hash-checked."""
+    manager = ModelManager()
+    for key in ("PP-OCRv6_det_small", "PP-OCRv6_rec_small", "ch_ppocr_mobile_v2.0_cls"):
+        assert manager.get_model_path(key, verify=True).is_file()
 
 
 def test_model_cache_dir_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

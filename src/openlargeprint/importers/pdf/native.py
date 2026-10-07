@@ -1,16 +1,37 @@
-"""Unified PDF extraction with automatic routing across native, scanned, and mixed pages (PDF-001..007)."""
+"""PDF import: classify, analyse layout, read text, rebuild structure (DOC-001, PDF-001..007).
+
+For every page:
+
+1. Read the page's own text at character level and decide how to treat it.
+   Pages whose text is visible are *native* and are never recognised again
+   (PDF-002). Pages with no text, an invisible text layer, or text hidden under
+   a page-sized picture are *scanned* and go to recognition (PDF-003). Text that
+   is garbled is *broken* and also goes to recognition (PDF-005).
+2. Run the layout model on the rendered page. It returns titles, paragraphs,
+   tables, figures, captions and page furniture in reading order.
+3. Fill the regions with words (native or recognised), add fill-in blanks, and
+   assemble blocks. Native text regions that have no text but sit on a picture
+   are recognised on their own (mixed pages, PDF-004).
+
+A page that fails keeps its original image in the output and is flagged; the
+rest of the document is unaffected (UI-003, SPEC §2).
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+import statistics
+from collections import Counter, defaultdict
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
-import pikepdf
+from typing import Dict, List, Optional, Set, Tuple
+
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
+from PIL import Image
 
 from openlargeprint.importers.base import BaseImporter, CancelCheck, CheckpointCallback, ProgressCallback
 from openlargeprint.ir.models import (
+    SCHEMA_VERSION,
     Block,
     BlockType,
     BoundingBox,
@@ -20,125 +41,78 @@ from openlargeprint.ir.models import (
     ImageAsset,
     PageClassification,
     PageMetadata,
-    TableCell,
-    TableStructure,
-    TextDirection,
 )
-import re
-from openlargeprint.ocr.base import DocumentOcrEngine
+from openlargeprint.layout.detector import get_layout_detector
+from openlargeprint.layout.regions import LayoutRegion, RegionKind, TEXT_KINDS, coverage
+from openlargeprint.ocr.base import CancellationToken, DocumentOcrEngine
 from openlargeprint.ocr.router import OcrRouter, RoutingMode
 from openlargeprint.security.isolation import JobWorkspace, log_safe_info
 from openlargeprint.security.validator import bounded_pdf_scale
-from openlargeprint.text.direction import (
-    detect_language,
-    detect_text_direction,
-    normalize_arabic_logical_order,
-)
+from .assemble import PageAssembler, assign_heading_levels, insert_blanks
 from .classifier import classify_pdf_page
-from .images import extract_lossless_images_for_page, image_digest
-from PIL import Image
-from .scanned import ScannedPageExtractor
-from .vector_figures import extract_vector_figure_region
+from .rules import find_rules
+from .scanned import ocr_words
+from .tables import build_table, ruled_table_regions
+from .textlayer import Word, extract_native_text, page_box
 
-LIGATURE_MAP = {
-    "\x0b": "ff",
-    "\x0c": "fi",
-    "\x0d": "fl",
-    "\x0e": "ffi",
-    "\x0f": "ffl",
-    "\x11": "ft",
-    "\x12": "st",
-    "\x1f": "ft",
-    "\ufb00": "ff",
-    "\ufb01": "fi",
-    "\ufb02": "fl",
-    "\ufb03": "ffi",
-    "\ufb04": "ffl",
-    "\ufb05": "ft",
-    "\ufb06": "st",
-}
+LAYOUT_DPI = 150.0
+FIGURE_MIN_DPI = 150.0
+FIGURE_MAX_DPI = 300.0
+LOW_PAGE_CONFIDENCE = 0.5
+REVIEW_CONFIDENCE = 0.75
+SHOW_ORIGINAL_CONFIDENCE = 0.7
+MIN_NATIVE_CHARS = 40
 
 
-def clean_ligatures(text: str) -> str:
-    """Normalize custom and Unicode font ligature code points to plain ASCII characters."""
-    for k, v in LIGATURE_MAP.items():
-        if k in text:
-            text = text.replace(k, v)
-    return text
+def _save_image(image: Image.Image, path_stem: Path, alt: str) -> ImageAsset:
+    """PNG for line art and flat colour, JPEG for photographs (keeps books a sensible size)."""
+    rgb = image.convert("RGB")
+    sample = rgb.copy()
+    sample.thumbnail((256, 256))
+    colours = sample.getcolors(maxcolors=4096)
+    if colours is None:
+        path = path_stem.with_suffix(".jpg")
+        rgb.save(path, format="JPEG", quality=90, optimize=True)
+        mime = "image/jpeg"
+    else:
+        path = path_stem.with_suffix(".png")
+        rgb.save(path, format="PNG", optimize=True)
+        mime = "image/png"
+    return ImageAsset(asset_id=path_stem.name, file_path=str(path), mime_type=mime,
+                      width=rgb.width, height=rgb.height, alt_text=alt)
 
 
-def normalize_tracked_text(text: str) -> str:
-    """Normalize artificially tracked/letter-spaced words like 'C a m b r i d g e' -> 'Cambridge'."""
-    if not text or len(text) < 5 or " " not in text:
-        return text
-
-    def _collapse_match(m: re.Match) -> str:
-        return m.group(0).replace(" ", "")
-
-    # Match single letters separated by exactly one space (multi-spaces represent word breaks)
-    pattern = re.compile(r"\b[A-Za-z](?: [A-Za-z]){2,}\b")
-    return pattern.sub(_collapse_match, text)
-
-
-@dataclass
-class TextLine:
-    text: str
-    rect: Tuple[float, float, float, float]  # left, bottom, right, top
-    font_size: float
-    font_name: str
-    is_bold: bool
-    page_num: int
-
-    @property
-    def x0(self) -> float:
-        return self.rect[0]
-
-    @property
-    def y0(self) -> float:
-        return self.rect[1]
-
-    @property
-    def x1(self) -> float:
-        return self.rect[2]
-
-    @property
-    def y1(self) -> float:
-        return self.rect[3]
-
-    @property
-    def width(self) -> float:
-        return abs(self.x1 - self.x0)
-
-    @property
-    def height(self) -> float:
-        return abs(self.y1 - self.y0)
+def _language_hint(file_path: Path, sample: str) -> str:
+    text = f"{file_path.stem} {sample}"
+    return "ar" if sum(1 for c in text if "؀" <= c <= "ۿ") >= 3 or "arabic" in file_path.name.lower() else "en"
 
 
 class NativePdfImporter(BaseImporter):
-    """Imports PDF documents, dynamically routing pages across native extraction, OCR, and mixed reconciliation (DOC-001, PDF-001..007)."""
+    """Imports PDF documents into DocumentIR (DOC-001, PDF-001..007)."""
 
     def __init__(
         self,
         ocr_engine: Optional[DocumentOcrEngine] = None,
         routing_mode: RoutingMode = RoutingMode.AUTOMATIC,
         ocr_dpi: float = 300.0,
-        preserve_page_artwork: bool = False,
+        layout_detector=None,
     ):
-        self.routing_mode = routing_mode
-        self.ocr_dpi = ocr_dpi
-        # Off by default: page-filling images are usually the scanned page itself
-        # or a canvas wallpaper, and carrying those into the output would turn the
-        # reflow back into screenshots of the original (SPEC 2). Turning it on is an
-        # explicit request to keep the artwork.
-        self.preserve_page_artwork = preserve_page_artwork
+        self.routing_mode = RoutingMode(routing_mode)
+        self.ocr_dpi = 400.0 if self.routing_mode == RoutingMode.MAXIMUM_ACCURACY else ocr_dpi
         self._router = OcrRouter()
-        self.ocr_engine = ocr_engine or self._router.get_engine(routing_mode)
-        self.scanned_extractor = ScannedPageExtractor(
-            self.ocr_engine, dpi=ocr_dpi,
-            ocr_router=self._router if ocr_engine is None else None,
-            routing_mode=routing_mode,
-        )
+        self._injected_engine = ocr_engine
+        self._layout = layout_detector
 
+    @property
+    def ocr_engine(self) -> DocumentOcrEngine:
+        return self._injected_engine or self._router.get_engine(self.routing_mode)
+
+    def _engine_for(self, language: str) -> DocumentOcrEngine:
+        if self._injected_engine is not None:
+            return self._injected_engine
+        return self._router.get_engine(self.routing_mode, language=language)
+
+    # ------------------------------------------------------------------
     def import_document(
         self,
         file_path: Path,
@@ -148,1185 +122,494 @@ class NativePdfImporter(BaseImporter):
         checkpoint_callback: Optional[CheckpointCallback] = None,
         selected_pages: Optional[Set[int]] = None,
     ) -> DocumentIR:
-        """Parse PDF and construct canonical DocumentIR with progress and checkpointing (UI-002, UI-003)."""
         log_safe_info(f"Opening PDF document: {file_path.name}")
         pdf = pdfium.PdfDocument(file_path)
-        pike_doc = pikepdf.open(file_path)
-
         page_count = len(pdf)
-        pages_metadata: List[PageMetadata] = []
+        layout = self._layout or get_layout_detector()
+        pages_meta: List[PageMetadata] = []
         all_blocks: List[Block] = []
-        block_counter = 1
-
-        total_to_process = len(selected_pages) if selected_pages is not None else page_count
-        processed_count = 0
-
+        heading_sizes: Dict[str, float] = {}
+        body_sizes: List[float] = []
+        total = len(selected_pages) if selected_pages is not None else page_count
+        done = 0
+        language = _language_hint(file_path, "")
         try:
-            for page_idx in range(page_count):
-                page_num = page_idx + 1
+            for index in range(page_count):
+                page_num = index + 1
                 if selected_pages is not None and page_num not in selected_pages:
                     continue
-
                 if cancel_check and cancel_check():
-                    log_safe_info("Cancellation signal received during PDF import (UI-002)")
                     raise InterruptedError("Operation cancelled by user.")
-
-                processed_count += 1
-                page = pdf[page_idx]
-
-                # 1. Classify page diagnostics (PDF-001, PDF-007)
-                page_meta = classify_pdf_page(page, page_num)
-                pages_metadata.append(page_meta)
-
-                # Send real-time progress event (UI-002)
-                if progress_callback:
-                    stage = "ocr" if page_meta.classification != PageClassification.NATIVE else "extracting"
-                    msg = (
-                        f"Recognizing scanned text — page {page_num} of {page_count}"
-                        if stage == "ocr"
-                        else f"Extracting digital text — page {page_num} of {page_count}"
-                    )
-                    progress_callback(processed_count, total_to_process, stage, msg)
-
-                # 2. Add source-page transition marker (OUT-005)
-                marker_block = Block(
-                    id=f"p{page_num}_marker",
-                    type=BlockType.PAGE_MARKER,
-                    source_page=page_num,
-                    page_marker=page_num,
-                    extraction_method=ExtractionMethod.NATIVE,
-                    confidence=1.0,
-                )
-                all_blocks.append(marker_block)
-                if page_meta.details.get("is_blank"):
-                    if checkpoint_callback:
-                        checkpoint_callback(page_num, page_meta.classification, False, None)
-                    page.close()
-                    continue
-
-                image_blocks: List[Block] = []
-                page_image_warnings: List[str] = []
+                done += 1
+                page = pdf[index]
                 try:
-                    # 3. Extract lossless embedded images (IMG-001) & query image bounds (PDF-006)
-                    pike_page = pike_doc.pages[page_idx]
-                    images = extract_lossless_images_for_page(
-                        pike_page, page_num, workspace.assets_dir,
-                        on_warning=page_image_warnings.append,
-                        pdfium_page=page,
-                    )
-
-                    # Candidate figure bounds: IMAGE and FORM objects. Figures are often
-                    # wrapped in a form XObject, which a raw IMAGE filter misses.
+                    meta = classify_pdf_page(page, page_num)
+                    pages_meta.append(meta)
+                    marker = Block(id=f"p{page_num}_marker", type=BlockType.PAGE_MARKER,
+                                   source_page=page_num, page_marker=page_num)
+                    all_blocks.append(marker)
+                    if meta.details.get("is_blank"):
+                        if progress_callback:
+                            progress_callback(done, total, "extracting", f"Reading page {page_num} of {page_count}")
+                        if checkpoint_callback:
+                            checkpoint_callback(page_num, meta.classification, False, None)
+                        continue
                     try:
-                        fig_objs = list(
-                            page.get_objects(
-                                filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=16
-                            )
+                        blocks, page_headings, sizes = self._process_page(
+                            page, meta, workspace, layout, language, cancel_check,
+                            lambda stage, message: progress_callback(done, total, stage, message) if progress_callback else None,
+                            page_count,
                         )
-                    except Exception:
-                        fig_objs = list(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]))
-
-                    cb_x0, cb_y0, cb_x1, cb_y1 = page.get_cropbox()
-                    candidate_bboxes: List[Optional[BoundingBox]] = []
-                    candidate_objs: List[Any] = []
-                    for obj in fig_objs:
-                        try:
-                            l, b, r, t = obj.get_bounds()
-                            # Discard figures completely outside visible cropbox
-                            if r <= cb_x0 or l >= cb_x1 or t <= cb_y0 or b >= cb_y1:
-                                continue
-                            ix0 = max(0.0, float(l) - cb_x0)
-                            iy0 = max(0.0, float(b) - cb_y0)
-                            ix1 = min(page_meta.width, float(r) - cb_x0)
-                            iy1 = min(page_meta.height, float(t) - cb_y0)
-                            candidate_bboxes.append(
-                                BoundingBox(x0=ix0, y0=iy0, x1=ix1, y1=iy1)
-                            )
-                            candidate_objs.append(obj)
-                        except Exception:
-                            candidate_bboxes.append(None)
-                            candidate_objs.append(None)
-
-                    if images and candidate_bboxes and len(images) != len(candidate_bboxes):
-                        page_image_warnings.append(
-                            f"Page {page_num}: {len(images)} image(s) found but {len(candidate_bboxes)} "
-                            "figure region(s) located; positions may be approximate"
-                        )
-
-                    page_area = max(1.0, page_meta.width * page_meta.height)
-
-                    # Match decoded content, not dimensions: same-sized figures can differ.
-                    candidate_digests = []
-                    for obj in candidate_objs:
-                        digest = None
-                        try:
-                            from openlargeprint.security.validator import validate_image_dimensions
-                            validate_image_dimensions(*obj.get_px_size())
-                            bitmap = obj.get_bitmap()
-                            try:
-                                digest = image_digest(bitmap.to_pil())
-                            finally:
-                                bitmap.close()
-                        except Exception:
-                            pass
-                        candidate_digests.append(digest)
-                    placed_images = []
-                    used_candidates = set()
-                    for img in images:
-                        with Image.open(img.file_path) as decoded:
-                            digest = image_digest(decoded)
-                        matches = [i for i, key in enumerate(candidate_digests)
-                                   if key == digest and i not in used_candidates]
-                        if matches:
-                            for match in matches:
-                                used_candidates.add(match)
-                                placed_images.append((img, candidate_bboxes[match]))
-                        else:
-                            page_image_warnings.append(f"Page {page_num}: a figure's source position could not be verified. It has been retained for review.")
-                            placed_images.append((img, None))
-
-                    for img, bbox in placed_images:
-                        if bbox is None and candidate_bboxes:
-                            page_image_warnings.append(
-                                f"Page {page_num}: a figure's position could not be determined and may be misplaced"
-                            )
-
-                        # Suppress only page-filling rasters (the scanned page itself or a
-                        # canvas wallpaper) — never silently, and with a high threshold so a
-                        # large real figure on a text page is preserved.
-                        img_area = (bbox.width * bbox.height) if bbox else 0.0
-                        is_background_canvas = bbox is not None and (
-                            (img_area / page_area > 0.90)
-                            or (
-                                bbox.width > 0.95 * page_meta.width
-                                and bbox.height > 0.95 * page_meta.height
-                            )
-                        )
-
-                        if is_background_canvas and page_num != 1 and not self.preserve_page_artwork:
-                            page_image_warnings.append(
-                                f"Page {page_num}: a full-page background image was omitted from the reflowed output"
-                            )
-                            continue
-
-                        img_block = Block(
-                            id=f"p{page_num}_img{block_counter}",
-                            type=BlockType.IMAGE,
-                            source_page=page_num,
-                            source_bounding_box=bbox,
-                            extraction_method=ExtractionMethod.NATIVE,
-                            image_asset=img,
-                            confidence=1.0,
-                        )
-                        block_counter += 1
-                        image_blocks.append(img_block)
-                except Exception as e:
-                    log_safe_info(f"Image extraction skipped on page {page_num}: {type(e).__name__}")
-
-                try:
-                    # 4. Route page processing according to classification (PDF-001..005)
-                    extracted: List[Block] = []
-                    if page_meta.classification == PageClassification.NATIVE:
-                        # Native extraction path (PDF-002: no OCR on native text)
-                        extracted = self._extract_native_text(page, page_num, block_counter, page_meta)
-                        block_counter += len(extracted)
-
-                    elif page_meta.classification in (PageClassification.SCANNED, PageClassification.BROKEN_DIGITAL):
-                        if self.routing_mode == RoutingMode.NATIVE_ONLY:
-                            pass  # Common empty-extraction path retains the original below.
-                        else:
-                        # OCR path for scanned pages and broken-digital fallback (PDF-003, PDF-005)
-                            log_safe_info(
-                                f"Page {page_num} routed to OCR engine ({page_meta.classification.value})"
-                            )
-                            page_lang_hints = ("ar",) if (
-                                "arabic" in file_path.name.lower()
-                                or any("\u0600" <= c <= "\u06ff" for c in file_path.stem)
-                                or any("\u0600" <= c <= "\u06ff" for c in str(page_meta.details.get("clean_text", "")))
-                            ) else ("en",)
-                            extracted = self.scanned_extractor.extract_page(
-                                page,
-                                page_num,
-                                block_counter,
-                                assets_dir=workspace.assets_dir,
-                                cancel_check=cancel_check,
-                                language_hints=page_lang_hints,
-                            )
-                            block_counter += len(extracted)
-
-                    elif page_meta.classification == PageClassification.MIXED:
-                        # Mixed page reconciliation path (PDF-004)
-                        log_safe_info(f"Page {page_num} routed to mixed reconciliation (PDF-004)")
-                        if self.routing_mode == RoutingMode.NATIVE_ONLY:
-                            extracted = self._extract_native_text(page, page_num, block_counter, page_meta)
-                            try:
-                                image_blocks.append(self._preserve_page(page, page_num, workspace))
-                            except Exception:
-                                page_image_warnings.append(
-                                    "The original mixed-page image could not be prepared. Native text was retained; compare scanned areas with the original document."
-                                )
-                        else:
-                            extracted = self._reconcile_mixed_page(
-                                page, page_num, block_counter, page_meta, assets_dir=workspace.assets_dir, cancel_check=cancel_check
-                            )
-                        block_counter += len(extracted)
-
-                    # 4b. IMG-002: preserve vector artwork when no embedded raster was recovered
-                    if not image_blocks:
-                        table_bboxes = [
-                            (
-                                b.source_bounding_box.x0,
-                                b.source_bounding_box.y0,
-                                b.source_bounding_box.x1,
-                                b.source_bounding_box.y1,
-                            )
-                            for b in extracted
-                            if b.type == BlockType.TABLE and b.source_bounding_box is not None
-                        ]
-                        vector_asset = extract_vector_figure_region(
-                            page,
-                            page_num,
-                            workspace.assets_dir,
-                            page_meta.width,
-                            page_meta.height,
-                            occupied_bboxes=table_bboxes,
-                            on_warning=page_image_warnings.append,
-                        )
-                        if vector_asset is not None:
-                            image_blocks.append(
-                                Block(
-                                    id=f"p{page_num}_img{block_counter}",
-                                    type=BlockType.IMAGE,
-                                    source_page=page_num,
-                                    extraction_method=ExtractionMethod.NATIVE,
-                                    image_asset=vector_asset,
-                                    confidence=1.0,
-                                )
-                            )
-                            block_counter += 1
-
-                    # Keep source evidence for inferred native tables. This is a
-                    # region crop alongside semantic cells, never rasterized text
-                    # replacing usable native extraction (TBL-002, PDF-002).
-                    for table in extracted:
-                        if table.type == BlockType.TABLE and table.image_asset is None and table.source_bounding_box:
-                            try:
-                                box = table.source_bounding_box
-                                from openlargeprint.security.validator import bounded_pdf_scale
-                                scale = bounded_pdf_scale(page_meta.width, page_meta.height, 144)
-                                bitmap = page.render(scale=scale, crop=(max(0, box.x0 - 3), max(0, box.y0 - 3),
-                                    max(0, page_meta.width - box.x1 - 3), max(0, page_meta.height - box.y1 - 3)))
-                                try:
-                                    raster = bitmap.to_pil()
-                                    path = workspace.assets_dir / f"{table.id}_source.png"
-                                    raster.save(path)
-                                    table.image_asset = ImageAsset(asset_id=f"{table.id}_source", file_path=str(path),
-                                        width=raster.width, height=raster.height, mime_type="image/png",
-                                        alt_text=f"Original table on page {page_num}")
-                                finally:
-                                    bitmap.close()
-                            except Exception:
-                                table.warnings.append("The source table image could not be prepared. Native table text was retained; compare with the original document.")
-
-                    if page_meta.details.get("ocr_failed"):
-                        image_blocks.append(self._preserve_page(page, page_num, workspace))
-                    elif any(
-                        b.text and b.warnings and (b.type != BlockType.TABLE or b.image_asset is None)
-                        for b in extracted
-                    ):
-                        try:
-                            image_blocks.append(self._preserve_page(page, page_num, workspace))
-                        except Exception:
-                            extracted[0].warnings.append(
-                                "The original page image could not be prepared. Extracted text was retained; compare with the original document."
-                            )
-                    elif not extracted or all(b.confidence == 0 for b in extracted):
-                        image_blocks = [self._preserve_page(page, page_num, workspace)]
-
-                    # 5. Contextually interleave images with content blocks in reading order
-                    page_blocks = self._interleave_images_with_blocks(extracted, image_blocks)
-                    if page_image_warnings:
-                        # Surface image issues on the page's first block (never drop silently).
-                        target = page_blocks[0] if page_blocks else marker_block
-                        target.warnings.extend(page_image_warnings)
-
-                    all_blocks.extend(page_blocks)
-
-                    # 5. Checkpoint callback per page (UI-003)
+                    except InterruptedError:
+                        raise
+                    except Exception as exc:
+                        log_safe_info(f"Page {page_num} could not be converted ({type(exc).__name__})")
+                        blocks = [self._preserve_page(page, page_num, workspace,
+                                                      f"Page {page_num} could not be converted. The original page is shown instead.")]
+                        page_headings, sizes = {}, []
+                    heading_sizes.update(page_headings)
+                    body_sizes.extend(sizes)
+                    sample = " ".join(b.text or "" for b in blocks[:6])
+                    if language == "en" and sum(1 for c in sample if "؀" <= c <= "ۿ") > 20:
+                        language = "ar"
+                    all_blocks.extend(blocks)
                     if checkpoint_callback:
-                        has_warn = any(bool(b.warnings) for b in [marker_block, *page_blocks])
-                        warn_msg = None
-                        if has_warn:
-                            for b in [marker_block, *page_blocks]:
-                                if b.warnings:
-                                    warn_msg = b.warnings[0]
-                                    break
-                        checkpoint_callback(page_num, page_meta.classification, has_warn, warn_msg)
-
-                except InterruptedError:
-                    raise
-                except Exception as page_err:
-                    # UI-003: Single failed page must not discard already-converted pages
-                    log_safe_info(f"Page {page_num} encountered extraction error: {type(page_err).__name__}")
-                    try:
-                        fallback_block = self._preserve_page(page, page_num, workspace)
-                    except Exception:
-                        fallback_block = Block(
-                            id=f"p{page_num}_err_fallback",
-                            type=BlockType.PARAGRAPH,
-                            text=f"[Page {page_num} could not be rendered. Consult the original document.]",
-                            warnings=[f"Page {page_num} could not be extracted or rendered."],
-                            source_page=page_num,
-                            confidence=0.0,
-                        )
-                    all_blocks.append(fallback_block)
-                    if checkpoint_callback:
-                        checkpoint_callback(page_num, page_meta.classification, True, f"Page {page_num} extraction error")
+                        warned = next((w for b in blocks for w in b.warnings), None)
+                        checkpoint_callback(page_num, meta.classification, warned is not None, warned)
                 finally:
                     page.close()
-
         finally:
-            pike_doc.close()
             pdf.close()
             self._router.close()
-            close_engine = (getattr(self.ocr_engine, "close", None)
-                            if self.scanned_extractor.ocr_router is None else None)
-            if callable(close_engine):
-                close_engine()
+            close = getattr(self._injected_engine, "close", None)
+            if callable(close):
+                close()
 
+        body = statistics.median(body_sizes) if body_sizes else 11.0
+        assign_heading_levels(all_blocks, heading_sizes, body)
+        all_blocks = self._settle_page_furniture(all_blocks, pages_meta)
         metadata = DocumentMetadata(
-            title=file_path.stem.replace("_", " "),
+            title=file_path.stem.replace("_", " ").strip(),
             source_file_name=file_path.name,
-            page_count=len(pages_metadata) if selected_pages is not None else page_count,
+            page_count=len(pages_meta) if selected_pages is not None else page_count,
         )
+        return DocumentIR(schema_version=SCHEMA_VERSION, metadata=metadata, pages=pages_meta, blocks=all_blocks)
 
-        return DocumentIR(
-            schema_version="1.0.0",
-            metadata=metadata,
-            pages=pages_metadata,
-            blocks=all_blocks,
-        )
-
-    def _reconcile_mixed_page(
-        self,
-        page: pdfium.PdfPage,
-        page_num: int,
-        start_idx: int,
-        page_meta: PageMetadata,
-        assets_dir: Optional[Path] = None,
-        cancel_check: Optional[CancelCheck] = None,
-    ) -> List[Block]:
-        """Reconcile native text with selective OCR of regions lacking native text, deduplicating overlaps (PDF-004)."""
-        # 1. Native text extraction
-        native_blocks = self._extract_native_text(page, page_num, start_idx, page_meta)
-        idx_after_native = start_idx + len(native_blocks)
-
+    # ------------------------------------------------------------------
+    def _process_page(self, page: pdfium.PdfPage, meta: PageMetadata, workspace: JobWorkspace,
+                      layout, language: str, cancel_check: Optional[CancelCheck], report, page_count: int,
+                      ) -> Tuple[List[Block], Dict[str, float], List[float]]:
+        page_num = meta.page_number
+        width, height = meta.width, meta.height
+        crop = page_box(page)
         textpage = page.get_textpage()
         try:
-            native_regions = [textpage.get_rect(index) for index in range(textpage.count_rects())]
+            native = extract_native_text(page, textpage, height, crop)
         finally:
             textpage.close()
+
+        broken = native.broken_chars > 0.15 * max(1, native.visible_chars)
+        # Visible text is the document's own (PDF-002). On a page that is mostly a
+        # picture, a few stray characters (a stamped page number) do not make it digital.
+        mostly_picture = meta.details.get("raster_coverage", 0) > 0.5
+        use_native = not broken and native.visible_chars >= (MIN_NATIVE_CHARS if mostly_picture else 1)
+        if broken:
+            meta.classification = PageClassification.BROKEN_DIGITAL
+        elif not use_native:
+            meta.classification = PageClassification.SCANNED
+            if native.hidden_chars:
+                meta.details["hidden_text_layer"] = True
+        recognise = not use_native and self.routing_mode != RoutingMode.NATIVE_ONLY
+
+        if report:
+            report("ocr" if recognise else "extracting",
+                   f"Recognizing scanned text, page {page_num} of {page_count}" if recognise
+                   else f"Reading page {page_num} of {page_count}")
+
+        hi_scale = bounded_pdf_scale(width, height, self.ocr_dpi if recognise else LAYOUT_DPI)
+        bitmap = page.render(scale=hi_scale)
         try:
-            page_lang_hints = ("ar",) if any("\u0600" <= c <= "\u06ff" for c in str(page_meta.details.get("clean_text", ""))) else ("en",)
-            ocr_blocks = self.scanned_extractor.extract_page(
-                page, page_num, idx_after_native, assets_dir=assets_dir,
-                cancel_check=cancel_check, native_regions=native_regions,
-                language_hints=page_lang_hints,
-            )
-        except InterruptedError:
-            raise
-        except Exception:
-            if not native_blocks:
-                raise
-            page_meta.details["ocr_failed"] = True
-            for block in native_blocks:
-                block.warnings.append(f"Page {page_num}: scanned regions could not be recognized. Native text and original images have been retained for review.")
-            return native_blocks
+            image = bitmap.to_pil().convert("RGB")
+        finally:
+            bitmap.close()
+        layout_image = image
+        if recognise and hi_scale > LAYOUT_DPI / 72.0 * 1.2:
+            layout_image = image.resize((int(width * LAYOUT_DPI / 72.0), int(height * LAYOUT_DPI / 72.0)), Image.BILINEAR)
 
-        # 3. Deduplicate: keep only OCR blocks that DO NOT overlap native text (Principle 1)
-        accepted_ocr_blocks: List[Block] = []
-        for ocr_b in ocr_blocks:
-            if not ocr_b.source_bounding_box:
+        page_layout = layout.detect(layout_image, width, height)
+        regions = page_layout.regions
+        if use_native:
+            if page_layout.source != "model":
+                # Without the layout model, pictures are still found from the file itself.
+                regions = regions + self._image_objects(page, native.words, width, height, crop)
+            regions = regions + self._vector_artwork(page, regions, native.words, width, height, crop)
+        meta.details["layout"] = page_layout.source
+
+        method = ExtractionMethod.NATIVE
+        page_confidence = 1.0
+        if use_native:
+            words: List[Word] = list(native.words)
+            words.extend(self._recognise_empty_regions(page, regions, words, meta, language, cancel_check))
+            if any(w.confidence < 1.0 for w in words):
+                meta.classification = PageClassification.MIXED
+        elif recognise:
+            method = ExtractionMethod.OCR_MAXIMUM if self.routing_mode == RoutingMode.MAXIMUM_ACCURACY else ExtractionMethod.OCR_FAST
+            words, page_confidence = self._recognise(image, hi_scale, page_num, language, cancel_check)
+        else:
+            words = []
+
+        rules = find_rules(layout_image, width, height,
+                           [w.box for w in words if any(ch.isalnum() for ch in w.text)],
+                           ink=215 if recognise else 200)
+        if page_layout.source != "model":
+            regions = regions + [r for r in ruled_table_regions(rules, words)
+                                 if not any(coverage(r.box, other.box) > 0.5 for other in regions)]
+        words = insert_blanks(words, rules, regions, width)
+
+        figure_counter = [0]
+
+        def make_figure(region: LayoutRegion) -> Optional[ImageAsset]:
+            if region.width < 6 or region.height < 6:
+                return None
+            if region.area < 0.002 * width * height and max(region.width, region.height) < 36:
+                meta.details["decorative_images"] = meta.details.get("decorative_images", 0) + 1
+                return None
+            figure_counter[0] += 1
+            stem = workspace.assets_dir / f"p{page_num}_fig{figure_counter[0]}"
+            pad = 2.0
+            box = (max(0.0, region.x0 - pad), max(0.0, region.y0 - pad),
+                   min(width, region.x1 + pad), min(height, region.y1 + pad))
+            crop_img = None
+            if recognise:
+                crop_img = image.crop(tuple(int(v * hi_scale) for v in box))
+            else:
+                # IMG-001: a picture that is exactly one embedded image, with nothing
+                # printed over it, is taken from the file at its own resolution.
+                if not any(coverage(w.box, region.box) > 0.5 for w in native.words):
+                    crop_img = self._embedded_picture(page, region, height, crop)
+                if crop_img is None:
+                    dpi = self._figure_dpi(page, region, height, crop)
+                    scale = bounded_pdf_scale(width, height, dpi)
+                    bm = page.render(scale=scale, crop=(box[0], height - box[3], width - box[2], box[1]))
+                    try:
+                        crop_img = bm.to_pil()
+                    finally:
+                        bm.close()
+            if crop_img.width < 4 or crop_img.height < 4:
+                return None
+            return _save_image(crop_img, stem, f"Picture from page {page_num}")
+
+        def make_table(region: LayoutRegion, table_words: List[Word]):
+            built = build_table(region, table_words, rules)
+            if built is None:
+                return None
+            structure, confidence = built
+            source = make_figure(region) if confidence < 0.6 else None
+            if source is not None:
+                source.alt_text = f"Original table from page {page_num}"
+            return structure, confidence, source
+
+        rtl = language == "ar"
+        assembler = PageAssembler(page_num, width, height, method, rtl=rtl)
+        assembled = assembler.assemble(regions, words, make_figure, make_table)
+        blocks = assembled.blocks
+        if assembled.printed_page:
+            meta.details["printed_page"] = assembled.printed_page
+
+        if recognise:
+            has_text = any(b.text and b.type != BlockType.CAPTION for b in blocks)
+            has_pictures = any(b.type == BlockType.IMAGE for b in blocks)
+            if not has_text and not has_pictures:
+                picture = self._preserve_page(page, page_num, workspace, "")
+                picture.warnings.clear()
+                picture.confidence = 1.0
+                picture.image_asset.alt_text = f"Page {page_num}, a page without text"
+                blocks.insert(0, picture)
+            elif has_text and page_confidence < LOW_PAGE_CONFIDENCE:
+                blocks.insert(0, self._preserve_page(
+                    page, page_num, workspace,
+                    f"Page {page_num} was hard to read. The original page is shown so nothing is lost."))
+            else:
+                for block in blocks:
+                    if block.text and block.confidence < REVIEW_CONFIDENCE and block.role not in ("running_text", "page_number"):
+                        block.warnings.append("Some words here were hard to read. Compare with the original page.")
+                        if block.confidence < SHOW_ORIGINAL_CONFIDENCE and block.image_asset is None:
+                            block.image_asset = self._crop_original(image, hi_scale, block, height, workspace)
+        elif use_native and any(w.visual_order for w in words):
+            # Arabic stored in display order cannot be put into reading order without
+            # guessing; the stored characters stay as they are, next to the page itself.
+            for block in blocks:
+                if block.text and block.text_direction.value == "rtl":
+                    block.warnings.append("Arabic reading order may be uncertain. Compare with the original page shown here.")
+            try:
+                blocks.insert(0, self._preserve_page(page, page_num, workspace,
+                                                     f"Page {page_num} is shown as printed because its Arabic text order is uncertain."))
+            except Exception:
+                pass
+        elif not use_native:
+            blocks.insert(0, self._preserve_page(
+                page, page_num, workspace,
+                f"Page {page_num} is a picture of text and recognition is turned off, so the original page is shown."))
+        return blocks, assembled.heading_sizes, assembled.body_sizes
+
+    # ------------------------------------------------------------------
+    def _recognise(self, image: Image.Image, scale: float, page_num: int, language: str,
+                   cancel_check: Optional[CancelCheck]) -> Tuple[List[Word], float]:
+        engine = self._engine_for(language)
+        result = engine.analyze_page(image, page_num=page_num, language_hints=(language,),
+                                     cancellation=CancellationToken(cancel_check))
+        if result.cancelled or (cancel_check and cancel_check()):
+            raise InterruptedError("Conversion cancelled.")
+        confidences = [line.confidence for line in result.lines]
+        mean = statistics.mean(confidences) if confidences else 0.0
+        if self._injected_engine is None and language == "en" and len(result.lines) >= 3 and mean < 0.65:
+            # Possibly Arabic: try the Arabic recogniser and keep whichever reads better.
+            alternative = self._engine_for("ar").analyze_page(
+                image, page_num=page_num, language_hints=("ar",), cancellation=CancellationToken(cancel_check))
+            alt_conf = [line.confidence for line in alternative.lines]
+            if alt_conf and statistics.mean(alt_conf) > mean + 0.1:
+                result, mean = alternative, statistics.mean(alt_conf)
+        return ocr_words(result, scale), mean
+
+    def _recognise_empty_regions(self, page, regions: List[LayoutRegion], words: List[Word],
+                                 meta: PageMetadata, language: str, cancel_check) -> List[Word]:
+        """Mixed pages: text regions with no native text but painted as a picture (PDF-004)."""
+        if self.routing_mode == RoutingMode.NATIVE_ONLY or meta.details.get("raster_coverage", 0) < 0.01:
+            return []
+        empty = [r for r in regions if r.kind in TEXT_KINDS and r.area > 200
+                 and not any(coverage(w.box, r.box) > 0.5 for w in words)]
+        # Pictures often carry words of their own (speech bubbles, labels, signs).
+        pictures = [r for r in regions if r.kind == RegionKind.FIGURE and not r.decorative
+                    and r.area > 2500 and not any(coverage(w.box, r.box) > 0.5 for w in words)]
+        if not empty and not pictures:
+            return []
+        width, height = meta.width, meta.height
+        scale = bounded_pdf_scale(width, height, self.ocr_dpi)
+        found: List[Word] = []
+        for region in empty + pictures:
+            box = (region.x0, region.y0, region.x1, region.y1)
+            bm = page.render(scale=scale, crop=(box[0], height - box[3], width - box[2], box[1]))
+            try:
+                crop_img = bm.to_pil().convert("RGB")
+            finally:
+                bm.close()
+            if crop_img.width < 8 or crop_img.height < 8:
                 continue
-            ocr_box = ocr_b.source_bounding_box
+            engine = self._engine_for(language)
+            result = engine.analyze_page(crop_img, page_num=meta.page_number, language_hints=(language,),
+                                         cancellation=CancellationToken(cancel_check))
+            if result.cancelled:
+                raise InterruptedError("Conversion cancelled.")
+            if region in pictures:
+                # Only clear words: photographs produce letter-like noise.
+                result.lines = [l for l in result.lines if l.confidence >= 0.85
+                                and sum(c.isalpha() for c in l.text) >= 2]
+            for word in ocr_words(result, scale, offset=(box[0], box[1])):
+                word.confidence = min(word.confidence, 0.999)
+                found.append(word)
+        if empty and found:
+            meta.details["recognised_regions"] = len(empty)
+        return found
 
-            overlaps_native = False
-            for nat_b in native_blocks:
-                if not nat_b.source_bounding_box:
+    @staticmethod
+    def _image_objects(page, words: List[Word], width: float, height: float, crop) -> List[LayoutRegion]:
+        """Embedded pictures as figure regions, used when no layout model is available (IMG-001).
+
+        A picture that fills most of the page with text printed over it is a
+        background, not a figure, and is left to the page itself.
+        """
+        found: List[LayoutRegion] = []
+        try:
+            objects = list(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=8))
+        except Exception:
+            return []
+        for obj in objects:
+            try:
+                left, bottom, right, top = obj.get_bounds()
+            except Exception:
+                continue
+            box = (max(0.0, left - crop[0]), max(0.0, crop[3] - top),
+                   min(width, right - crop[0]), min(height, crop[3] - bottom))
+            if box[2] - box[0] < 6 or box[3] - box[1] < 6:
+                continue
+            if (box[2] - box[0]) * (box[3] - box[1]) > 0.6 * width * height and any(
+                    coverage(w.box, box) > 0.5 for w in words):
+                continue
+            if any(coverage(box, r.box) > 0.85 for r in found):
+                continue
+            found.append(LayoutRegion(RegionKind.FIGURE, *box, score=0.5, label="embedded_image"))
+        found.sort(key=lambda r: (r.y0, r.x0))
+        for order, region in enumerate(found):
+            region.order = order
+        return found
+
+    @staticmethod
+    def _vector_artwork(page, regions: List[LayoutRegion], words: List[Word], width: float,
+                        height: float, crop) -> List[LayoutRegion]:
+        """Drawings made of vector paths that the layout model did not mark (IMG-002).
+
+        Paths are clustered; a cluster that is large, holds no text and lies
+        outside every detected region is kept as a picture so it is not lost.
+        """
+        boxes: List[List[float]] = []
+        try:
+            for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_PATH], max_depth=8):
+                left, bottom, right, top = obj.get_bounds()
+                boxes.append([left - crop[0], crop[3] - top, right - crop[0], crop[3] - bottom])
+        except Exception:
+            return []
+        clusters: List[List[float]] = []
+        for box in sorted(boxes, key=lambda b: (b[1], b[0])):
+            for cluster in clusters:
+                if (box[0] <= cluster[2] + 6 and box[2] >= cluster[0] - 6
+                        and box[1] <= cluster[3] + 6 and box[3] >= cluster[1] - 6):
+                    cluster[:] = [min(cluster[0], box[0]), min(cluster[1], box[1]),
+                                  max(cluster[2], box[2]), max(cluster[3], box[3])]
+                    break
+            else:
+                clusters.append(list(box))
+        found: List[LayoutRegion] = []
+        for x0, y0, x1, y1 in clusters:
+            w, h = x1 - x0, y1 - y0
+            if w < 40 or h < 40 or w * h < 0.03 * width * height or w > 0.98 * width:
+                continue
+            box = (x0, y0, x1, y1)
+            if any(coverage(box, r.box) > 0.3 or coverage(r.box, box) > 0.3 for r in regions):
+                continue
+            if sum(1 for word in words if coverage(word.box, box) > 0.5) > 2:
+                continue  # a frame or ruled box around text, not a drawing
+            order = max((r.order for r in regions if r.y1 <= y0), default=-1) + 0.5
+            found.append(LayoutRegion(RegionKind.FIGURE, x0, y0, x1, y1, score=0.5, order=order,
+                                      label="vector_artwork"))
+        return found
+
+    @staticmethod
+    def _embedded_picture(page, region: LayoutRegion, height: float, crop) -> Optional[Image.Image]:
+        """The decoded embedded image behind a figure, masks applied, at its own pixel size."""
+        from openlargeprint.security.validator import validate_image_dimensions
+
+        matches = []
+        try:
+            for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=8):
+                left, bottom, right, top = obj.get_bounds()
+                box = (left - crop[0], crop[3] - top, right - crop[0], crop[3] - bottom)
+                if coverage(box, region.box) >= 0.85 and coverage(region.box, box) >= 0.85:
+                    matches.append(obj)
+                elif coverage(box, region.box) > 0.2:
+                    return None  # several pictures make up this figure: render it as seen
+        except Exception:
+            return None
+        if len(matches) != 1:
+            return None
+        obj = matches[0]
+        try:
+            validate_image_dimensions(*obj.get_px_size())
+            bitmap = obj.get_bitmap(render=True, scale_to_original=True)
+            try:
+                picture = bitmap.to_pil().copy()
+            finally:
+                bitmap.close()
+        except Exception:
+            return None
+        if picture.mode in ("RGBA", "LA", "P"):
+            canvas = Image.new("RGB", picture.size, "white")
+            canvas.paste(picture.convert("RGBA"), mask=picture.convert("RGBA").split()[-1])
+            picture = canvas
+        return picture
+
+    @staticmethod
+    def _figure_dpi(page, region: LayoutRegion, height: float, crop) -> float:
+        """Render figures at the resolution of the picture inside them, within sensible limits."""
+        best = FIGURE_MIN_DPI
+        try:
+            for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=8):
+                left, bottom, right, top = obj.get_bounds()
+                box = (left - crop[0], crop[3] - top, right - crop[0], crop[3] - bottom)
+                if coverage(region.box, box) < 0.3 and coverage(box, region.box) < 0.5:
                     continue
-                nat_box = nat_b.source_bounding_box
+                px_w, _ = obj.get_px_size()
+                if right - left > 0:
+                    best = max(best, px_w / ((right - left) / 72.0))
+        except Exception:
+            pass
+        return max(FIGURE_MIN_DPI, min(FIGURE_MAX_DPI, best))
 
-                # Check bounding box overlap
-                x_overlap = max(0.0, min(ocr_box.x1, nat_box.x1) - max(ocr_box.x0, nat_box.x0))
-                y_overlap = max(0.0, min(ocr_box.y1, nat_box.y1) - max(ocr_box.y0, nat_box.y0))
-                overlap_area = x_overlap * y_overlap
-                ocr_area = max(1.0, ocr_box.width * ocr_box.height)
+    @staticmethod
+    def _crop_original(image: Image.Image, scale: float, block: Block, page_height: float,
+                       workspace: JobWorkspace) -> Optional[ImageAsset]:
+        """The printed lines behind a doubtful block, shown with the recognised text."""
+        box = block.source_bounding_box
+        if box is None:
+            return None
+        pad = 4.0
+        left = max(0, int((box.x0 - pad) * scale))
+        top = max(0, int((page_height - box.y1 - pad) * scale))
+        right = min(image.width, int((box.x1 + pad) * scale))
+        bottom = min(image.height, int((page_height - box.y0 + pad) * scale))
+        if right - left < 8 or bottom - top < 8:
+            return None
+        asset = _save_image(image.crop((left, top, right, bottom)),
+                            workspace.assets_dir / f"{block.id}_original",
+                            f"Original lines from page {block.source_page}")
+        return asset
 
-                if (overlap_area / ocr_area) > 0.25:
-                    overlaps_native = True
-                    break
-
-            if not overlaps_native:
-                accepted_ocr_blocks.append(ocr_b)
-
-        # 4. Merge native blocks and non-overlapping OCR blocks in reading order
-        combined = native_blocks + accepted_ocr_blocks
-        proxies = []
-        owners = {}
-        for block in combined:
-            box = block.source_bounding_box
-            if box:
-                proxy = TextLine(block.text or "", (box.x0, box.y0, box.x1, box.y1),
-                                 12, "", False, page_num)
-                proxies.append(proxy)
-                owners[id(proxy)] = block
-        ordered = self._order_lines_by_layout(proxies, page_meta.width, page_meta.height)
-        return [owners[id(proxy)] for proxy in ordered] + [b for b in combined if b.source_bounding_box is None]
-
-    def _interleave_images_with_blocks(
-        self, content_blocks: List[Block], image_blocks: List[Block]
-    ) -> List[Block]:
-        """Interleave image figures contextually into the reading order flow."""
-        if not image_blocks:
-            return content_blocks
-        if not content_blocks:
-            return image_blocks
-
-        merged: List[Block] = []
-        img_idx = 0
-        sorted_images = sorted(
-            image_blocks,
-            key=lambda b: -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
-        )
-
-        for blk in content_blocks:
-            blk_y = blk.source_bounding_box.y1 if blk.source_bounding_box else 0.0
-            while img_idx < len(sorted_images):
-                curr_img = sorted_images[img_idx]
-                img_y = curr_img.source_bounding_box.y1 if curr_img.source_bounding_box else 0.0
-                if img_y >= blk_y:
-                    merged.append(curr_img)
-                    img_idx += 1
-                else:
-                    break
-            merged.append(blk)
-
-        while img_idx < len(sorted_images):
-            merged.append(sorted_images[img_idx])
-            img_idx += 1
-
-        return merged
-
-    def _preserve_page(self, page: pdfium.PdfPage, page_num: int, workspace: JobWorkspace) -> Block:
+    def _preserve_page(self, page: pdfium.PdfPage, page_num: int, workspace: JobWorkspace,
+                       warning: str) -> Block:
         width, height = page.get_size()
         scale = bounded_pdf_scale(width, height, 150.0)
         bitmap = page.render(scale=scale)
         try:
-            image = bitmap.to_pil()
-            path = workspace.assets_dir / f"p{page_num}_retained.png"
-            image.save(path, format="PNG")
-            asset = ImageAsset(
-                asset_id=f"p{page_num}_retained",
-                file_path=str(path),
-                width=image.width,
-                height=image.height,
-                mime_type="image/png",
-                alt_text=f"Original page {page_num}, retained for review",
-            )
+            asset = _save_image(bitmap.to_pil(), workspace.assets_dir / f"p{page_num}_retained",
+                                f"Original page {page_num}")
         finally:
             bitmap.close()
+        asset.asset_id = f"p{page_num}_retained"
         return Block(
-            id=f"p{page_num}_retained",
-            type=BlockType.IMAGE,
-            source_page=page_num,
+            id=f"p{page_num}_retained", type=BlockType.IMAGE, source_page=page_num,
             source_bounding_box=BoundingBox(x0=0, y0=0, x1=width, y1=height),
-            image_asset=asset,
-            confidence=0.0,
-            warnings=[f"Page {page_num} needs review. The original page image has been retained."],
+            image_asset=asset, confidence=0.0, warnings=[warning],
         )
 
-    def _filter_running_headers_and_footers(
-        self,
-        lines: List[TextLine],
-        page_num: int,
-        page_width: float,
-        page_height: float,
-    ) -> List[TextLine]:
-        """Filter out running headers, running footers, and isolated page numbers from original layout."""
-        # Margin position alone cannot prove that text is disposable (PDF-002).
-        return lines
+    @staticmethod
+    def _settle_page_furniture(blocks: List[Block], pages: List[PageMetadata]) -> List[Block]:
+        """Running heads, footers and page numbers move into page details.
 
-    def _extract_native_text(
-        self,
-        page: pdfium.PdfPage,
-        page_num: int,
-        start_idx: int,
-        page_meta: PageMetadata,
-    ) -> List[Block]:
-        """Extract native text spans, order columns, and form semantic blocks."""
-        cropbox = page.get_cropbox()
-        textpage = page.get_textpage()
-        try:
-            raw_lines = self._extract_raw_lines(
-                textpage, page_num, cropbox=cropbox, page_width=page_meta.width, page_height=page_meta.height
-            )
-        finally:
-            textpage.close()
+        Text that repeats on several pages (book title, chapter name, page
+        numbers) is page furniture: it is kept in the page's metadata and shown
+        with the page marker instead of interrupting the reading flow. Footer
+        text that appears only once is real content and stays as a note.
+        """
+        meta_by_page = {p.page_number: p for p in pages}
 
-        if not raw_lines:
-            return []
+        def normal(text: str) -> str:
+            return re.sub(r"[\d\W_]+", " ", text.lower()).strip()
 
-        # Filter running headers and footers from original page layout
-        clean_lines = self._filter_running_headers_and_footers(
-            raw_lines, page_num, page_meta.width, page_meta.height
-        )
-
-        # 1. Detect and extract tables before column ordering (TBL-001)
-        non_table_lines, table_blocks = self._extract_tables(clean_lines, page_num, start_idx, page_meta)
-        idx_after_tables = start_idx + len(table_blocks)
-
-        # 2. Reconstruct column order for regular text
-        ordered_lines = self._order_lines_by_layout(non_table_lines, page_meta.width, page_meta.height)
-
-        # 3. Form semantic blocks (headings, paragraphs, lists, footnotes, captions)
-        text_blocks = self._form_semantic_blocks(
-            ordered_lines, page_num, idx_after_tables, page_meta.height, page_meta.width
-        )
-        for block in text_blocks + table_blocks:
-            if block.text and normalize_arabic_logical_order(block.text) != block.text:
-                block.warnings.append(
-                    "Arabic reading order may be uncertain. Source characters were preserved; compare with the retained original page."
-                )
-
-        # 4. If table blocks were extracted, insert them in reading order without
-        # disrupting multi-column ordering of text_blocks
-        if not table_blocks:
-            return text_blocks
-
-        all_blocks: List[Block] = []
-        tbl_idx = 0
-        sorted_tables = sorted(
-            table_blocks,
-            key=lambda b: -(b.source_bounding_box.y1 if b.source_bounding_box else 0.0),
-        )
-        for tb in text_blocks:
-            tb_y = tb.source_bounding_box.y1 if tb.source_bounding_box else 0.0
-            while tbl_idx < len(sorted_tables):
-                curr_tbl = sorted_tables[tbl_idx]
-                tbl_y = curr_tbl.source_bounding_box.y1 if curr_tbl.source_bounding_box else 0.0
-                if tbl_y >= tb_y:
-                    all_blocks.append(curr_tbl)
-                    tbl_idx += 1
-                else:
-                    break
-            all_blocks.append(tb)
-        while tbl_idx < len(sorted_tables):
-            all_blocks.append(sorted_tables[tbl_idx])
-            tbl_idx += 1
-        return all_blocks
-
-    def _extract_tables(
-        self,
-        lines: List[TextLine],
-        page_num: int,
-        start_idx: int,
-        page_meta: PageMetadata,
-    ) -> Tuple[List[TextLine], List[Block]]:
-        """Identify multi-column aligned grids and construct TableStructure blocks (TBL-001)."""
-        if len(lines) < 4:
-            return lines, []
-
-        # 1. Group lines by horizontal row bands (similar y0 within 6pt tolerance)
-        rows_by_y: List[List[TextLine]] = []
-        sorted_by_y = sorted(lines, key=lambda l: -l.y0)
-
-        for line in sorted_by_y:
-            placed = False
-            for r in rows_by_y:
-                if abs(r[0].y0 - line.y0) <= 6.0 and abs(r[0].y1 - line.y1) <= 6.0:
-                    r.append(line)
-                    placed = True
-                    break
-            if not placed:
-                rows_by_y.append([line])
-
-        for r in rows_by_y:
-            r.sort(key=lambda l: l.x0)
-
-        # 2. Identify candidate multi-column rows (>= 2 cells separated by >= 8pt horizontal gap)
-        multi_col_rows: List[Tuple[int, List[TextLine]]] = []
-        for r_idx, r in enumerate(rows_by_y):
-            if len(r) >= 2:
-                has_gaps = all(r[i + 1].x0 - r[i].x1 >= 8.0 for i in range(len(r) - 1))
-                if has_gaps:
-                    multi_col_rows.append((r_idx, r))
-
-        if len(multi_col_rows) < 2:
-            return lines, []
-
-        # 3. Find contiguous clusters of multi-column rows
-        table_clusters: List[List[List[TextLine]]] = []
-        curr_cluster: List[List[TextLine]] = []
-        prev_r_idx = -99
-
-        for r_idx, r in multi_col_rows:
-            if curr_cluster and (r_idx - prev_r_idx > 2 or abs(len(r) - len(curr_cluster[-1])) > 1):
-                if len(curr_cluster) >= 2:
-                    table_clusters.append(curr_cluster)
-                curr_cluster = []
-            curr_cluster.append(r)
-            prev_r_idx = r_idx
-
-        if len(curr_cluster) >= 2:
-            table_clusters.append(curr_cluster)
-
-        if not table_clusters:
-            return lines, []
-
-        table_blocks: List[Block] = []
-        consumed_line_ids: set[int] = set()
-        idx = start_idx
-
-        for cluster in table_clusters:
-            all_x0s = sorted(l.x0 for r in cluster for l in r)
-            col_anchors: List[float] = []
-            for x in all_x0s:
-                if not col_anchors or (x - col_anchors[-1] > 25.0):
-                    col_anchors.append(x)
-
-            if len(col_anchors) < 2:
+        counts = Counter()
+        seen = defaultdict(set)
+        for block in blocks:
+            if block.role == "running_text" and block.text:
+                key = normal(block.text)
+                if key and block.source_page not in seen[key]:
+                    seen[key].add(block.source_page)
+                    counts[key] += 1
+        threshold = 2 if len(pages) <= 6 else 3
+        kept: List[Block] = []
+        for block in blocks:
+            meta = meta_by_page.get(block.source_page)
+            if block.role == "page_number" and block.text:
+                if meta is not None:
+                    meta.details.setdefault("printed_page", block.text)
                 continue
-
-            # Prose columns can align by chance. Every candidate row must use the
-            # same anchors consistently before we consume it as tabular content.
-            if any(len(r) != len(col_anchors) for r in cluster):
+            if block.role == "edge_text":
+                if meta is not None:
+                    meta.details.setdefault("edge_text", []).append(block.text or "")
                 continue
-            if any(abs(cell.x0 - col_anchors[c]) > 12.0
-                   for r in cluster for c, cell in enumerate(r)):
-                continue
-
-            # Invariant: Disambiguate multi-column page layout, TOCs, and outlines from a table.
-            # A true table has structured, concise data cells arranged in a grid across columns.
-            total_cluster_lines = sum(len(r) for r in cluster)
-            avg_len = sum(len(l.text) for r in cluster for l in r) / max(1, total_cluster_lines)
-            max_w = max((l.x1 - l.x0) for r in cluster for l in r)
-
-            # If any line spans more than 40% of the page width, or average line length is long prose (> 32 chars),
-            # this is multi-column text, TOC entries, or section blocks — NOT a table!
-            if avg_len > 32 or max_w > 0.40 * page_meta.width:
-                continue
-
-            # Tables must have at least 3 rows, or 2 rows with strictly short data (<= 20 chars avg)
-            if len(cluster) < 3 and avg_len > 20:
-                continue
-
-            # Require each row in the cluster to have at least 2 distinct non-overlapping cells
-            valid_rows = sum(1 for r in cluster if len(r) >= 2)
-            if valid_rows < 2 or (valid_rows / len(cluster) < 0.60):
-                continue
-
-            grid: List[List[TableCell]] = []
-            all_cluster_lines: List[TextLine] = []
-
-            for r_idx, row_lines in enumerate(cluster):
-                row_cells: List[TableCell] = [
-                    TableCell(text="", is_header=(r_idx == 0)) for _ in col_anchors
-                ]
-                for line in row_lines:
-                    all_cluster_lines.append(line)
-                    consumed_line_ids.add(id(line))
-                    best_c = 0
-                    min_dist = 9999.0
-                    for c_idx, anchor in enumerate(col_anchors):
-                        dist = abs(line.x0 - anchor)
-                        if dist < min_dist:
-                            min_dist = dist
-                            best_c = c_idx
-                    existing = row_cells[best_c].text
-                    row_cells[best_c].text = (existing + " " + line.text).strip() if existing else line.text.strip()
-
-                grid.append(row_cells)
-
-            has_cells = any(any(c.text for c in row) for row in grid)
-            if not has_cells:
-                continue
-
-            min_x = min(l.x0 for l in all_cluster_lines)
-            min_y = min(l.y0 for l in all_cluster_lines)
-            max_x = max(l.x1 for l in all_cluster_lines)
-            max_y = max(l.y1 for l in all_cluster_lines)
-            bbox = BoundingBox(x0=min_x, y0=min_y, x1=max_x, y1=max_y)
-
-            table_struct = TableStructure(rows=grid, has_header=True)
-            tbl_text = table_struct.to_markdown_table()
-            tbl_lang = detect_language(tbl_text)
-            tbl_dir = detect_text_direction(tbl_text)
-
-            tbl_block = Block(
-                id=f"p{page_num}_tbl{idx}",
-                type=BlockType.TABLE,
-                text=tbl_text,
-                table_structure=table_struct,
-                source_page=page_num,
-                source_bounding_box=bbox,
-                extraction_method=ExtractionMethod.NATIVE,
-                confidence=0.8,
-                warnings=["Table structure was inferred from aligned text. Compare it with the retained source table."],
-                language=tbl_lang,
-                text_direction=tbl_dir,
-            )
-            table_blocks.append(tbl_block)
-            idx += 1
-
-        remaining_lines = [l for l in lines if id(l) not in consumed_line_ids]
-        return remaining_lines, table_blocks
-
-    def _extract_raw_lines(
-        self,
-        textpage: pdfium.PdfTextPage,
-        page_num: int,
-        cropbox: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-        page_width: float = 0.0,
-        page_height: float = 0.0,
-    ) -> List[TextLine]:
-        """Extract text rectangles with font metrics and coordinates from textpage."""
-        import ctypes
-        cb_x0, cb_y0, cb_x1, cb_y1 = cropbox
-        has_crop = cb_x1 > cb_x0 and cb_y1 > cb_y0
-        groups = []
-        metrics = {}
-        current = None
-        # Each source character belongs to one span. Bounded rectangle queries
-        # can return neighbouring characters twice when bounds overlap (PDF-002).
-        for index in range(textpage.count_chars()):
-            codepoint = pdfium_c.FPDFText_GetUnicode(textpage, index)
-            if not codepoint or codepoint > 0x10FFFF:
-                continue
-            char = chr(codepoint)
-            if char in "\r\n\t":
-                current = None
-                continue
-            left, bottom, right, top = textpage.get_charbox(index)
-            if has_crop and (right <= cb_x0 or left >= cb_x1 or top <= cb_y0 or bottom >= cb_y1):
-                continue
-            obj = textpage.get_textobj(index)
-            key = ctypes.cast(obj.raw, ctypes.c_void_p).value if obj else None
-            if key not in metrics:
-                size, name, bold = max(4.0, top - bottom), "Helvetica", False
-                if obj:
-                    size = max(size, float(obj.get_font_size()))
-                    font = obj.get_font()
-                    if font:
-                        name = font.get_base_name()
-                        bold = "bold" in name.lower() or font.get_weight() > 500
-                metrics[key] = (size, name, bold)
-            size, name, bold = metrics[key]
-            mid_y = (bottom + top) / 2
-            if current is None or current[0] != key or abs(current[1] - mid_y) > size * .6:
-                current = [key, mid_y, [], []]
-                groups.append(current)
-            current[2].append(char)
-            if right > left and top > bottom:
-                current[3].append((left, bottom, right, top))
-        fragments = []
-        seen = set()
-        for key, _, chars, boxes in groups:
-            if not boxes:
-                continue
-            # Native Unicode is authoritative. Lexical guesses about Arabic
-            # articles also reverse valid words such as 'مثلا' (PDF-002).
-            text = "".join(chars)
-            if not text.strip():
-                continue
-            rect = (min(r[0] for r in boxes) - cb_x0, min(r[1] for r in boxes) - cb_y0,
-                    max(r[2] for r in boxes) - cb_x0, max(r[3] for r in boxes) - cb_y0)
-            identity = (text, tuple(round(v, 2) for v in rect))
-            if identity in seen:
-                continue  # Identical glyphs painted at identical bounds, not repeated prose.
-            seen.add(identity)
-            size, name, bold = metrics[key]
-            fragments.append(TextLine(text, rect, size, name, bold, page_num))
-        return self._aggregate_fragments_into_lines(fragments, page_num)
-
-    def _aggregate_fragments_into_lines(self, frags: List[TextLine], page_num: int) -> List[TextLine]:
-        """Aggregate disjoint horizontal text fragments into unified visual lines."""
-        if not frags:
-            return []
-
-        # Group fragments by horizontal baseline/y-midpoint band
-        bands: List[List[TextLine]] = []
-        sorted_frags = sorted(frags, key=lambda f: -f.y1)
-
-        for f in sorted_frags:
-            placed = False
-            f_mid_y = (f.y0 + f.y1) / 2.0
-            for band in bands:
-                rep = band[0]
-                # Disallow grouping fragments with vastly different font sizes into the same line (e.g. 100pt title vs 12pt subtitle)
-                font_ratio = max(f.font_size, rep.font_size) / max(1.0, min(f.font_size, rep.font_size))
-                if font_ratio > 1.8:
+            if block.role == "running_text" and block.text:
+                key = normal(block.text)
+                if not key or counts[key] >= threshold:
+                    if meta is not None:
+                        meta.details.setdefault("running_text", []).append(block.text)
                     continue
-                rep_mid_y = (rep.y0 + rep.y1) / 2.0
-                vert_overlap = max(0.0, min(f.y1, rep.y1) - max(f.y0, rep.y0))
-                min_h = max(1.0, min(f.height, rep.height))
-                if abs(f_mid_y - rep_mid_y) <= 4.0 or (vert_overlap / min_h >= 0.45):
-                    band.append(f)
-                    placed = True
-                    break
-            if not placed:
-                bands.append([f])
-
-        bands.sort(key=lambda b: -max(f.y1 for f in b))
-        aggregated_lines: List[TextLine] = []
-
-        for band in bands:
-            # Sort fragments horizontally
-            band.sort(key=lambda f: f.x0)
-
-            # Cluster fragments into continuous runs separated by reasonable intra-line gaps
-            runs: List[List[TextLine]] = []
-            curr_run: List[TextLine] = []
-
-            for f in band:
-                if not curr_run:
-                    curr_run.append(f)
-                else:
-                    prev_f = curr_run[-1]
-                    gap = f.x0 - prev_f.x1
-                    max_gap = max(18.0, 1.2 * max(f.font_size, prev_f.font_size))
-                    # Merge if adjacent or separated by normal intra-line gap
-                    if -4.0 <= gap <= max_gap:
-                        curr_run.append(f)
-                    else:
-                        runs.append(curr_run)
-                        curr_run = [f]
-            if curr_run:
-                runs.append(curr_run)
-
-            for run in runs:
-                if len(run) == 1:
-                    aggregated_lines.append(run[0])
-                    continue
-
-                # Combine text with appropriate font-proportional spacing
-                merged_parts: List[str] = []
-                for i, f in enumerate(run):
-                    t = f.text
-                    if not t.strip():
-                        continue
-                    if not merged_parts:
-                        merged_parts.append(t)
-                    else:
-                        prev_f = run[i - 1]
-                        gap = f.x0 - prev_f.x1
-                        avg_font = (f.font_size + prev_f.font_size) / 2.0
-                        effective_font = max(avg_font, f.height, prev_f.height)
-                        space_threshold = max(0.75, 0.18 * effective_font)
-                        prev_ends_space = merged_parts[-1].endswith(" ")
-                        curr_starts_space = t.startswith(" ")
-
-                        if prev_ends_space or curr_starts_space:
-                            merged_parts.append(t.lstrip() if prev_ends_space else t)
-                        elif gap > space_threshold:
-                            merged_parts.append(" " + t.lstrip())
-                        else:
-                            merged_parts.append(t)
-
-                merged_text = "".join(merged_parts).strip()
-                if not merged_text:
-                    continue
-
-                min_x = min(f.x0 for f in run)
-                min_y = min(f.y0 for f in run)
-                max_x = max(f.x1 for f in run)
-                max_y = max(f.y1 for f in run)
-                rect = (min_x, min_y, max_x, max_y)
-
-                avg_size = sum(f.font_size for f in run) / len(run)
-                bold_count = sum(1 for f in run if f.is_bold)
-                is_bold = bold_count > (len(run) // 2)
-                font_name = run[0].font_name
-
-                aggregated_lines.append(
-                    TextLine(
-                        text=merged_text,
-                        rect=rect,
-                        font_size=avg_size,
-                        font_name=font_name,
-                        is_bold=is_bold,
-                        page_num=page_num,
-                    )
-                )
-
-        return aggregated_lines
-
-    def _order_lines_by_layout(
-        self, lines: List[TextLine], page_width: float, page_height: float, _depth: int = 0
-    ) -> List[TextLine]:
-        """Reconstruct proper reading order for multi-column or single-column pages using adaptive gutters and vertical banding."""
-        if len(lines) <= 2 or _depth >= 16:
-            return sorted(lines, key=lambda l: -l.y1)
-
-        # 1. Adaptive Gutter Detection
-        body_lines = [l for l in lines if l.width < 0.65 * page_width and len(l.text.strip()) > 0]
-        split_x = (min(l.x0 for l in lines) + max(l.x1 for l in lines)) / 2 if _depth else page_width / 2.0
-        is_multi_col = False
-
-        if len(body_lines) >= 4:
-            start_x = int(max(0.25 * page_width, min(l.x0 for l in body_lines) + 2))
-            end_x = int(min(0.75 * page_width, max(l.x1 for l in body_lines) - 2))
-            if _depth:
-                start_x = int(min(l.x0 for l in body_lines) + 2)
-                end_x = int(max(l.x1 for l in body_lines) - 2)
-            best_gutter_center = page_width / 2.0
-            best_gutter_width = 0.0
-            current_gutter_start = None
-
-            for x in range(start_x, end_x, 2):
-                crossing = sum(1 for l in body_lines if l.x0 <= x <= l.x1)
-                if crossing == 0:
-                    if current_gutter_start is None:
-                        current_gutter_start = x
-                else:
-                    if current_gutter_start is not None:
-                        gutter_w = x - current_gutter_start
-                        if gutter_w > best_gutter_width:
-                            best_gutter_width = gutter_w
-                            best_gutter_center = (current_gutter_start + x) / 2.0
-                        current_gutter_start = None
-
-            if current_gutter_start is not None:
-                gutter_w = end_x - current_gutter_start
-                if gutter_w > best_gutter_width:
-                    best_gutter_width = gutter_w
-                    best_gutter_center = (current_gutter_start + end_x) / 2.0
-
-            if best_gutter_width >= 8.0:
-                left_count = sum(1 for l in body_lines if l.x1 <= best_gutter_center + 10)
-                right_count = sum(1 for l in body_lines if l.x0 >= best_gutter_center - 10)
-                if left_count >= 2 and right_count >= 2:
-                    split_x = best_gutter_center
-                    is_multi_col = True
-
-        if not is_multi_col:
-            # Fallback to midpoint test
-            left_count = sum(1 for l in body_lines if l.x1 <= split_x + 15)
-            right_count = sum(1 for l in body_lines if l.x0 >= split_x - 15)
-            if left_count >= 2 and right_count >= 2:
-                is_multi_col = True
-
-        if not is_multi_col:
-            return sorted(lines, key=lambda l: -l.y1)
-
-        # 2. Multi-column classification
-        sample_text = " ".join(l.text for l in lines)
-        page_dir = detect_text_direction(sample_text)
-
-        left_lines: List[TextLine] = []
-        right_lines: List[TextLine] = []
-        full_width_breaks: List[TextLine] = []
-
-        for line in lines:
-            if line.x0 < split_x * 0.85 and line.x1 > split_x * 1.15:
-                full_width_breaks.append(line)
-            elif line.x1 <= split_x + 15:
-                left_lines.append(line)
-            elif line.x0 >= split_x - 15:
-                right_lines.append(line)
-            else:
-                full_width_breaks.append(line)
-
-        full_width_breaks.sort(key=lambda l: -l.y1)
-
-        # 3. Vertical banding: full-width lines act as section dividers
-        ordered: List[TextLine] = []
-        if not full_width_breaks:
-            if page_dir == TextDirection.RTL:
-                ordered.extend(self._order_lines_by_layout(right_lines, page_width, page_height, _depth + 1))
-                ordered.extend(self._order_lines_by_layout(left_lines, page_width, page_height, _depth + 1))
-            else:
-                ordered.extend(self._order_lines_by_layout(left_lines, page_width, page_height, _depth + 1))
-                ordered.extend(self._order_lines_by_layout(right_lines, page_width, page_height, _depth + 1))
-            return ordered
-
-        remaining_left = list(left_lines)
-        remaining_right = list(right_lines)
-
-        for fw in full_width_breaks:
-            fw_bottom = fw.y0
-            band_left = [l for l in remaining_left if l.y0 >= fw_bottom - 4.0]
-            band_right = [l for l in remaining_right if l.y0 >= fw_bottom - 4.0]
-
-            remaining_left = [l for l in remaining_left if l not in band_left]
-            remaining_right = [l for l in remaining_right if l not in band_right]
-
-            if page_dir == TextDirection.RTL:
-                ordered.extend(self._order_lines_by_layout(band_right, page_width, page_height, _depth + 1))
-                ordered.extend(self._order_lines_by_layout(band_left, page_width, page_height, _depth + 1))
-            else:
-                ordered.extend(self._order_lines_by_layout(band_left, page_width, page_height, _depth + 1))
-                ordered.extend(self._order_lines_by_layout(band_right, page_width, page_height, _depth + 1))
-
-            ordered.append(fw)
-
-        if page_dir == TextDirection.RTL:
-            ordered.extend(self._order_lines_by_layout(remaining_right, page_width, page_height, _depth + 1))
-            ordered.extend(self._order_lines_by_layout(remaining_left, page_width, page_height, _depth + 1))
-        else:
-            ordered.extend(self._order_lines_by_layout(remaining_left, page_width, page_height, _depth + 1))
-            ordered.extend(self._order_lines_by_layout(remaining_right, page_width, page_height, _depth + 1))
-
-        return ordered
-
-    def _form_semantic_blocks(
-        self,
-        lines: List[TextLine],
-        page_num: int,
-        start_idx: int,
-        page_height: float = 792.0,
-        page_width: float = 612.0,
-    ) -> List[Block]:
-        """Cluster ordered lines into paragraphs, headings, lists, footnotes, and captions."""
-        if not lines:
-            return []
-
-        font_sizes = sorted(l.font_size for l in lines)
-        body_font_size = font_sizes[len(font_sizes) // 2]
-
-        blocks: List[Block] = []
-        current_lines: List[TextLine] = []
-        current_type = BlockType.PARAGRAPH
-        current_level: Optional[int] = None
-        idx = start_idx
-
-        def flush_block():
-            nonlocal idx, current_lines, current_type, current_level
-            if not current_lines:
-                return
-
-            # Reflow changes layout whitespace, never source punctuation or words.
-            normalized_text = " ".join(l.text.strip() for l in current_lines if l.text.strip())
-            if not normalized_text:
-                current_lines = []
-                return
-            blk_lang = detect_language(normalized_text)
-            blk_dir = detect_text_direction(normalized_text)
-
-            min_x = min(l.x0 for l in current_lines)
-            min_y = min(l.y0 for l in current_lines)
-            max_x = max(l.x1 for l in current_lines)
-            max_y = max(l.y1 for l in current_lines)
-            bbox = BoundingBox(x0=min_x, y0=min_y, x1=max_x, y1=max_y)
-
-            blk = Block(
-                id=f"p{page_num}_b{idx}",
-                type=current_type,
-                text=normalized_text,
-                level=current_level,
-                language=blk_lang,
-                text_direction=blk_dir,
-                source_page=page_num,
-                source_bounding_box=bbox,
-                extraction_method=ExtractionMethod.NATIVE,
-                confidence=1.0,
-            )
-            blocks.append(blk)
-            idx += 1
-            current_lines = []
-            current_type = BlockType.PARAGRAPH
-            current_level = None
-
-        outline_pattern = re.compile(
-            r"^(?:"
-            r"[-*•◦–—▪▫◆◇·]\s+"
-            r"|\d{1,4}(?:\.\d{1,4})*[\.\)]\s+"
-            r"|\d{1,4}\s+[A-Za-z\(]"
-            r"|[a-zA-Z][\.\)]\s+"
-            r"|(?:[ivxlcdm]+|[IVXLCDM]+)[\.\)]\s+"
-            r"|\(\d{1,3}\)\s+"
-            r"|\([a-zA-Z]\)\s+"
-            r")"
-        )
-
-        for line in lines:
-            txt = line.text.strip()
-
-            # 1. Footnote detection (FN-001, FN-002)
-            # Invariant: Footnotes must be at the bottom of the page AND have a distinctly smaller font size (< 0.90 * body).
-            is_at_page_bottom = line.y1 <= 0.28 * page_height
-            is_smaller_font = line.font_size <= 0.90 * body_font_size
-            starts_with_fn_marker = bool(
-                re.match(r"^(?:\[\d+\]|\*|¹|²|³|†|‡|\d+[\.\)]|\d+\s+)", txt)
-            )
-            is_footnote = is_at_page_bottom and is_smaller_font and (
-                starts_with_fn_marker or (current_type == BlockType.FOOTNOTE)
-            )
-
-            # 2. Caption detection
-            is_caption = bool(
-                re.match(
-                    r"^(?:Figure|Fig\.|Table|Exhibit|Illustration|جدول|شكل)\s+(?:\d+|[A-ZIVX]+)(?::|\.|\s-|\s—)",
-                    txt,
-                    re.IGNORECASE,
-                )
-            )
-
-            is_list_item = bool(outline_pattern.match(txt))
-
-            is_heading = False
-            heading_level = None
-            if not is_footnote and not is_caption and not is_list_item and len(txt) >= 3:
-                if line.font_size >= 1.5 * body_font_size:
-                    is_heading = True
-                    heading_level = 1
-                elif line.font_size >= 1.25 * body_font_size:
-                    is_heading = True
-                    heading_level = 2
-                elif line.is_bold and len(txt) < 70 and not txt.endswith((".", ",", ";", ":", "?", "!")):
-                    is_heading = True
-                    heading_level = 3
-
-            if is_footnote:
-                if current_type != BlockType.FOOTNOTE or starts_with_fn_marker:
-                    flush_block()
-                    current_type = BlockType.FOOTNOTE
-                current_lines.append(line)
-            elif is_caption:
-                flush_block()
-                current_type = BlockType.CAPTION
-                current_lines.append(line)
-                flush_block()
-            elif is_heading:
-                flush_block()
-                current_type = BlockType.HEADING
-                current_level = heading_level
-                current_lines.append(line)
-                flush_block()
-            elif is_list_item:
-                flush_block()
-                current_type = BlockType.LIST
-                current_lines.append(line)
-                flush_block()
-            else:
-                if current_lines:
-                    prev = current_lines[-1]
-                    gap = prev.y0 - line.y1
-                    max_h = max(prev.height, line.height, 10.0)
-
-                    # Check column overlap
-                    horiz_overlap = min(prev.x1, line.x1) - max(prev.x0, line.x0)
-                    min_w = min(prev.x1 - prev.x0, line.x1 - line.x0)
-                    same_column = (horiz_overlap > 0.25 * min_w) or (abs(prev.x0 - line.x0) < 36.0)
-
-                    # Sentence and indent detection for clean paragraph boundaries
-                    prev_ended = prev.text.rstrip().endswith((".", "!", "?", '."', '!"', '?"', ":"))
-                    prev_is_short = (prev.width < 0.70 * page_width) and (prev.x1 < line.x1 - 25.0)
-                    is_indented = (line.x0 > prev.x0 + 12.0)
-
-                    if gap > 1.4 * max_h or not same_column or (prev_ended and (gap > 0.8 * max_h or prev_is_short or is_indented)):
-                        flush_block()
-
-                current_lines.append(line)
-
-        flush_block()
-        return blocks
+                block.role = "page_note"
+            kept.append(block)
+        return kept

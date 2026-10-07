@@ -22,6 +22,7 @@ from openlargeprint.importers.office import (
     PptxImporter,
 )
 from openlargeprint.importers.pdf.native import NativePdfImporter
+from openlargeprint.ir.models import SCHEMA_VERSION
 from openlargeprint.ir.models import (
     DocumentIR,
     DocumentMetadata,
@@ -51,6 +52,12 @@ class ConversionResult:
     warnings: List[str] = field(default_factory=list)
     success: bool = True
     asset_root: Optional[Path] = None
+
+
+def readable_title(path: Path) -> str:
+    """A document title from its file name: underscores to spaces, web tags like [site] removed."""
+    title = re.sub(r"\[[^\]]*\]", " ", path.stem).replace("_", " ")
+    return re.sub(r"\s+", " ", title).strip(" -") or path.stem
 
 
 def parse_page_range(
@@ -111,13 +118,9 @@ class PipelineOrchestrator:
     def __init__(
         self,
         routing_mode: RoutingMode = RoutingMode.AUTOMATIC,
-        preserve_page_artwork: bool = False,
     ):
         self.routing_mode = routing_mode
-        self.preserve_page_artwork = preserve_page_artwork
-        self.pdf_importer = NativePdfImporter(
-            routing_mode=routing_mode, preserve_page_artwork=preserve_page_artwork
-        )
+        self.pdf_importer = NativePdfImporter(routing_mode=routing_mode)
         self.docx_importer = DocxImporter()
         self.pptx_importer = PptxImporter()
         self.legacy_bridge = LibreOfficeBridge()
@@ -263,6 +266,10 @@ class PipelineOrchestrator:
                 selected_pages=selected_pages,
             )
 
+            # The sanitised working copy has its own name; the reader should see the original's.
+            doc_ir.metadata.title = readable_title(input_file)
+            doc_ir.metadata.source_file_name = input_file.name
+
             # 5. Validate canonical DocumentIR (DOC-003, DESIGN.md §3)
             if format_type != "pdf" and page_range is not None:
                 selected_pages = parse_page_range(page_range, doc_ir.metadata.page_count)
@@ -324,7 +331,7 @@ class PipelineOrchestrator:
                     )
 
         return DocumentIR(
-            schema_version="1.0.0",
+            schema_version=SCHEMA_VERSION,
             metadata=DocumentMetadata(
                 title=file_path.stem.replace("_", " "),
                 source_file_name=file_path.name,
@@ -358,9 +365,7 @@ class PipelineOrchestrator:
             # Use a fresh importer honouring the requested routing mode so the
             # retry actually re-runs extraction/OCR rather than returning cached blocks.
             retry_importer = (
-                NativePdfImporter(
-                    routing_mode=routing_mode, preserve_page_artwork=self.preserve_page_artwork
-                )
+                NativePdfImporter(routing_mode=routing_mode)
                 if fmt == "pdf"
                 else None
             )

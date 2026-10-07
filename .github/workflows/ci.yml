@@ -27,6 +27,13 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
       - name: Install dependencies
         run: uv sync --locked --dev --extra dev --python ${{ matrix.python-version }}
+      - name: Cache pinned models
+        uses: actions/cache@v4
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
       - name: Run pytest with coverage
         run: uv run pytest tests/ --cov=openlargeprint --cov-report=xml -v
       - name: Upload coverage
@@ -49,6 +56,13 @@ jobs:
         run: uv python install 3.12
       - name: Install dependencies
         run: uv sync --locked --dev --extra dev --python 3.12
+      - name: Cache pinned models
+        uses: actions/cache@v4
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
       # The corpus is a gate, not a metric dump: a case that loses text, pages,
       # a table, or images fails the build instead of being reported as a pass.
       - name: Compare the corpus against per-case expectations
@@ -80,10 +94,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
+      - name: Install engine dependencies
+        run: uv sync --locked --dev --extra dev --python 3.12
+      - name: Cache pinned models
+        uses: actions/cache@v4
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
       - name: Build required engine resource
-        run: |
-          uv sync --locked --dev --extra dev --python 3.12
-          uv run python packaging/build_sidecar.py
+        run: uv run python packaging/build_sidecar.py
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -127,6 +148,13 @@ jobs:
         run: uv python install 3.12
       - name: Install dependencies
         run: uv sync --locked --dev --extra dev --python 3.12
+      - name: Cache pinned models
+        uses: actions/cache@v4
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
       - name: Verify standard conversion emits zero network traffic
         run: uv run pytest tests/test_security_hardening.py::test_offline_conversion_network_isolation -v
 
@@ -145,4 +173,7 @@ jobs:
         working-directory: ui
       - name: Run component tests
         run: npm test -- --run
+        working-directory: ui
+      - name: Type-check
+        run: npx tsc --noEmit
         working-directory: ui
