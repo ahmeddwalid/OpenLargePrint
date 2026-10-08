@@ -206,19 +206,29 @@ jobs:
 
       - name: Name the packages and check their contents
         run: |
-          set -euo pipefail
+          set -eu
+          fail() { echo "::error title=Linux package check failed::$1"; exit 1; }
           version="${{ needs.version-check.outputs.version }}"
           mkdir -p dist
           cp src-tauri/target/release/bundle/appimage/*.AppImage "dist/OpenLargePrint_${version}_linux_x86_64.AppImage"
           cp src-tauri/target/release/bundle/rpm/*.rpm "dist/OpenLargePrint_${version}_linux_x86_64.rpm"
           cp src-tauri/target/release/bundle/deb/*.deb "dist/OpenLargePrint_${version}_linux_amd64.deb"
-          rpm -qlp dist/*.rpm | grep -q '/usr/bin/openlargeprint-sidecar'
-          dpkg-deb -c dist/*.deb | grep -q '/usr/bin/openlargeprint-sidecar'
+          # List first, then search: grep -q on a pipe would cut the lister off mid-stream.
+          rpm_files="$(rpm -qlp dist/*.rpm)"
+          deb_files="$(dpkg-deb -c dist/*.deb)"
+          for f in /usr/bin/openlargeprint-desktop /usr/bin/openlargeprint-sidecar; do
+            grep -qF "$f" <<<"$rpm_files" || fail "RPM is missing $f"
+            grep -qF "${f#/}" <<<"$deb_files" || fail "DEB is missing $f"
+          done
+          rpm -K --nosignature dist/*.rpm || fail "RPM digests do not verify"
           chmod +x dist/*.AppImage
-          cd dist && ./OpenLargePrint_*.AppImage --appimage-extract >/dev/null
-          test -x squashfs-root/usr/bin/openlargeprint-sidecar
-          uv run --project .. python ../packaging/smoke_convert.py squashfs-root/usr/bin/openlargeprint-sidecar
-          rm -rf squashfs-root
+          extract="$RUNNER_TEMP/appimage"
+          mkdir -p "$extract"
+          (cd "$extract" && "$GITHUB_WORKSPACE"/dist/OpenLargePrint_*.AppImage --appimage-extract >/dev/null) || fail "AppImage does not extract"
+          test -x "$extract/squashfs-root/usr/bin/openlargeprint-sidecar" || fail "AppImage engine is missing or not executable"
+          uv run python packaging/smoke_convert.py "$extract/squashfs-root/usr/bin/openlargeprint-sidecar" \
+            || fail "The engine inside the AppImage could not convert the test documents"
+          ls -la dist
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
