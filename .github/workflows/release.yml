@@ -20,7 +20,8 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  # A newer push to a release branch replaces its test build; a tag build is never cancelled.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   version-check:
@@ -38,6 +39,7 @@ jobs:
     name: Windows x64 installer and portable zip
     needs: version-check
     runs-on: windows-latest
+    timeout-minutes: 120
     env:
       # Signing is optional. With a certificate thumbprint configured on the runner,
       # every executable is signed before bundling; without it the build is unsigned.
@@ -138,6 +140,7 @@ jobs:
     name: Linux x86_64 AppImage, RPM and DEB
     needs: version-check
     runs-on: ubuntu-22.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
@@ -185,7 +188,21 @@ jobs:
 
       - name: Build Linux packages
         working-directory: src-tauri
-        run: npx -y @tauri-apps/cli@2.11.5 build --bundles appimage,rpm,deb
+        run: |
+          set -o pipefail
+          # Compile once, then bundle each format with its own time limit; the end of a
+          # failing bundler's output becomes an annotation on the run.
+          npx -y @tauri-apps/cli@2.11.5 build --no-bundle 2>&1 | tail -n 40
+          for format in deb rpm appimage; do
+            echo "::group::bundle $format"
+            if ! timeout 30m npx -y @tauri-apps/cli@2.11.5 bundle --bundles "$format" --verbose > "bundle-$format.log" 2>&1; then
+              tail -n 80 "bundle-$format.log"
+              echo "::error title=Linux $format bundle failed or timed out::$(tail -n 50 bundle-$format.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+              exit 1
+            fi
+            tail -n 20 "bundle-$format.log"
+            echo "::endgroup::"
+          done
 
       - name: Name the packages and check their contents
         run: |
