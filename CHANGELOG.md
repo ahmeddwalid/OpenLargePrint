@@ -61,6 +61,17 @@ lines.
   text.
 - A page that cannot be converted is shown as the original page image with a
   note, and the rest of the book is converted.
+- Pages shown sideways (a landscape table printed in a portrait book, or a
+  rotated page) are read in the direction their text runs instead of coming out
+  as single letters.
+- Arabic paragraphs in the large-print PDF print their lines in reading order,
+  with brackets facing the right way.
+- A file name no longer decides the recognition language: a weak reading is
+  compared with the other script's recogniser, so English scans in a file with
+  an Arabic name (and the reverse) are read correctly.
+- Headings drawn as outlines, and tables pasted in as pictures, are kept.
+- The first start of the conversion engine may take longer than 15 seconds on
+  slow disks; the app now waits for it instead of reporting an error.
 
 ### Removed
 
