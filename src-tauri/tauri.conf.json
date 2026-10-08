@@ -54,6 +54,13 @@
       "wix": {
         "language": "en-US"
       }
+    },
+    "linux": {
+      "rpm": {
+        "compression": {
+          "type": "none"
+        }
+      }
     }
   }
 }

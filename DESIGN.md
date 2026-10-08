@@ -420,7 +420,10 @@ Milestone 1 proves the core hypothesis with no OCR at all: one healthy digital P
 The engine is frozen with PyInstaller (`packaging/build_sidecar.py`) together
 with its models and fonts. Windows uses a one-directory engine with the
 `_internal` runtime beside it, inside an NSIS per-user installer and a portable
-zip. Linux uses a one-file engine inside an AppImage, an RPM and a DEB. The
+zip. Linux uses a one-file engine inside an AppImage, an RPM and a DEB. The RPM
+payload is stored uncompressed (`bundle.linux.rpm.compression`): the engine is
+already compressed by PyInstaller, and the bundler's compressors take tens of
+minutes on a file that size for no gain. The
 release workflow builds each on its own runner, converts test documents with the
 packaged engine (and on Windows with the silently installed copy and the
 portable copy), and publishes only when both platforms pass, with
