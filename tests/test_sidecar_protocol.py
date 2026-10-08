@@ -4,10 +4,8 @@ import io
 import json
 from pathlib import Path
 import pypdfium2 as pdfium
-import pytest
 
 from openlargeprint.sidecar.protocol import (
-    CommandType,
     EventType,
 )
 from openlargeprint.sidecar.runner import SidecarRunner

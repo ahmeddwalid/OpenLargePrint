@@ -1,9 +1,7 @@
 """Unit tests for text direction, language detection, and bidi reordering (LANG-001, LANG-002)."""
 
-import pytest
 from openlargeprint.ir.models import TextDirection
 from openlargeprint.text.direction import (
-    count_script_chars,
     detect_language,
     detect_text_direction,
     is_arabic_char,

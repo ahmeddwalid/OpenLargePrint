@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 import json
 import re
-import hashlib
 from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Optional

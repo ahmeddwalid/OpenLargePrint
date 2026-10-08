@@ -13,11 +13,9 @@ from openlargeprint.security import (
     SecurityValidationError,
     log_safe_info,
     safe_extract_zip,
-    sanitize_document,
     sanitize_office_openxml,
     sanitize_pdf,
 )
-from test_docx_importer import create_sample_docx
 
 
 def test_sanitize_pdf_strips_javascript(tmp_path: Path):
@@ -228,7 +226,6 @@ def test_atomic_export_keeps_previous_output_on_failure(tmp_path):
 
 
 def test_non_object_ipc_input_is_rejected():
-    import io
     import json
     from openlargeprint.sidecar.runner import SidecarRunner
 

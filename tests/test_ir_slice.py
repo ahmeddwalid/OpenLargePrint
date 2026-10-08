@@ -6,7 +6,6 @@ from openlargeprint.ir.models import (
     BlockType,
     DocumentIR,
     DocumentMetadata,
-    ExtractionMethod,
     PageClassification,
     PageMetadata,
 )

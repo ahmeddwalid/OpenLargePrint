@@ -1,7 +1,5 @@
-from pathlib import Path
 import json
 import pypdfium2 as pdfium
-import pytest
 from openlargeprint.qa.corpus_builder import BenchmarkCorpusBuilder
 from openlargeprint.qa.metrics import calculate_reading_order_accuracy, calculate_table_structural_score
 

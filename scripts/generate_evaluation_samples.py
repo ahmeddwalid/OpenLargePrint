@@ -84,13 +84,13 @@ def main() -> int:
     selected_pages = None if args.full else parse_page_range(args.pages)
     range_str = "full book (all pages)" if selected_pages is None else f"pages {min(selected_pages)}-{max(selected_pages)} ({len(selected_pages)} pages)"
 
-    print(f"============================================================")
-    print(f"OpenLargePrint — Evaluation Output Generation")
+    print("============================================================")
+    print("OpenLargePrint — Evaluation Output Generation")
     print(f"Target documents: {len(pdf_files)}")
     print(f"Scope:            {range_str}")
     print(f"Formats:          {args.format}")
     print(f"Destination:      {output_root}")
-    print(f"============================================================\n")
+    print("============================================================\n")
 
     orchestrator = PipelineOrchestrator()
     summary_rows = []

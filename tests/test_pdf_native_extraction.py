@@ -1,7 +1,6 @@
 """Tests for native PDF text extraction, column ordering, and provenance (PDF-002, PDF-006, OUT-005)."""
 
 from pathlib import Path
-import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 

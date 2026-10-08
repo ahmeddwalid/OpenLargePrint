@@ -4,7 +4,7 @@ import io
 from pathlib import Path
 from PIL import Image
 import pptx
-from pptx.util import Inches, Pt
+from pptx.util import Inches
 import pytest
 
 from openlargeprint.importers.office.pptx import PptxImporter

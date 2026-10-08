@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import io
 import json
-import hashlib
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont, features
 import arabic_reshaper
 import pypdfium2 as pdfium

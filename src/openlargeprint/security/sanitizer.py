@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import io
 import re
 import shutil
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import pikepdf
 

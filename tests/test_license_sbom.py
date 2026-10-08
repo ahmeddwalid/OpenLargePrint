@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-import pytest
 
 
 def test_sbom_inventory_completeness():

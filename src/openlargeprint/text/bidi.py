@@ -5,7 +5,7 @@ from __future__ import annotations
 import unicodedata
 import arabic_reshaper
 from openlargeprint.ir.models import TextDirection
-from .direction import is_arabic_char, is_rtl_char
+from .direction import is_arabic_char
 
 
 def _get_char_direction(char: str) -> str:
