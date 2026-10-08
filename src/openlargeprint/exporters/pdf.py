@@ -21,6 +21,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     BaseDocTemplate,
     CondPageBreak,
+    Flowable,
     Frame,
     HRFlowable,
     Image as PlatypusImage,
@@ -35,7 +36,7 @@ from reportlab.platypus import (
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, PageMetadata, TableStructure, TextDirection
 from openlargeprint.layout.table import TableTier, evaluate_table_fit, iter_visible_cells
 from openlargeprint.security.isolation import log_safe_info
-from openlargeprint.text.bidi import reorder_bidi_for_display
+from openlargeprint.text.bidi import reorder_bidi_line, shape_arabic
 from .base import BaseExporter, ExportOptions, PaperSize
 from .common import (
     BLANK_TOKEN,
@@ -61,6 +62,64 @@ INK = HexColor("#1A1A1A")
 MUTED = HexColor("#4A4A4A")
 RULE = HexColor("#8A8A8A")
 SHADE = HexColor("#EDEDED")
+
+
+class RtlText(str):
+    """Right-to-left block text, still in logical (reading) order."""
+
+
+class RtlParagraph(Flowable):
+    """A right-to-left paragraph wrapped in reading order, then reordered line by line.
+
+    ReportLab paints left to right and has no bidi algorithm, so the text must
+    be put in visual order before drawing. Reordering a whole paragraph first
+    and letting ReportLab wrap it puts the lines in reverse order and can split
+    a Latin or number run across lines; wrapping the logical text first does not.
+    """
+
+    def __init__(self, text: str, style: ParagraphStyle, render):
+        super().__init__()
+        self.text = text
+        self.style = style
+        self._render = render
+        self._inner: Optional[Paragraph] = None
+        self.keepWithNext = getattr(style, "keepWithNext", 0)
+
+    def _lines(self, width: float) -> List[str]:
+        style = self.style
+        room = max(10.0, width - style.leftIndent - style.rightIndent - max(0.0, style.firstLineIndent))
+        lines: List[str] = []
+        for hard_line in self.text.split("\n"):
+            current: List[str] = []
+            for word in hard_line.split(" "):
+                trial = " ".join(current + [word])
+                if current and stringWidth(shape_arabic(trial), style.fontName, style.fontSize) > room:
+                    lines.append(" ".join(current))
+                    current = [word]
+                else:
+                    current.append(word)
+            lines.append(" ".join(current))
+        return lines
+
+    def _build(self, width: float) -> Paragraph:
+        visual = [self._render(reorder_bidi_line(line, TextDirection.RTL)) for line in self._lines(width)]
+        return Paragraph("<br/>".join(visual), self.style)
+
+    def wrap(self, availWidth, availHeight):
+        self._inner = self._build(availWidth)
+        return self._inner.wrap(availWidth, availHeight)
+
+    def split(self, availWidth, availHeight):
+        return self._build(availWidth).split(availWidth, availHeight)
+
+    def getSpaceBefore(self):
+        return self.style.spaceBefore
+
+    def getSpaceAfter(self):
+        return self.style.spaceAfter
+
+    def draw(self):
+        self._inner.drawOn(self.canv, 0, 0)
 
 
 class _NumberedCanvas(canvas.Canvas):
@@ -216,13 +275,21 @@ class PdfExporter(BaseExporter):
 
     def _text(self, text: str, rtl: bool, block: Optional[Block] = None, offset: int = 0) -> str:
         if rtl:
-            text = reorder_bidi_for_display(text, TextDirection.RTL)
-            result = markup(text, self._fonts)
+            # Kept in logical order: RtlParagraph wraps it first and reorders each line.
+            return RtlText(text)
         else:
             result = "".join(
                 f"{''.join(f'<{t}>' for t in tags)}{markup(segment, self._fonts)}{''.join(f'</{t}>' for t in reversed(tags))}"
                 for segment, tags in styled_segments(text, block.styles if block else [], offset))
         return result.replace(BLANK_TOKEN, "<u>" + "&nbsp;" * 12 + "</u>").replace("\n", "<br/>")
+
+    def _render_line(self, visual: str) -> str:
+        return markup(visual, self._fonts).replace(BLANK_TOKEN, "<u>" + "&nbsp;" * 12 + "</u>")
+
+    def _paragraph(self, text: str, style: ParagraphStyle, **kwargs):
+        if isinstance(text, RtlText):
+            return RtlParagraph(str(text), style, self._render_line)
+        return Paragraph(text, style, **kwargs)
 
     def _style(self, key: str, rtl: bool) -> ParagraphStyle:
         return self._styles[f"{key}_rtl" if rtl else key]
@@ -253,7 +320,7 @@ class PdfExporter(BaseExporter):
                 # next sheet and leave a near-empty page; reserve room instead.
                 out.append(CondPageBreak(style.leading * 2 + b * 8))
                 style = ParagraphStyle(f"{style.name}Free", parent=style, keepWithNext=0)
-            out.append(Paragraph(self._text(block.text or "", rtl), style))
+            out.append(self._paragraph(self._text(block.text or "", rtl), style))
             return out
 
         if block.type == BlockType.LIST:
@@ -265,10 +332,13 @@ class PdfExporter(BaseExporter):
                 hang = max(b * 1.7, stringWidth(marker, marker_font, b) + b * 0.6)
                 style = ParagraphStyle(f"List{block.id}", parent=style, leftIndent=indent + hang,
                                        bulletIndent=indent, bulletFontName=marker_font, bulletFontSize=b)
-                para = Paragraph(self._text(rest, rtl, block, len(block.text or "") - len(rest)), style,
-                                 bulletText=marker)
+                if rtl:
+                    para = self._paragraph(self._text(block.text or "", rtl, block), style)
+                else:
+                    para = self._paragraph(self._text(rest, rtl, block, len(block.text or "") - len(rest)), style,
+                                           bulletText=marker)
             else:
-                para = Paragraph(self._text(block.text or "", rtl, block), style)
+                para = self._paragraph(self._text(block.text or "", rtl, block), style)
             out.append(para)
             self._note(block, out)
             return out
@@ -276,22 +346,27 @@ class PdfExporter(BaseExporter):
         if block.type == BlockType.CAPTION:
             label = caption_label(block)
             text = self._text(block.text or "", rtl, block)
-            if label:
-                text = f'<font name="{self._fonts.bold_italic}">{markup(label, self._fonts)}</font>{text}'
-            out.append(Paragraph(text, self._style("caption", rtl)))
+            label_markup = f'<font name="{self._fonts.bold_italic}">{markup(label, self._fonts)}</font>' if label else ""
+            if rtl:
+                if label:
+                    out.append(Paragraph(label_markup, ParagraphStyle(
+                        "CaptionLabelRtl", parent=self._style("caption", rtl), keepWithNext=1, spaceAfter=0)))
+                out.append(self._paragraph(text, self._style("caption", rtl)))
+            else:
+                out.append(Paragraph(label_markup + text, self._style("caption", rtl)))
             return out
 
         if block.type == BlockType.FOOTNOTE:
             out.append(HRFlowable(width="30%", thickness=0.6, color=RULE, hAlign="RIGHT" if rtl else "LEFT",
                                   spaceBefore=b * 0.4, spaceAfter=b * 0.2))
-            out.append(Paragraph(self._text(block.text or "", rtl, block), self._style("footnote", rtl)))
+            out.append(self._paragraph(self._text(block.text or "", rtl, block), self._style("footnote", rtl)))
             return out
 
         if block.type == BlockType.ASIDE:
             if block.role == "page_note":
-                out.append(Paragraph(self._text(block.text or "", rtl), self._style("note", rtl)))
+                out.append(self._paragraph(self._text(block.text or "", rtl), self._style("note", rtl)))
                 return out
-            box = PlatypusTable([[Paragraph(self._text(block.text or "", rtl, block), self._style("aside", rtl))]],
+            box = PlatypusTable([[self._paragraph(self._text(block.text or "", rtl, block), self._style("aside", rtl))]],
                                 colWidths=[self._width])
             box.setStyle(TableStyle([
                 ("BOX", (0, 0), (-1, -1), 1.0, RULE),
@@ -319,7 +394,7 @@ class PdfExporter(BaseExporter):
             out.extend([Spacer(1, b * 0.3), image, Spacer(1, b * 0.4)])
             return out
 
-        out.append(Paragraph(self._text(block.text or "", rtl, block), self._style("body", rtl)))
+        out.append(self._paragraph(self._text(block.text or "", rtl, block), self._style("body", rtl)))
         self._note(block, out)
         return out
 
@@ -368,14 +443,18 @@ class PdfExporter(BaseExporter):
         caption_style = ParagraphStyle("TableCaption", parent=self._style("caption", rtl), keepWithNext=1)
         if fit.tier == TableTier.LINEARIZE:
             if table.caption:
-                out.append(Paragraph(self._text(table.caption, rtl), caption_style))
+                out.append(self._paragraph(self._text(table.caption, rtl), caption_style))
             lead_style = ParagraphStyle("TableLead", parent=self._style("body", rtl), fontName=self._fonts.bold,
                                         spaceAfter=b * 0.15, keepWithNext=1)
             detail_style = ParagraphStyle("TableDetail", parent=self._style("list", rtl), leftIndent=b * 1.4)
             for lead, details in table_as_entries(table):
                 if lead:
-                    out.append(Paragraph(self._text(lead, rtl), lead_style))
+                    out.append(self._paragraph(self._text(lead, rtl), lead_style))
                 for label, value in details:
+                    if rtl:
+                        out.append(self._paragraph(self._text(f"{label}: {value}" if label else value, rtl),
+                                                   detail_style))
+                        continue
                     text = self._text(value, rtl)
                     if label:
                         text = f"<b>{markup(label, self._fonts)}:</b> {text}"
@@ -387,7 +466,7 @@ class PdfExporter(BaseExporter):
             widths = fit.column_widths if part is table and fit.column_widths and len(fit.column_widths) == part.column_count else None
             flow = self._grid(part, rtl, widths)
             if part.caption:
-                out.append(Paragraph(self._text(part.caption, rtl), caption_style))
+                out.append(self._paragraph(self._text(part.caption, rtl), caption_style))
             if flow is not None:
                 out.extend([flow, Spacer(1, b * 0.7)])
         return out
@@ -399,7 +478,7 @@ class PdfExporter(BaseExporter):
         data: List[List[object]] = []
         for r, row in enumerate(table.rows):
             header = r == 0 and table.has_header
-            cells = [Paragraph(self._text(row[c].text if c < len(row) else "", rtl),
+            cells = [self._paragraph(self._text(row[c].text if c < len(row) else "", rtl),
                                self._style("cell_head" if header else "cell", rtl)) for c in range(columns)]
             if rtl:
                 cells.reverse()

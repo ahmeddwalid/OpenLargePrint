@@ -113,3 +113,13 @@ def test_bidi_edge_cases_and_ltr_base():
     assert is_rtl_char(hebrew[0])
     reordered_hebrew = reorder_bidi_for_display(hebrew, TextDirection.RTL)
     assert len(reordered_hebrew) > 0
+
+
+def test_brackets_in_right_to_left_text_are_mirrored_for_painting():
+    """UAX #9 L4: in a right-to-left run, "(" is painted as ")" so the pair encloses the right words."""
+    from openlargeprint.text.bidi import reorder_bidi_line
+
+    visual = reorder_bidi_line("قال (المادة) هنا", TextDirection.RTL)
+    # Painted left to right: the bracket left of the enclosed word must open to the right.
+    assert visual.index("(") < visual.index(")")
+    assert reorder_bidi_line("see (note) here", TextDirection.LTR) == "see (note) here"
