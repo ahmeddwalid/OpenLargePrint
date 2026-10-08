@@ -51,22 +51,35 @@ DOC/PPT adapter ─┤
 
 ### 2.1 Block schema (`DOC-002`)
 
+Schema version 1.1.0 (`SCHEMA_VERSION` in `ir/models.py`).
+
 ```text
 Block
   id
-  type                 # title | heading | paragraph | list | quote |
+  type                 # title | heading | paragraph | list | quote | aside |
                         # footnote | table | image | caption | page_marker
-  text / children
+  text                 # may contain "\n" for entries set apart on one line;
+                        # "______" marks an answer blank
+  level                # heading level 1-3, assigned document-wide by size
   language
   text_direction        # ltr | rtl
   source_page
-  source_bounding_box
+  source_bounding_box   # merged blocks carry the union of their sources
   extraction_method      # native | ocr_fast | ocr_maximum | office_import
   confidence
-  warnings[]
-  image_asset            # present if type == image
+  warnings[]            # plain-language notes shown to the reader
+  image_asset            # the picture, or a crop of the original lines
   table_structure        # present if type == table
+  list_marker            # the source's own marker ("1", "a)", "A:")
+  indent_level           # 0-6
+  styles[]               # inline bold / italic / underline spans
+  role                   # finer meaning: figure_text, dialogue, contents,
+                        # running_text, page_number, page_note, edge_text
 ```
+
+Page-level facts that are not reading content (printed page number, running
+heads, text bleeding in from the facing page, hidden text layers) live in
+`PageMetadata.details`, so they never interrupt the text but are not lost.
 
 `DocumentIR` itself is versioned (`DOC-003`) with schema tests, so a change to one importer or exporter can't silently break another.
 
@@ -77,106 +90,144 @@ Block
 - **Provenance is preserved** (`PDF-006`, `OUT-005`) — reflowed page N no longer equals source page N, so `source_page`/`source_bounding_box` on each block is what lets the app insert "Original page 152" markers and power the side-by-side review screen.
 - **Source comparison becomes trivial** — clicking a reflowed block and highlighting its source region is a lookup, not a new subsystem.
 
-## 3. PDF classification pipeline (`PDF-001..007`)
+## 3. PDF pipeline (`PDF-001..007`)
 
-A PDF page is one of four kinds, and the *first* operation on any page is classification — never OCR-by-default.
+Implemented in `importers/pdf/` (`native.py` drives it). Each page goes through
+the same steps; a page that fails at any step is replaced by its original page
+image with a plain note, and the rest of the book continues.
 
 ```text
-Native/born-digital:
-  PDF page → native text/layout extraction → semantic blocks → DocumentIR
-
-Scanned:
-  PDF page → render at OCR resolution → layout + OCR →
-  reading-order reconstruction → DocumentIR
-
-Mixed:
-  native text ───────────┐
-                          ├→ reconcile/deduplicate → DocumentIR
-  OCR missing regions ────┘
-
-Broken-digital:
-  detected via implausible extraction → treated as scanned page
+page ──► 1. read the page's own text, glyph by glyph (textlayer.py)
+           │   visible text?  ── yes ──► native page (never recognised again)
+           │   no text / hidden layer / garbled ──► scanned page
+           ▼
+         2. render at 150 dpi (300 dpi when recognising) and find layout regions
+           │   PP-DocLayoutV2 (layout/detector.py): titles, text, lists,
+           │   tables, pictures, captions, footnotes, headers, page numbers,
+           │   and the order to read them in
+           ▼
+         3. words: native glyphs, or recognised words (scanned.py),
+           │   plus recognition of empty text regions and picture text on
+           │   native pages (mixed pages)
+           ▼
+         4. ruling lines on the render (rules.py): answer blanks,
+           │   underlines, table grid lines
+           ▼
+         5. assemble blocks (assemble.py, tables.py) ──► DocumentIR
 ```
 
-Classification signals: presence/plausibility of native text, page-object geometry, raster-image coverage, rotation, and character-count sanity. A PDF rendering/inspection library provides the low-level primitives (text extraction, object bounds) needed for this diagnostic stage.
+**1. Text layer.** Words are built from PDFium character boxes: a word ends at
+a space character, at a gap clearly wider than the line's own letter spacing,
+or at a font change. Ligature glyphs are expanded (fi, fl, ffi), phantom spaces
+inside ligatures are dropped, symbol-font and private-use glyphs are mapped to
+standard characters (`glyphs.py`), and `/Rotate` pages are mapped into display
+space. Text drawn in an invisible render mode, or painted underneath a later
+page-covering picture (an earlier tool's OCR layer), is counted as hidden: that
+page is recognised again rather than trusted. Arabic stored in display order is
+flagged, kept as stored, and shown next to the original page.
 
-Validation runs **after** parsing every page, independent of which path was taken:
-- output isn't inexplicably empty,
-- OCR didn't duplicate an existing native text layer,
-- block reading order is geometrically plausible,
-- significant image regions are accounted for,
-- table blocks have plausible structure,
-- text isn't dominated by replacement/gibberish characters,
-- a multi-column page wasn't flattened top-to-bottom across both columns.
+**Routing.** Native if the page has visible text (at least 40 characters when
+more than half the page is a picture) and the text is not mostly replacement
+glyphs; otherwise recognised. "Native text only" never recognises; a scanned
+page is then kept as its page image with a note.
 
-These are application-level checks (`OCR-005`), not something delegated blindly to a single model's own confidence score.
+**2. Layout.** `PPDocLayoutDetector` runs PP-DocLayoutV2 through ONNX Runtime
+using rapid-layout's pre/post-processing. Regions are in page space (points,
+y down) and converted to IR coordinates only when blocks are made. When the
+model file is missing or damaged, `HeuristicLayoutDetector` is used: no model
+regions, but embedded pictures are taken from the PDF's image objects, ruled
+tables are found from their grid lines, and text is ordered by the geometric
+XY-cut below, so nothing is dropped.
 
-## 4. OCR engine abstraction and routing (`OCR-001..007`)
+**5. Assembly.** Words go to the region holding most of them. Inside regions
+the assembler splits side-by-side columns, paragraphs, numbered and lettered
+items (hanging indents), dialogue lines (speaker marked), run-in bold headings
+and numbered headings set larger than the text. Bold/italic/underline inside a
+sentence become inline styles. Running heads and page numbers that repeat on
+several pages move to page details; footer text that appears once stays as a
+page note. Footnotes close the page. A "Figure 4.1" line beside a picture is its
+caption. Right-to-left pages are reordered right to left. Heading levels are set
+for the whole document from type size against the body median.
+
+Reading order without model guidance uses an XY-cut: horizontal bands are
+joined while together they still have a clear vertical gutter, then each column
+is read top to bottom. A full-width title or footnote starts a new stretch.
+
+**Confidence.** Recognised blocks below 0.75 get a review note; below 0.7 the
+original lines are cropped and shown with the text; a page below 0.5 keeps its
+whole page image. Picture-only pages are shown as a picture, without an alarm.
+
+## 4. Recognition (`OCR-001..007`)
 
 ```python
 class DocumentOcrEngine(Protocol):
-    def capabilities(self) -> EngineCapabilities:
-        ...
-
-    def analyze_page(
-        self,
-        image: PageImage,
-        *,
-        language_hints: tuple[str, ...],
-        cancellation: CancellationToken,
-    ) -> EnginePageResult:
-        ...
+    def capabilities(self) -> EngineCapabilities: ...
+    def analyze_page(self, image, *, page_num, language_hints, cancellation) -> EnginePageResult: ...
 ```
+
+`ocr/paddle_engine.py` (`PaddleRapidOcrEngine`) uses RapidOCR 3.9.2 with
+PP-OCRv6 small detection and recognition (Latin and Chinese script, shipped in
+the RapidOCR wheel) and PP-OCRv5 mobile Arabic recognition (shipped in
+`models/weights`). It returns lines with word boxes; `scanned.ocr_words` maps
+them back to words using the recognised line text, so the text stays exactly
+as recognised. The router keeps one engine per script. Recognition runs in an
+isolated subprocess (`ocr/worker.py`) that blocks sockets and name resolution.
+
+Recognised text is never rewritten, by rules or by any generative model
+(`OCR-007`). Uncertainty stays visible as notes and original-line crops.
+
+There is one pipeline and it is bundled; there is no optional pack. "Maximum
+accuracy" renders scanned pages at 400 dpi instead of 300 and is used when a
+page is retried from the review screen.
+
+**Models.** `models/manifest.py` pins every model by size and SHA-256:
+`pp_doc_layoutv2`, `PP-OCRv6_det_small`, `PP-OCRv6_rec_small`,
+`ch_ppocr_mobile_v2.0_cls` (inside the RapidOCR wheel) and
+`arabic_PP-OCRv5_rec_mobile`. `scripts/fetch_models.py` downloads the two that
+are not in a wheel for development and release builds; the sidecar build
+refuses to run unless all five verify. At run time models are only looked up,
+verified once per process, and never downloaded; rapid-layout and RapidOCR are
+always given explicit paths so their own downloaders are never reached.
+
+### 4.1 What has and has not been validated
+
+- Native Latin and Arabic text extraction, mixed pages, tables, pictures and
+  exercises: unit tests, the synthetic benchmark corpus (`QA-001`) and manual
+  page-by-page review of eight real textbooks and scans.
+- Latin-script recognition: corpus and real scans.
+- Arabic recognition: the model is bundled and routed, and Arabic scans in the
+  corpus convert, but its accuracy has not been measured on a real Arabic
+  corpus. It must not be advertised as validated.
+- A local generative model was considered and rejected: it could rewrite
+  source text (`OCR-007`) and the layout model already provides the structure.
+
+## 5. Pictures (`IMG-001..003`)
 
 ```text
-Engine A (default, CPU-friendly)
-Engine B (optional, maximum accuracy)
-Engine C (future / benchmark-only)
-        │
-        ▼
-EnginePageResult
-        │
-        ▼
-DocumentIR
+one embedded image matching the region, no text over it ──► the original pixels
+otherwise ──► the region rendered at the picture's own resolution (150-300 dpi)
+scanned page ──► crop of the 300 dpi page render
 ```
 
-Routing modes exposed to the user (`UI-001` keeps this out of the primary screen):
-
-| User setting | Internal behavior |
-|---|---|
-| Automatic | Native-first; lightweight OCR when needed; escalate difficult pages |
-| Fast | Prefer the lightweight recognition/layout pipeline |
-| Maximum accuracy | Permit the heavier document-VLM-class model on difficult structured pages |
-
-The default installer ships only the lightweight, CPU-friendly engine pack. The maximum-accuracy pack is an optional, separately downloaded model, verified against a hash manifest before load (`SEC-006`, `OCR-003`). Platform support for the maximum-accuracy pack is only claimed after it is packaged and validated per-platform (`PKG-001`) — do not assume "the framework is cross-platform" implies the model stack is.
-
-### 4.1 Implemented recognition stack and remaining work
-
-The current baseline is `rapidocr-onnxruntime==1.4.4`, using the three ONNX models bundled in its wheel: PP-OCRv4 detection, mobile-v2 orientation classification, and PP-OCRv4 Chinese/English recognition. `models/manifest.py` and `sbom.json` pin the observed bytes; the adapter verifies all three SHA-256 values before initialization. Python release environments are constrained to 3.11–3.12, matching the runtime's published compatibility range: https://pypi.org/project/rapidocr-onnxruntime/1.4.4/.
-
-Layout, column ordering, and table reconstruction currently use application heuristics, not PP-StructureV3 inference. The recognizer does not advertise Arabic or full document-layout support. CPU inference uses at most eight intra-operation threads and one inter-operation thread via the runtime's actual flat configuration keys. No GPU dependency is required by the base distribution; packaged RTX acceleration remains unverified.
-
-Maximum accuracy currently delegates to the standard adapter and attaches an explicit warning. It must not be described as VLM inference or automatically mark a page verified. The earlier layout/table/VLM catalog entries did not correspond to integrated, verified runtime artifacts and have been removed. A genuine optional higher-accuracy pack and verified Arabic recognition remain required work (`OCR-002..003`, `LANG-002`), subject to code/weight license review and corpus validation.
-
-PaddleOCR structure models, Docling, and optional VLM adapters are candidates, not shipped features. Existing exclusions of olmOCR, Surya, and MinerU from the default distribution remain in effect until a fresh `LIC-002` review. Any future model choice must have a real artifact, verified license and digest, Windows/Linux execution evidence, and quality results on the project corpus.
-
-## 5. Image handling (`IMG-001..003`)
-
-```text
-Original embedded asset
-        ↓ if unavailable
-High-quality cropped page rendering
-        ↓ if structure is unknowable
-Full original source region/page fallback
-```
-
-Prefer lossless extraction of the original embedded image object when present; fall back to rendering the source region at a suitable resolution when it isn't recoverable as a discrete asset. Aspect ratio is never distorted at any tier.
+Vector drawings the model did not mark are found by clustering path objects
+and kept. Tiny decorative marks are skipped and counted in page details.
+Aspect ratio is never changed; exporters enlarge pictures with the text, up to
+2.2 times their pixel size.
 
 ## 6. Tables and footnotes (`TBL-xxx`, `FN-xxx`)
 
-Tables: enlarged semantic table → landscape/split presentation → accessible linearized text or retained source-table image + extracted text. Never silently collapse into scrambled prose.
+`tables.build_table` makes a grid from vertical ruling lines or, without them,
+from white space that runs through every row. Rows follow horizontal rules, or
+an empty first cell continues the row above. A bold first row becomes the
+header; a one-row ruled table with empty rows below is a table to fill in.
+Doubtful grids keep a crop of the source table. When no grid can be found the
+rows are kept as lines with a note. Exporters show tables that fit as tables,
+split wide ones into parts that repeat the first column, and list very wide
+ones row by row, always with a note and with the caption kept.
 
-Footnotes: body prose and footnote blocks are distinguished during extraction and their relationship preserved through reflow; rendered as large-print notes beneath the relevant content or as endnotes depending on the output preset. Minimum readable sizes are enforced for footnotes/captions/tables regardless of the ratio implied by the source page's original typography (`FN-002`).
+Footnotes: model footnote regions, numbered footer text, and small numbered text
+at the foot of the page become footnote blocks at the end of their page.
+Minimum readable sizes are enforced for footnotes/captions/tables (`FN-002`).
 
 ## 7. Office and legacy formats (`OFF-001..003`)
 
@@ -289,9 +340,9 @@ Track separately: character error rate, word error rate, reading-order correctne
 
 ### 11.1 Measurement limitations
 
-CER and WER are calculated only when a reference transcript exists; otherwise they are null/N/A. WER uses token-level Levenshtein distance and may exceed 1 when insertions dominate. Reported reading-order/table scores remain plausibility heuristics, not ground-truth correctness. RAM is the process lifetime peak, excludes child processes, and is not an isolated per-case measurement. VRAM is unmeasured. A completed conversion is reported separately from fidelity acceptance.
+CER and WER are calculated only when a reference transcript exists; otherwise they are null/N/A. WER uses token-level Levenshtein distance and may exceed 1 when insertions dominate. Separate reference measurements compare authored reading-order units, table cells, and original image pixels including dimensions. Missing/misrecognized reading units reduce that reference score as well as inversions. Unexpected reconstructed tables are structural mismatches. The existing order/table plausibility heuristics remain separate. RAM is the process lifetime peak, excludes child processes, and is not an isolated per-case measurement. VRAM is unmeasured. A completed conversion is reported separately from fidelity acceptance.
 
-The generated corpus is a smoke-test corpus, not release-quality coverage: the mixed-bidi, mixed-digital/scan, Arabic font rendering, rotated-content, and image-reference fixtures need stronger real-content ground truth. Real rights-safe books, annotated structures, long-document stress tests, and target-machine measurements remain release blockers.
+The generated corpus is a smoke-test corpus, not release-quality coverage. It now has actual mixed-script and native/scanned content, nonblank rotated scans, distinct embedded originals, nonoverlapping columns, fitting Arabic text, and independent per-case transcripts/reference manifests. Real rights-safe books, expert-annotated structures, robust Arabic recognition, long-document final-GUI stress tests, and target-machine measurements remain release blockers.
 
 ## 12. Licensing enforcement as code (`LIC-001..002`)
 
@@ -360,6 +411,24 @@ None of these are banned outright — they're defaults, and a deliberate choice 
 | Office | DOCX/PPTX and legacy-format bridge |
 | PDF output | Reflowed large-print PDF |
 | Hardening | Fuzzing, resource limits, offline verification, license/SBOM |
-| Packaging | Windows/Linux/macOS validated installers |
+| Packaging | Windows and Linux installers, tested in CI |
 
 Milestone 1 proves the core hypothesis with no OCR at all: one healthy digital PDF → extract exact text + images → `DocumentIR` → 20pt DOCX. Milestone 2 proves the abstraction holds under OCR: one scanned PDF → OCR/layout → the *same* `DocumentIR` → the *same* DOCX exporter, unmodified.
+
+## 16. Packaging (`PKG-001..002`)
+
+The engine is frozen with PyInstaller (`packaging/build_sidecar.py`) together
+with its models and fonts. Windows uses a one-directory engine with the
+`_internal` runtime beside it, inside an NSIS per-user installer and a portable
+zip. Linux uses a one-file engine inside an AppImage, an RPM and a DEB. The RPM
+payload is stored uncompressed (`bundle.linux.rpm.compression`): the engine is
+already compressed by PyInstaller, and the bundler's compressors take tens of
+minutes on a file that size for no gain. The
+release workflow builds each on its own runner, converts test documents with the
+packaged engine (and on Windows with the silently installed copy and the
+portable copy), and publishes only when both platforms pass, with
+`SHA256SUMS.txt`.
+
+Windows signing is optional (`SIGNING.md`): with a certificate thumbprint
+configured, every executable is signed before the installer is assembled;
+without one the release is unsigned. macOS is not built or supported.

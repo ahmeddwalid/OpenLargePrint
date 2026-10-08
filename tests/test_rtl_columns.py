@@ -1,8 +1,6 @@
 """Tests for RTL multi-column reading order reconstruction (PDF-003, LANG-002)."""
 
 from pathlib import Path
-import pypdfium2 as pdfium
-import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -81,23 +79,13 @@ def test_rtl_multi_column_reading_order(tmp_path: Path):
 
     full_text = " ".join(b.text for b in text_blocks)
 
-    # In proper Arabic reading order:
-    # 1. Title
-    # 2. Right column articles (المادة ١, المادة ٢, المادة ٣)
-    # 3. Left column articles (المادة ٤, المادة ٥, المادة ٦)
-    # 4. Footer
-    pos_m1 = full_text.find("المادة ١") if "المادة ١" in full_text else full_text.find("المادة 1")
-    pos_m4 = full_text.find("المادة ٤") if "المادة ٤" in full_text else full_text.find("المادة 4")
+    # Glyphs are drawn right to left, so whole words come back in reading order
+    # (the source characters themselves are never altered).
+    for phrase in ("لا مساغ للاجتهاد في مورد النص", "القديم يترك على قدمه", "الضرر لا يزال بمثله"):
+        assert phrase in full_text
 
-    # If numbers or text were normalized, check relative positions of key phrases:
-    # Right column phrase: "لا مساغ للاجتهاد"
-    # Left column phrase: "القديم يترك"
-    pos_right_col = full_text.find("لا مساغ للاجتهاد")
-    pos_left_col = full_text.find("القديم يترك")
-
-    assert pos_right_col != -1, "Right column content must be present"
-    assert pos_left_col != -1, "Left column content must be present"
-    assert pos_right_col < pos_left_col, (
-        f"Right column (Column 1) must be read BEFORE Left column (Column 2) in Arabic RTL documents! "
-        f"pos_right={pos_right_col}, pos_left={pos_left_col}"
-    )
+    # The right-hand column is read completely before the left-hand one.
+    article = [full_text.find(p) for p in ("مساغ للاجتهاد", "باليقين", "الأصل بقاء", "القديم يترك", "الضرر لا", "درء المفاسد")]
+    assert all(pos != -1 for pos in article)
+    assert article == sorted(article), "Right column (articles 1-3) must precede the left column (articles 4-6)"
+    assert full_text.find("مجلة الأحكام") < article[0], "The title comes first"

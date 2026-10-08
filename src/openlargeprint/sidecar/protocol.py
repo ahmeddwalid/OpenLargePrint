@@ -60,9 +60,6 @@ class ConvertCommand(BaseModel):
     monochrome: bool = False
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
-    # Advanced, off by default: carrying page-filling images into the output would
-    # turn the reflow back into screenshots of the original page (SPEC 2).
-    preserve_page_artwork: bool = False
     page_break_on_source_page: bool = False
 
 
@@ -121,6 +118,7 @@ class ProgressEvent(BaseModel):
     current_page: int
     total_pages: int
     percent: float
+    elapsed_seconds: float = 0.0
     message: str  # e.g. "Recognizing scanned text — page 85 of 512" (UI-002)
 
 

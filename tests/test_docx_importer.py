@@ -4,8 +4,7 @@ import io
 from pathlib import Path
 import docx
 from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Inches, Pt
+from docx.shared import Inches
 from PIL import Image
 import pytest
 

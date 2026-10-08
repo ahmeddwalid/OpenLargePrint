@@ -1,63 +1,51 @@
 import React, { useState } from 'react';
-import { RoutingMode } from '../types';
 import { useI18n } from '../i18n/i18n';
-import {
-  checkForUpdates,
-  isAutoUpdateEnabled,
-  setAutoUpdateEnabled,
-  CURRENT_VERSION,
-} from '../api/update-checker';
 
 interface AdvancedOptionsProps {
-  routingMode: RoutingMode;
-  onRoutingModeChange: (mode: RoutingMode) => void;
   pageRange: string;
   onPageRangeChange: (range: string) => void;
   monochrome: boolean;
   onMonochromeChange: (val: boolean) => void;
-  preservePageArtwork: boolean;
-  onPreservePageArtworkChange: (val: boolean) => void;
   pageBreakOnSourcePage: boolean;
   onPageBreakOnSourcePageChange: (val: boolean) => void;
+  searchableOriginal: boolean;
+  onSearchableOriginalChange: (val: boolean) => void;
 }
 
+interface CheckRowProps {
+  id: string;
+  checked: boolean;
+  onChange: (val: boolean) => void;
+  label: string;
+  description: string;
+}
+
+const CheckRow: React.FC<CheckRowProps> = ({ id, checked, onChange, label, description }) => (
+  <label className="check-row" htmlFor={id}>
+    <input id={id} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <span>
+      <span className="check-title">{label}</span>
+      <span className="check-desc">{description}</span>
+    </span>
+  </label>
+);
+
+/** Settings most people never need, kept out of the three-step flow (UI-001). */
 export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
-  routingMode,
-  onRoutingModeChange,
   pageRange,
   onPageRangeChange,
   monochrome,
   onMonochromeChange,
-  preservePageArtwork,
-  onPreservePageArtworkChange,
   pageBreakOnSourcePage,
   onPageBreakOnSourcePageChange,
+  searchableOriginal,
+  onSearchableOriginalChange,
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
-  const [autoUpdate, setAutoUpdate] = useState<boolean>(() => isAutoUpdateEnabled());
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
-  const [manualCheckStatus, setManualCheckStatus] = useState<string | null>(null);
-
-  const handleCheckUpdatesNow = async () => {
-    setIsCheckingUpdate(true);
-    setManualCheckStatus('Connecting to update server...');
-    try {
-      const res = await checkForUpdates(true);
-      if (res.available && res.latestVersion) {
-        setManualCheckStatus(`New version ${res.latestVersion} is available.`);
-      } else {
-        setManualCheckStatus(`Up to date. You are using version ${CURRENT_VERSION}.`);
-      }
-    } catch {
-      setManualCheckStatus('Could not check for updates at this time.');
-    } finally {
-      setIsCheckingUpdate(false);
-    }
-  };
 
   return (
-    <div className="advanced-options-section" style={{ marginTop: '12px' }}>
+    <div className="advanced-options-section">
       <button
         type="button"
         className="disclosure-toggle"
@@ -65,162 +53,50 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({
         aria-expanded={isOpen}
         aria-controls="advanced-options-content"
       >
-        <span>{isOpen ? '▾' : '▸'}</span>
-        <span>{isOpen ? 'Hide advanced settings' : 'More options (page range, recognition mode)'}</span>
+        <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+        <span>{t('advanced.toggle')}</span>
       </button>
 
       {isOpen && (
         <div id="advanced-options-content" className="disclosure-body">
-          {/* Page Range */}
-          <div>
-            <label htmlFor="page-range-input" style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>
-              Page selection (optional)
+          <div className="field">
+            <label htmlFor="page-range-input" className="field-label">
+              {t('advanced.page_range_label')}
             </label>
+            <span id="page-range-help" className="field-help">{t('advanced.page_range_help')}</span>
             <input
               id="page-range-input"
+              className="field-input"
               type="text"
-              placeholder="e.g. 1-10 or leave blank for all pages"
+              inputMode="numeric"
+              placeholder={t('advanced.page_range_placeholder')}
+              aria-describedby="page-range-help"
               value={pageRange}
               onChange={(e) => onPageRangeChange(e.target.value)}
-              style={{
-                width: '100%',
-                maxWidth: '320px',
-                padding: '8px 12px',
-                backgroundColor: 'var(--bg-primary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-              }}
             />
           </div>
 
-          {/* Routing mode */}
-          <div>
-            <label htmlFor="routing-mode-select" style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>
-              Recognition mode
-            </label>
-            <select
-              id="routing-mode-select"
-              value={routingMode}
-              onChange={(e) => onRoutingModeChange(e.target.value as RoutingMode)}
-              style={{
-                width: '100%',
-                maxWidth: '320px',
-                padding: '8px 12px',
-                backgroundColor: 'var(--bg-primary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-              }}
-            >
-              <option value="max_accuracy" disabled>Higher accuracy pack unavailable</option>
-              <option value="auto">Automatic (default)</option>
-              <option value="native_only">Native text only (preserves scans for review)</option>
-              <option value="ocr_scanned_only">Recognize scanned pages</option>
-            </select>
-          </div>
-
-          {/* Laser Printer Monochrome Export */}
-          <div style={{ marginTop: '6px', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', minHeight: '48px', padding: '6px 0' }}>
-              <input
-                type="checkbox"
-                checked={monochrome}
-                onChange={(e) => onMonochromeChange(e.target.checked)}
-                style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer' }}
-              />
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {t('export.monochrome_label')}
-                </div>
-                <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  {t('export.monochrome_desc')}
-                </div>
-              </div>
-            </label>
-          </div>
-
-          {/* Page artwork retention */}
-          <div style={{ marginTop: '6px', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', minHeight: '48px', padding: '6px 0' }}>
-              <input
-                type="checkbox"
-                checked={preservePageArtwork}
-                onChange={(e) => onPreservePageArtworkChange(e.target.checked)}
-                style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer' }}
-              />
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {t('export.artwork_label')}
-                </div>
-                <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  {t('export.artwork_desc')}
-                </div>
-              </div>
-            </label>
-          </div>
-
-          {/* Page break on each original page */}
-          <div style={{ marginTop: '6px', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', minHeight: '48px', padding: '6px 0' }}>
-              <input
-                type="checkbox"
-                checked={pageBreakOnSourcePage}
-                onChange={(e) => onPageBreakOnSourcePageChange(e.target.checked)}
-                style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer' }}
-              />
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {t('export.page_break_label')}
-                </div>
-                <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  {t('export.page_break_desc')}
-                </div>
-              </div>
-            </label>
-          </div>
-
-          {/* Software updates */}
-          <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
-            <div style={{ fontWeight: 600, marginBottom: '8px' }}>Software updates</div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', minHeight: '36px' }}>
-              <input
-                type="checkbox"
-                checked={autoUpdate}
-                onChange={(e) => {
-                  setAutoUpdate(e.target.checked);
-                  setAutoUpdateEnabled(e.target.checked);
-                }}
-                style={{ width: '18px', height: '18px' }}
-              />
-              <span>Check for updates automatically on startup</span>
-            </label>
-
-            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={handleCheckUpdatesNow}
-                disabled={isCheckingUpdate}
-                style={{
-                  minHeight: '48px',
-                  padding: '0 16px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border-color)',
-                  backgroundColor: 'var(--bg-secondary)',
-                  color: 'var(--text-primary)',
-                  fontWeight: 600,
-                  cursor: isCheckingUpdate ? 'wait' : 'pointer',
-                }}
-              >
-                {isCheckingUpdate ? 'Checking for updates...' : 'Check for updates now'}
-              </button>
-              {manualCheckStatus && (
-                <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }} aria-live="polite">
-                  {manualCheckStatus}
-                </span>
-              )}
-            </div>
-          </div>
+          <CheckRow
+            id="option-page-break"
+            checked={pageBreakOnSourcePage}
+            onChange={onPageBreakOnSourcePageChange}
+            label={t('export.page_break_label')}
+            description={t('export.page_break_desc')}
+          />
+          <CheckRow
+            id="option-monochrome"
+            checked={monochrome}
+            onChange={onMonochromeChange}
+            label={t('export.monochrome_label')}
+            description={t('export.monochrome_desc')}
+          />
+          <CheckRow
+            id="option-searchable"
+            checked={searchableOriginal}
+            onChange={onSearchableOriginalChange}
+            label={t('export.searchable_label')}
+            description={t('export.searchable_desc')}
+          />
         </div>
       )}
     </div>

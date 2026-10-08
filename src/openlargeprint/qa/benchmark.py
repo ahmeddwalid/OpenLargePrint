@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import time
+import json
+import re
+from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -18,7 +21,83 @@ from openlargeprint.qa.metrics import (
     calculate_cer,
     calculate_image_retention,
     calculate_wer,
+    calculate_reading_order_accuracy,
+    calculate_table_structural_score,
+    calculate_page_anchor_fidelity,
+    image_pixel_digest,
 )
+
+
+def _block_transcript(block) -> str:
+    """Recognized content only: table cells own text, never their Markdown view."""
+    if block.type in (BlockType.PAGE_MARKER, BlockType.IMAGE):
+        return ""
+    if block.table_structure is not None:
+        return " ".join(" ".join(cell.text.split()) for row in block.table_structure.rows for cell in row)
+    if block.type == BlockType.TABLE and "|" in (block.text or ""):
+        cells = []
+        for line in block.text.splitlines():
+            if line.strip().startswith("|"):
+                values = [value.strip() for value in line.strip().strip("|").split("|")]
+                if values and all(re.fullmatch(r":?-{3,}:?", value) for value in values):
+                    continue
+                cells.extend(values)
+            else:
+                cells.append(line.strip())
+        return " ".join(" ".join(value.split()) for value in cells if value)
+    return " ".join((block.text or "").split())
+
+
+def _document_transcript(doc: DocumentIR) -> str:
+    return " ".join(text for block in doc.blocks if (text := _block_transcript(block)))
+
+
+def _reference_measurements(doc: DocumentIR, reference: dict) -> dict:
+    """Independent reference units allow differing paragraph segmentation."""
+    transcript = _document_transcript(doc)
+    ref_units = [" ".join(line.split()) for line in reference["reading_order"]]
+    positions = []
+    for index, unit in enumerate(ref_units):
+        start = 0
+        while unit:
+            position = transcript.find(unit, start)
+            if position < 0:
+                break
+            # Match whole textual units, avoiding page label 1 inside 131.
+            end = position + len(unit)
+            if (position == 0 or transcript[position - 1].isspace()) and (end == len(transcript) or transcript[end].isspace()):
+                positions.append((position, index))
+            start = end
+    hyp_units = [index for _, index in sorted(positions)]
+    tables = [block.table_structure for block in doc.blocks if block.table_structure is not None]
+    refs = reference.get("tables", [])
+    table_score = None
+    if refs:
+        scores = [calculate_table_structural_score(ref, [[cell.text for cell in row] for row in tables[index].rows]) if index < len(tables) else 0.0 for index, ref in enumerate(refs)]
+        table_score = sum(scores) / max(len(refs), len(tables))
+    elif "tables" in reference:
+        table_score = 0.0 if tables else 1.0
+    expected_hashes = list(reference.get("image_pixel_hashes", []))
+    retained = 0
+    for block in doc.blocks:
+        asset = block.image_asset
+        if not asset or not asset.file_path or not expected_hashes:
+            continue
+        try:
+            with Image.open(asset.file_path) as image:
+                digest = image_pixel_digest(image)
+            if digest in expected_hashes:
+                retained += 1
+                expected_hashes.remove(digest)
+        except (OSError, ValueError):
+            continue
+    image_count = reference.get("image_count", 0)
+    return {
+        "reading_order_accuracy": calculate_reading_order_accuracy(list(range(len(ref_units))), hyp_units),
+        "table_structural_accuracy": table_score,
+        "image_content_retention": retained / image_count if image_count else None,
+        "page_anchor_fidelity": calculate_page_anchor_fidelity(reference["source_pages"], [block.page_marker for block in doc.blocks if block.type == BlockType.PAGE_MARKER]),
+    }
 
 
 def get_current_ram_mb() -> float:
@@ -205,6 +284,7 @@ class BenchmarkResult(BaseModel):
     measurement_notes: List[str] = Field(default_factory=list)
     peak_vram_mb: float | None = None
     expectation_mismatches: List[str] = Field(default_factory=list)
+    fidelity_accepted: bool | None = None
 
 
 class BenchmarkReport(BaseModel):
@@ -224,18 +304,21 @@ class BenchmarkReport(BaseModel):
     def to_markdown_table(self) -> str:
         """Format benchmark results as a clean Markdown table (anti-slop, subject-grounded)."""
         lines = [
-            "| Case Name | Format | Pages | CER | WER | Order heuristic | Table heuristic | Images | Anchors | Speed (s/p) | Process peak RAM (MB) | VRAM (MB) | Execution |",
-            "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+            "| Case Name | Format | Pages | CER | WER | Order reference | Table reference | Image pixels | Order heuristic | Table heuristic | Images | Anchors | Speed (s/p) | Process peak RAM (MB) | VRAM (MB) | Execution |",
+            "|" + "---|" * 16,
         ]
         for name, r in self.results.items():
             status = "PASS" if r.success else "FAIL"
             m = r.metrics
             cer_label = f"{m.cer:.3f}" if m.cer is not None else "N/A"
             wer_label = f"{m.wer:.3f}" if m.wer is not None else "N/A"
+            order_ref = f"{m.reading_order_accuracy:.2f}" if m.reading_order_accuracy is not None else "N/A"
+            table_ref = f"{m.table_structural_accuracy:.2f}" if m.table_structural_accuracy is not None else "N/A"
+            image_ref = f"{m.image_content_retention:.2f}" if m.image_content_retention is not None else "N/A"
             lines.append(
-                f"| {name} | {r.format} | {r.page_count} | {cer_label} | {wer_label} | {m.reading_order_score:.2f} | {m.table_score:.2f} | {m.image_retention:.2f} | {m.page_anchor_fidelity:.2f} | {m.speed_sec_per_page:.2f} | {m.peak_ram_mb:.1f} | N/A | {status} |"
+                f"| {name} | {r.format} | {r.page_count} | {cer_label} | {wer_label} | {order_ref} | {table_ref} | {image_ref} | {m.reading_order_score:.2f} | {m.table_score:.2f} | {m.image_retention:.2f} | {m.page_anchor_fidelity:.2f} | {m.speed_sec_per_page:.2f} | {m.peak_ram_mb:.1f} | N/A | {status} |"
             )
-        lines.append("\nPASS means conversion completed or malformed input was rejected safely. It is not a fidelity acceptance result. N/A means unmeasured. Order/table columns are heuristics; RAM excludes child processes and records the lifetime process peak.")
+        lines.append("\nPASS means conversion completed or malformed input was rejected safely. It is not a fidelity acceptance result. N/A means unmeasured. Reference columns compare authored order/cells/original image pixels; separate order/table columns are heuristics; RAM excludes child processes and records the lifetime process peak.")
         return "\n".join(lines)
 
 
@@ -303,7 +386,10 @@ class BenchmarkRunner:
                 page_count = max(1, len(doc_ir.pages))
 
                 # Extract reconstructed text
-                hyp_text = " ".join(" ".join(b.text.split()) for b in doc_ir.blocks if b.text and b.type != BlockType.PAGE_MARKER)
+                hyp_text = _document_transcript(doc_ir)
+                reference_path = Path(file_path).with_suffix(".reference.json")
+                reference = json.loads(reference_path.read_text(encoding="utf-8")) if reference_path.exists() else None
+                reference_metrics = _reference_measurements(doc_ir, reference) if reference else {}
 
                 gt_candidates = [
                     Path(str(file_path)).with_suffix(".txt"),
@@ -337,8 +423,8 @@ class BenchmarkRunner:
 
                 # Image retention: a case that should carry figures must retain them
                 images = [b for b in doc_ir.blocks if b.image_asset is not None]
-                if "images" in name or "mixed_digital_scan" in name:
-                    image_retention = calculate_image_retention(1, len(images))
+                if reference and reference.get("image_count"):
+                    image_retention = calculate_image_retention(reference["image_count"], len(images))
                 else:
                     image_retention = 1.0
 
@@ -357,7 +443,8 @@ class BenchmarkRunner:
                     reading_order_score=reading_order_score,
                     table_score=table_score,
                     image_retention=image_retention,
-                    page_anchor_fidelity=anchor_fidelity,
+                    **reference_metrics,
+                    **({} if reference else {"page_anchor_fidelity": anchor_fidelity}),
                     speed_sec_per_page=round(speed_per_page, 3),
                     peak_ram_mb=max(0.0, peak_ram),
                 )
@@ -369,9 +456,10 @@ class BenchmarkRunner:
                     duration_seconds=round(duration, 3),
                     metrics=metrics,
                     success=True,
+                    fidelity_accepted=(cer == 0.0 and wer == 0.0 and all(value == 1.0 for value in reference_metrics.values() if value is not None)) if reference and ref_text is not None else None,
                     warning_count=len(res.warnings),
                     measurement_notes=[
-                        "Reading order and table scores are heuristics, not ground-truth accuracy.",
+                        "Reference order/cell/pixel measurements are separate from geometric/table heuristics.",
                         "RAM is the process lifetime peak; child processes and VRAM are not measured.",
                         "Conversion success is not a document-fidelity pass.",
                     ] + (["No reference transcript: CER and WER unavailable."] if ref_text is None else []),
@@ -406,7 +494,7 @@ class BenchmarkRunner:
                     ),
                     success=False,
                     warning_count=0,
-                    error_message=str(exc),
+                    error_message=type(exc).__name__,
                 )
 
         passed = sum(1 for r in results.values() if r.success)

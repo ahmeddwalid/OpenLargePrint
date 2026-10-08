@@ -11,11 +11,20 @@
 #>
 
 param(
-    [switch]$SkipSidecarBuild
+    [switch]$SkipSidecarBuild,
+    [switch]$DevelopmentUnsigned
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+# Signing is optional: with OLP_CODESIGN_THUMBPRINT set, every executable is signed
+# before bundling (publicly trusted unless -DevelopmentUnsigned); without it the
+# build is unsigned and Windows SmartScreen asks the user to confirm (see README).
+# Set OLP_REQUIRE_SIGNING=1 to refuse unsigned output.
+$PublicRelease = -not $DevelopmentUnsigned
+if ($env:OLP_CODESIGN_THUMBPRINT -and $env:OLP_CODESIGN_THUMBPRINT -notmatch '^[a-fA-F0-9]{40}$') {
+    throw "OLP_CODESIGN_THUMBPRINT must be a 40-character certificate thumbprint."
+}
 
 # Single source of truth for the version (keeps artifact names in sync with the tag).
 $TauriConfPath = Join-Path $RepoRoot "src-tauri\tauri.conf.json"
@@ -49,7 +58,7 @@ if (Test-Path $vsWhere) {
     $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if ($vsPath) {
         $cand = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
-        if (Test-Path $cand) {
+        if ((Test-Path $cand) -and (Test-Path (Join-Path (Split-Path $cand) 'vcvarsall.bat'))) {
             $VcvarsBat = $cand
         }
     }
@@ -57,7 +66,7 @@ if (Test-Path $vsWhere) {
 
 if (-not $VcvarsBat) {
     foreach ($cand in $VcvarsCandidates) {
-        if (Test-Path $cand) {
+        if ((Test-Path $cand) -and (Test-Path (Join-Path (Split-Path $cand) 'vcvarsall.bat'))) {
             $VcvarsBat = $cand
             break
         }
@@ -85,13 +94,22 @@ if (Test-Path "$RepoRoot\.venv\Scripts\python.exe") {
 # 2. Build Python engine sidecar
 if (-not $SkipSidecarBuild) {
     Write-Host "[2/6] Compiling standalone Python engine sidecar with PyInstaller..." -ForegroundColor Green
-    & $PyExe "$RepoRoot\packaging\build_sidecar.py"
+    & $PyExe "$RepoRoot\packaging\build_sidecar.py" --onedir
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to build Python sidecar binary."
     }
 } else {
     Write-Host "[2/6] Using existing Python sidecar binary (skipped build step)..." -ForegroundColor Green
 }
+$SidecarExe = Join-Path $RepoRoot "src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe"
+& $PyExe "$RepoRoot\packaging\sidecar_freshness.py" $SidecarExe
+if ($LASTEXITCODE -ne 0) { throw "The sidecar is stale; rebuild it before packaging." }
+$EngineRuntime = Join-Path $RepoRoot "src-tauri\binaries\engine\_internal"
+if (-not (Test-Path -LiteralPath $EngineRuntime)) { throw "Windows packaging requires the onedir engine runtime; rebuild with --onedir." }
+$ResourceConfig = (@{ bundle = @{ resources = @{ "binaries/engine/_internal/" = "_internal/" } } } | ConvertTo-Json -Depth 5 -Compress)
+$BuildConfigPath = Join-Path $RepoRoot "packaging\build\windows-bundle-config.json"
+New-Item -ItemType Directory -Path (Split-Path $BuildConfigPath) -Force | Out-Null
+Set-Content -LiteralPath $BuildConfigPath -Value $ResourceConfig -Encoding UTF8
 
 # 3. Generate accessible Windows application icons
 Write-Host "[3/6] Generating accessible high-contrast Windows icons..." -ForegroundColor Green
@@ -126,9 +144,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[6/6] Building Windows desktop shell (unbundled)..." -ForegroundColor Green
 Push-Location "$RepoRoot\src-tauri"
 try {
-    npx -y @tauri-apps/cli@2 build --no-bundle
+    npx -y @tauri-apps/cli@2.11.5 build --no-bundle --config $BuildConfigPath
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Notice: If the cargo build is blocked by Smart App Control, enable Developer Mode in Windows Settings." -ForegroundColor Yellow
         Write-Error "Tauri build failed."
     }
 } finally {
@@ -141,14 +158,17 @@ $SidecarExe = Join-Path $RepoRoot "src-tauri\binaries\openlargeprint-sidecar-x86
 if ($env:OLP_CODESIGN_THUMBPRINT) {
     Write-Host "Signing desktop shell and engine sidecar before bundling..." -ForegroundColor Green
     $PreBundleTargets = @($DesktopExe, $SidecarExe) | Where-Object { Test-Path $_ }
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "sign_windows.ps1") -Path $PreBundleTargets
+    $PreBundleTargets += Get-ChildItem -LiteralPath $EngineRuntime -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll', '.pyd' } | Select-Object -ExpandProperty FullName
+    & (Join-Path $PSScriptRoot "sign_windows.ps1") -Path $PreBundleTargets -RequirePublicTrust:$PublicRelease
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Pre-bundle code signing failed."
     }
+    & (Join-Path $PSScriptRoot "verify_signatures.ps1") -Path @($DesktopExe, $SidecarExe) -RequirePublicTrust:$PublicRelease -ExpectedThumbprint $env:OLP_CODESIGN_THUMBPRINT
+    if ($LASTEXITCODE -ne 0) { throw "Application signing identity verification failed." }
 } elseif ($env:OLP_REQUIRE_SIGNING -eq "1") {
     Write-Error "OLP_REQUIRE_SIGNING=1 but OLP_CODESIGN_THUMBPRINT is not set; refusing to build artifacts that Smart App Control will block."
 } else {
-    Write-Host "WARNING: no signing certificate configured. The desktop shell and sidecar stay unsigned and will be blocked by Smart App Control on Windows 11 (PKG-001)." -ForegroundColor Yellow
+    Write-Host "No signing certificate configured: building unsigned. SmartScreen will ask users to confirm, and Smart App Control (if enforced) blocks unsigned apps (PKG-001)." -ForegroundColor Yellow
 }
 
 Write-Host "Assembling NSIS installer from the signed binaries..." -ForegroundColor Green
@@ -158,10 +178,11 @@ try {
         # Tauri's signCommand hook automatically signs the generated uninstaller (uninstall.exe)
         # during the NSIS build process, ensuring Smart App Control does not block uninstallation (PKG-001).
         $signCmd = ('signtool.exe sign /sha1 {0} /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 "%1"' -f $env:OLP_CODESIGN_THUMBPRINT)
-        $bundleConfig = (@{ bundle = @{ windows = @{ signCommand = $signCmd } } } | ConvertTo-Json -Compress)
-        npx -y @tauri-apps/cli@2 bundle --bundles nsis --config "$bundleConfig"
+        $bundleConfig = (@{ bundle = @{ resources = @{ "binaries/engine/_internal/" = "_internal/" }; windows = @{ signCommand = $signCmd } } } | ConvertTo-Json -Depth 5 -Compress)
+        Set-Content -LiteralPath $BuildConfigPath -Value $bundleConfig -Encoding UTF8
+        npx -y @tauri-apps/cli@2.11.5 bundle --bundles nsis --config $BuildConfigPath
     } else {
-        npx -y @tauri-apps/cli@2 bundle --bundles nsis
+        npx -y @tauri-apps/cli@2.11.5 bundle --bundles nsis --config $BuildConfigPath
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Tauri bundle step failed."
@@ -172,6 +193,7 @@ try {
 
 $NsisPath = Join-Path $RepoRoot "src-tauri\target\release\bundle\nsis"
 $DistPath = Join-Path $RepoRoot "packaging\dist"
+if ($DevelopmentUnsigned) { $DistPath = Join-Path $DistPath "development" }
 if (-not (Test-Path $DistPath)) {
     New-Item -ItemType Directory -Path $DistPath -Force | Out-Null
 }
@@ -188,6 +210,8 @@ if (Test-Path $NsisPath) {
             if ($LASTEXITCODE -ne 0) {
                 Write-Error "Code signing failed for $($inst.FullName)"
             }
+            & (Join-Path $PSScriptRoot "verify_signatures.ps1") -Path $inst.FullName -RequirePublicTrust:$PublicRelease -ExpectedThumbprint $env:OLP_CODESIGN_THUMBPRINT
+            if ($LASTEXITCODE -ne 0) { throw "Installer signature verification failed." }
         }
     }
     foreach ($inst in $Installers) {
@@ -205,10 +229,12 @@ if (Test-Path $NsisPath) {
     # Also generate a standalone portable ZIP archive for users who prefer not to run an installer
     $TargetRelease = Join-Path $RepoRoot "src-tauri\target\release"
     $DesktopExe = Join-Path $TargetRelease "openlargeprint-desktop.exe"
-    $SidecarExe = Join-Path $TargetRelease "openlargeprint-sidecar.exe"
+    $SidecarExe = Join-Path $RepoRoot "src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe"
     if (Test-Path $DesktopExe) {
         $PortableDir = Join-Path $RepoRoot "packaging\build\OpenLargePrint_portable"
-        if (Test-Path $PortableDir) { Remove-Item -Recurse -Force $PortableDir }
+        $PortableDir = [IO.Path]::GetFullPath($PortableDir)
+        if (-not $PortableDir.StartsWith(([IO.Path]::GetFullPath($RepoRoot) + '\'), [StringComparison]::OrdinalIgnoreCase)) { throw "Portable directory escapes the workspace." }
+        if (Test-Path -LiteralPath $PortableDir) { Remove-Item -LiteralPath $PortableDir -Recurse -Force }
         New-Item -ItemType Directory -Path $PortableDir -Force | Out-Null
 
         Copy-Item -LiteralPath $DesktopExe -Destination (Join-Path $PortableDir "OpenLargePrint.exe")
@@ -218,6 +244,7 @@ if (Test-Path $NsisPath) {
             Copy-Item -LiteralPath "$RepoRoot\src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe" -Destination (Join-Path $PortableDir "openlargeprint-sidecar.exe")
         }
         Copy-Item -LiteralPath "$RepoRoot\LICENSE" -Destination (Join-Path $PortableDir "LICENSE.txt")
+        Copy-Item -LiteralPath $EngineRuntime -Destination (Join-Path $PortableDir "_internal") -Recurse
         Copy-Item -LiteralPath "$RepoRoot\README.md" -Destination (Join-Path $PortableDir "README.txt")
 
         $PortableZip = Join-Path $DistPath ("OpenLargePrint_{0}_windows_x64_portable.zip" -f $AppVersion)

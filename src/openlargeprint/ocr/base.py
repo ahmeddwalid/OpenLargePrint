@@ -15,6 +15,15 @@ class EngineCapabilities:
     supports_confidence: bool
     supported_languages: List[str]
     is_gpu_accelerated: bool = False
+    recognition_profile: str = "standard"
+
+
+@dataclass
+class OcrWord:
+    """One recognised token with its pixel-space box (used for blanks and table columns)."""
+    text: str
+    polygon: List[Tuple[float, float]]
+    confidence: float = 1.0
 
 
 @dataclass
@@ -23,6 +32,7 @@ class OcrDetectedLine:
     text: str
     polygon: List[Tuple[float, float]]  # List of 4 (x, y) vertices in image pixels
     confidence: float
+    words: List[OcrWord] = field(default_factory=list)
 
     @property
     def x0(self) -> float:

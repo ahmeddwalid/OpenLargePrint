@@ -11,6 +11,8 @@ from enum import Enum
 from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+SCHEMA_VERSION = "1.1.0"
+
 
 class BoundingBox(BaseModel):
     """Bounding box coordinates in points or normalized space."""
@@ -41,6 +43,7 @@ class BlockType(str, Enum):
     IMAGE = "image"
     CAPTION = "caption"
     PAGE_MARKER = "page_marker"
+    ASIDE = "aside"  # boxed notes, sidebars, margin labels
 
 
 class ExtractionMethod(str, Enum):
@@ -141,6 +144,15 @@ class TableStructure(BaseModel):
         return "\n".join(lines)
 
 
+class InlineStyle(BaseModel):
+    """Emphasis over ``text[start:end]`` as printed in the source (schema 1.1)."""
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+
+
 class Block(BaseModel):
     """A semantic block carrying content, provenance, and classification (DOC-002)."""
     model_config = ConfigDict(extra="forbid")
@@ -159,6 +171,11 @@ class Block(BaseModel):
     image_asset: Optional[ImageAsset] = None
     table_structure: Optional[TableStructure] = None
     page_marker: Optional[int] = None  # Original page number if type == PAGE_MARKER (OUT-005)
+    # Schema 1.1: list and structure hints for reflow (OUT-001)
+    list_marker: Optional[str] = None  # source marker at the start of text ("1", "•", "A:")
+    indent_level: int = Field(default=0, ge=0, le=6)
+    styles: list[InlineStyle] = Field(default_factory=list)
+    role: Optional[str] = None  # finer meaning: "figure_text", "running_text", "contents", "dialogue"
 
 
 class PageClassification(str, Enum):
@@ -191,7 +208,7 @@ class DocumentIR(BaseModel):
     """Canonical document intermediate representation (DOC-001..003)."""
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "1.0.0"
+    schema_version: str = SCHEMA_VERSION
     metadata: DocumentMetadata
     pages: list[PageMetadata] = Field(default_factory=list)
     blocks: list[Block] = Field(default_factory=list)
@@ -226,10 +243,17 @@ class DocumentIR(BaseModel):
         filtered_pages = [p for p in self.pages if p.page_number in page_numbers]
         filtered_blocks = [b for b in self.blocks if b.source_page in page_numbers]
         ordered = sorted(page_numbers)
-        if len(ordered) == 1:
-            title_suffix = f" (Page {ordered[0]})"
-        else:
-            title_suffix = f" (Pages {', '.join(str(p) for p in ordered)})"
+        runs: list[str] = []
+        start = prev = ordered[0]
+        for page in ordered[1:] + [None]:
+            if page is not None and page == prev + 1:
+                prev = page
+                continue
+            runs.append(str(start) if start == prev else f"{start}–{prev}")
+            if page is not None:
+                start = prev = page
+        label = "page" if len(ordered) == 1 else "pages"
+        title_suffix = f" ({label} {', '.join(runs)})"
         base_title = self.metadata.title or "Document"
         new_metadata = DocumentMetadata(
             title=f"{base_title}{title_suffix}",

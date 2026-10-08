@@ -19,7 +19,6 @@ pub struct ConversionSettingsPayload {
     pub text_size: Option<u32>,
     pub paper_size: Option<String>,
     pub output_format: Option<String>,
-    pub routing_mode: Option<String>,
     pub page_range: Option<String>,
     pub page_break_on_source_page: Option<bool>,
 }
@@ -50,7 +49,10 @@ impl AppSession {
                         return Ok(());
                     }
                     Err(e) => {
-                        eprintln!("[supervisor] Failed to query sidecar status: {}. Resetting handles.", e);
+                        eprintln!(
+                            "[supervisor] Failed to query sidecar status: {}. Resetting handles.",
+                            e
+                        );
                         *stdin_guard = None;
                         *child_guard = None;
                     }
@@ -72,9 +74,13 @@ impl AppSession {
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW: prevent empty black console popup
         }
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("Failed to launch sidecar ({}): {}", sidecar_exe.display(), e))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "Failed to launch sidecar ({}): {}",
+                sidecar_exe.display(),
+                e
+            )
+        })?;
 
         let stdin = child.stdin.take().ok_or("Failed to open sidecar stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to open sidecar stdout")?;
@@ -144,14 +150,47 @@ impl AppSession {
                 }
             }
             eprintln!("[supervisor] Sidecar stdout EOF reached.");
-            let _ = app_clone.emit("sidecar-error", serde_json::json!({
-                "type": "error",
-                "message": "The document conversion engine stopped unexpectedly.",
-                "code": "SIDECAR_CRASHED"
-            }));
+            let _ = app_clone.emit(
+                "sidecar-error",
+                serde_json::json!({
+                    "type": "error",
+                    "message": "The document conversion engine stopped unexpectedly.",
+                    "code": "SIDECAR_CRASHED"
+                }),
+            );
         });
 
         Ok(())
+    }
+
+    pub async fn verify_engine(&self, app: &AppHandle) -> Result<serde_json::Value, String> {
+        self.ensure_sidecar_running(app).await?;
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_health.lock().unwrap();
+            if pending.is_some() {
+                return Err("The conversion engine is starting. Try again shortly.".into());
+            }
+            *pending = Some(tx);
+        }
+        if let Err(error) = self
+            .send_command(&serde_json::json!({"command": "health"}))
+            .await
+        {
+            self.pending_health.lock().unwrap().take();
+            return Err(error);
+        }
+        // The first answer waits for the engine to unpack and the recogniser to load;
+        // on a slow disk, or while antivirus scans a fresh install, that takes a while.
+        let result = tokio::time::timeout(Duration::from_secs(90), rx).await;
+        self.pending_health.lock().unwrap().take();
+        match result {
+            Ok(Ok(value)) => {
+                validate_engine_health(&value)?;
+                Ok(value)
+            }
+            _ => Err("The conversion engine did not respond. Restart the app or reinstall the current version.".into()),
+        }
     }
 
     pub async fn send_command(&self, json_val: &serde_json::Value) -> Result<(), String> {
@@ -176,6 +215,19 @@ impl AppSession {
             Err("Sidecar process is not running".to_string())
         }
     }
+}
+
+fn validate_engine_health(value: &serde_json::Value) -> Result<(), String> {
+    if value.get("status").and_then(|v| v.as_str()) != Some("ready") {
+        return Err("The conversion engine is not ready. Restart the app.".into());
+    }
+    if value.get("engine_version").and_then(|v| v.as_str()) != Some(env!("CARGO_PKG_VERSION")) {
+        return Err(
+            "The app and conversion engine are different versions. Reinstall the current version."
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 /// Platform-specific sidecar binary names, in preference order.
@@ -280,7 +332,9 @@ fn native_windows_open_file_dialog() -> Option<PathBuf> {
     let filter: Vec<u16> = "Supported Documents (*.pdf;*.docx;*.doc;*.pptx;*.ppt)\0*.pdf;*.docx;*.doc;*.pptx;*.ppt\0All Files (*.*)\0*.*\0\0"
         .encode_utf16()
         .collect();
-    let title: Vec<u16> = "Select Document for Large Print Conversion\0".encode_utf16().collect();
+    let title: Vec<u16> = "Select Document for Large Print Conversion\0"
+        .encode_utf16()
+        .collect();
     let mut file_buf = vec![0u16; 1024];
 
     let mut ofn: OpenFileNameW = unsafe { std::mem::zeroed() };
@@ -294,7 +348,10 @@ fn native_windows_open_file_dialog() -> Option<PathBuf> {
 
     let res = unsafe { GetOpenFileNameW(&mut ofn) };
     if res != 0 {
-        let end = file_buf.iter().position(|&c| c == 0).unwrap_or(file_buf.len());
+        let end = file_buf
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(file_buf.len());
         let path_str = String::from_utf16_lossy(&file_buf[..end]);
         if !path_str.is_empty() {
             return Some(PathBuf::from(path_str));
@@ -311,9 +368,18 @@ fn native_windows_save_file_dialog(
 ) -> Option<PathBuf> {
     let ext = filter_ext.unwrap_or("pdf").to_lowercase();
     let (filter_str, def_ext_str) = match ext.as_str() {
-        "docx" => ("Word Document (*.docx)\0*.docx\0All Files (*.*)\0*.*\0\0", "docx\0"),
-        "html" | "reader" => ("Interactive Web Document (*.html)\0*.html\0All Files (*.*)\0*.*\0\0", "html\0"),
-        _ => ("PDF Document (*.pdf)\0*.pdf\0All Files (*.*)\0*.*\0\0", "pdf\0"),
+        "docx" => (
+            "Word Document (*.docx)\0*.docx\0All Files (*.*)\0*.*\0\0",
+            "docx\0",
+        ),
+        "html" | "reader" => (
+            "Interactive Web Document (*.html)\0*.html\0All Files (*.*)\0*.*\0\0",
+            "html\0",
+        ),
+        _ => (
+            "PDF Document (*.pdf)\0*.pdf\0All Files (*.*)\0*.*\0\0",
+            "pdf\0",
+        ),
     };
 
     let filter: Vec<u16> = filter_str.encode_utf16().collect();
@@ -327,7 +393,8 @@ fn native_windows_save_file_dialog(
         file_buf[..copy_len].copy_from_slice(&utf16_name[..copy_len]);
     }
 
-    let init_dir_vec: Option<Vec<u16>> = initial_dir.map(|d| format!("{}\0", d).encode_utf16().collect());
+    let init_dir_vec: Option<Vec<u16>> =
+        initial_dir.map(|d| format!("{}\0", d).encode_utf16().collect());
 
     let mut ofn: OpenFileNameW = unsafe { std::mem::zeroed() };
     ofn.l_struct_size = std::mem::size_of::<OpenFileNameW>() as u32;
@@ -344,7 +411,10 @@ fn native_windows_save_file_dialog(
 
     let res = unsafe { GetSaveFileNameW(&mut ofn) };
     if res != 0 {
-        let end = file_buf.iter().position(|&c| c == 0).unwrap_or(file_buf.len());
+        let end = file_buf
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(file_buf.len());
         let path_str = String::from_utf16_lossy(&file_buf[..end]);
         if !path_str.is_empty() {
             return Some(PathBuf::from(path_str));
@@ -407,12 +477,19 @@ async fn open_file_dialog(app: AppHandle) -> Result<Option<serde_json::Value>, S
         #[cfg(not(target_os = "windows"))]
         {
             use tauri_plugin_dialog::DialogExt;
-            let selected = app.dialog().file()
+            let selected = app
+                .dialog()
+                .file()
                 .add_filter("Documents", &["pdf", "docx", "pptx", "doc", "ppt"])
                 .blocking_pick_file();
-            let Some(selected) = selected else { return Ok(None) };
-            let path = selected.into_path().map_err(|_| "Choose a local document.".to_string())?;
-            let metadata = std::fs::metadata(&path).map_err(|_| "The selected file could not be opened.".to_string())?;
+            let Some(selected) = selected else {
+                return Ok(None);
+            };
+            let path = selected
+                .into_path()
+                .map_err(|_| "Choose a local document.".to_string())?;
+            let metadata = std::fs::metadata(&path)
+                .map_err(|_| "The selected file could not be opened.".to_string())?;
             Ok(Some(serde_json::json!({
                 "path": path.to_string_lossy(),
                 "name": path.file_name().unwrap_or_default().to_string_lossy(),
@@ -449,15 +526,23 @@ async fn choose_save_dialog(
         {
             use tauri_plugin_dialog::DialogExt;
             let mut dialog = app.dialog().file();
-            if let Some(name) = default_name { dialog = dialog.set_file_name(name); }
-            if let Some(directory) = initial_dir { dialog = dialog.set_directory(directory); }
+            if let Some(name) = default_name {
+                dialog = dialog.set_file_name(name);
+            }
+            if let Some(directory) = initial_dir {
+                dialog = dialog.set_directory(directory);
+            }
             if let Some(extension) = filter_ext {
                 if ["pdf", "docx", "html"].contains(&extension.as_str()) {
                     dialog = dialog.add_filter("Document", &[extension.as_str()]);
                 }
             }
-            let Some(selected) = dialog.blocking_save_file() else { return Ok(None) };
-            let path = selected.into_path().map_err(|_| "Choose a local output file.".to_string())?;
+            let Some(selected) = dialog.blocking_save_file() else {
+                return Ok(None);
+            };
+            let path = selected
+                .into_path()
+                .map_err(|_| "Choose a local output file.".to_string())?;
             Ok(Some(path.to_string_lossy().into_owned()))
         }
     })
@@ -468,7 +553,11 @@ async fn choose_save_dialog(
 #[tauri::command]
 async fn inspect_file_path(file_path: String) -> Result<serde_json::Value, String> {
     let p = PathBuf::from(&file_path);
-    let file_name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let file_name = p
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let file_size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
     Ok(serde_json::json!({
         "path": file_path,
@@ -488,7 +577,8 @@ async fn open_path_in_system(path: String) -> Result<(), String> {
         let mut cmd = std::process::Command::new("explorer");
         cmd.arg(&p);
         cmd.creation_flags(0x08000000);
-        cmd.spawn().map_err(|e| format!("Failed to open file: {}", e))?;
+        cmd.spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
         Ok(())
     }
     #[cfg(target_os = "macos")]
@@ -520,7 +610,8 @@ async fn reveal_in_folder(path: String) -> Result<(), String> {
         let mut cmd = std::process::Command::new("explorer");
         cmd.args(["/select,", &p.to_string_lossy()]);
         cmd.creation_flags(0x08000000);
-        cmd.spawn().map_err(|e| format!("Failed to reveal path: {}", e))?;
+        cmd.spawn()
+            .map_err(|e| format!("Failed to reveal path: {}", e))?;
         Ok(())
     }
     #[cfg(target_os = "macos")]
@@ -550,7 +641,11 @@ async fn get_cli_arg_file() -> Result<Option<serde_json::Value>, String> {
         if !arg.starts_with('-') {
             let p = PathBuf::from(&arg);
             if p.exists() && p.is_file() {
-                let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let name = p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                 return Ok(Some(serde_json::json!({
                     "path": arg,
@@ -568,25 +663,7 @@ async fn health_check(
     app: AppHandle,
     session: State<'_, AppSession>,
 ) -> Result<serde_json::Value, String> {
-    session.ensure_sidecar_running(&app).await?;
-    let (tx, rx) = oneshot::channel();
-    {
-        let mut lock = session.pending_health.lock().unwrap();
-        *lock = Some(tx);
-    }
-
-    session
-        .send_command(&serde_json::json!({ "command": "health" }))
-        .await?;
-
-    match tokio::time::timeout(Duration::from_secs(5), rx).await {
-        Ok(Ok(val)) => Ok(val),
-        _ => Ok(serde_json::json!({
-            "status": "ready",
-            "desktop_version": env!("CARGO_PKG_VERSION"),
-            "sidecar_binary": resolve_sidecar_binary().to_string_lossy()
-        })),
-    }
+    session.verify_engine(&app).await
 }
 
 #[tauri::command]
@@ -595,7 +672,7 @@ async fn inspect_file(
     session: State<'_, AppSession>,
     file_path: String,
 ) -> Result<serde_json::Value, String> {
-    session.ensure_sidecar_running(&app).await?;
+    session.verify_engine(&app).await?;
     let (tx, rx) = oneshot::channel();
     {
         let mut lock = session.pending_inspect.lock().unwrap();
@@ -620,7 +697,10 @@ async fn inspect_file(
 fn resolve_output_path(input_path: &Path, settings: &serde_json::Value) -> PathBuf {
     let user_downloads = user_home().join("Downloads");
     let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
-    let out_fmt = settings.get("outputFormat").and_then(|f| f.as_str()).unwrap_or("pdf");
+    let out_fmt = settings
+        .get("outputFormat")
+        .and_then(|f| f.as_str())
+        .unwrap_or("pdf");
     let ext = match out_fmt {
         "docx" => "docx",
         "reader" | "html" => "html",
@@ -639,34 +719,35 @@ fn resolve_output_path(input_path: &Path, settings: &serde_json::Value) -> PathB
         user_downloads.join(format!("{}-largeprint.{}", stem, ext))
     };
 
-    let mut output_path = if let Some(custom_path) = settings.get("outputPath").and_then(|p| p.as_str()) {
-        let trimmed = custom_path.trim();
-        if !trimmed.is_empty() {
-            let p = PathBuf::from(trimmed);
-            if p.is_absolute() {
-                p
-            } else if trimmed.starts_with("Downloads") || trimmed.starts_with("downloads") {
-                let rest = trimmed
-                    .trim_start_matches("Downloads")
-                    .trim_start_matches("downloads")
-                    .trim_start_matches('\\')
-                    .trim_start_matches('/');
-                user_downloads.join(rest)
-            } else if let Some(parent) = input_path.parent() {
-                if parent.is_absolute() {
-                    parent.join(trimmed)
+    let mut output_path =
+        if let Some(custom_path) = settings.get("outputPath").and_then(|p| p.as_str()) {
+            let trimmed = custom_path.trim();
+            if !trimmed.is_empty() {
+                let p = PathBuf::from(trimmed);
+                if p.is_absolute() {
+                    p
+                } else if trimmed.starts_with("Downloads") || trimmed.starts_with("downloads") {
+                    let rest = trimmed
+                        .trim_start_matches("Downloads")
+                        .trim_start_matches("downloads")
+                        .trim_start_matches('\\')
+                        .trim_start_matches('/');
+                    user_downloads.join(rest)
+                } else if let Some(parent) = input_path.parent() {
+                    if parent.is_absolute() {
+                        parent.join(trimmed)
+                    } else {
+                        user_downloads.join(trimmed)
+                    }
                 } else {
                     user_downloads.join(trimmed)
                 }
             } else {
-                user_downloads.join(trimmed)
+                default_output_path
             }
         } else {
             default_output_path
-        }
-    } else {
-        default_output_path
-    };
+        };
 
     if output_path.is_relative() {
         output_path = user_downloads.join(&output_path);
@@ -679,7 +760,11 @@ fn resolve_output_path(input_path: &Path, settings: &serde_json::Value) -> PathB
 
 /// Map the UI text-size selection (or a custom point size) to a preset name.
 fn preset_from_settings(settings: &serde_json::Value) -> String {
-    if settings.get("customBodyPt").and_then(|v| v.as_f64()).is_some() {
+    if settings
+        .get("customBodyPt")
+        .and_then(|v| v.as_f64())
+        .is_some()
+    {
         return "Custom".to_string();
     }
     match settings.get("textSize").and_then(|t| t.as_u64()) {
@@ -698,7 +783,7 @@ async fn start_conversion(
     file_path: String,
     settings: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    session.ensure_sidecar_running(&app).await?;
+    session.verify_engine(&app).await?;
     let job_id = uuid_short();
     {
         let mut active = session.active_job_id.lock().unwrap();
@@ -715,13 +800,17 @@ async fn start_conversion(
 
     let preset = preset_from_settings(&settings);
 
-    let out_fmt = settings.get("outputFormat").and_then(|f| f.as_str()).unwrap_or("pdf");
-    let paper_size = settings.get("paperSize").and_then(|p| p.as_str()).unwrap_or("A4");
-    let routing_mode = settings.get("routingMode").and_then(|m| m.as_str()).unwrap_or("automatic");
-    let monochrome = settings.get("monochrome").and_then(|m| m.as_bool()).unwrap_or(false);
-    let preserve_page_artwork = settings
-        .get("preservePageArtwork")
-        .and_then(|v| v.as_bool())
+    let out_fmt = settings
+        .get("outputFormat")
+        .and_then(|f| f.as_str())
+        .unwrap_or("pdf");
+    let paper_size = settings
+        .get("paperSize")
+        .and_then(|p| p.as_str())
+        .unwrap_or("A4");
+    let monochrome = settings
+        .get("monochrome")
+        .and_then(|m| m.as_bool())
         .unwrap_or(false);
     let page_break_on_source_page = settings
         .get("pageBreakOnSourcePage")
@@ -739,10 +828,10 @@ async fn start_conversion(
         "preset": preset,
         "paper_size": paper_size,
         "export_format": out_fmt,
-        "routing_mode": routing_mode,
+        // One recognition pipeline: the engine decides per page (never OCRs native text).
+        "routing_mode": "automatic",
         "include_page_markers": true,
         "monochrome": monochrome,
-        "preserve_page_artwork": preserve_page_artwork,
         "page_break_on_source_page": page_break_on_source_page,
     });
 
@@ -776,7 +865,7 @@ async fn export_from_ir(
     file_path: String,
     settings: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    session.ensure_sidecar_running(&app).await?;
+    session.verify_engine(&app).await?;
     let job_id = {
         let active = session.active_job_id.lock().unwrap();
         active.clone()
@@ -789,10 +878,19 @@ async fn export_from_ir(
     }
 
     let output_path = resolve_output_path(input_path, &settings);
-    let out_fmt = settings.get("outputFormat").and_then(|f| f.as_str()).unwrap_or("pdf");
+    let out_fmt = settings
+        .get("outputFormat")
+        .and_then(|f| f.as_str())
+        .unwrap_or("pdf");
     let preset = preset_from_settings(&settings);
-    let paper_size = settings.get("paperSize").and_then(|p| p.as_str()).unwrap_or("A4");
-    let monochrome = settings.get("monochrome").and_then(|m| m.as_bool()).unwrap_or(false);
+    let paper_size = settings
+        .get("paperSize")
+        .and_then(|p| p.as_str())
+        .unwrap_or("A4");
+    let monochrome = settings
+        .get("monochrome")
+        .and_then(|m| m.as_bool())
+        .unwrap_or(false);
     let page_break_on_source_page = settings
         .get("pageBreakOnSourcePage")
         .and_then(|v| v.as_bool())
@@ -861,7 +959,7 @@ async fn get_review_data(
     session: State<'_, AppSession>,
     job_id: String,
 ) -> Result<serde_json::Value, String> {
-    session.ensure_sidecar_running(&app).await?;
+    session.verify_engine(&app).await?;
     let (tx, rx) = oneshot::channel();
     {
         let mut lock = session.pending_review.lock().unwrap();
@@ -894,7 +992,7 @@ async fn retry_page(
     page_number: usize,
     max_accuracy: bool,
 ) -> Result<serde_json::Value, String> {
-    session.ensure_sidecar_running(&app).await?;
+    session.verify_engine(&app).await?;
     let (tx, rx) = oneshot::channel();
     {
         let mut lock = session.pending_review.lock().unwrap();
@@ -948,7 +1046,9 @@ async fn download_and_apply_update(
     let url = tauri::Url::parse(&download_url).map_err(|_| "Invalid update URL.".to_string())?;
     if url.scheme() != "https"
         || url.host_str() != Some("github.com")
-        || !url.path().starts_with("/ahmeddwalid/OpenLargePrint/releases/download/")
+        || !url
+            .path()
+            .starts_with("/ahmeddwalid/OpenLargePrint/releases/download/")
         || !url.path().ends_with(".exe")
         || !url.username().is_empty()
         || url.password().is_some()
@@ -968,10 +1068,25 @@ async fn download_and_apply_update(
     #[cfg(target_os = "windows")]
     {
         let temp_dir = std::env::temp_dir().join(uuid_short());
-        std::fs::create_dir(&temp_dir).map_err(|_| "Could not create the update directory.".to_string())?;
+        std::fs::create_dir(&temp_dir)
+            .map_err(|_| "Could not create the update directory.".to_string())?;
         let installer_path = temp_dir.join("OpenLargePrint_setup_update.exe");
         let status = tokio::process::Command::new("curl.exe")
-            .args(["--fail", "-sSL", "--proto", "=https", "--proto-redir", "=https", "--max-time", "300", "--max-filesize", "2147483648", &download_url, "-o", &installer_path.to_string_lossy()])
+            .args([
+                "--fail",
+                "-sSL",
+                "--proto",
+                "=https",
+                "--proto-redir",
+                "=https",
+                "--max-time",
+                "300",
+                "--max-filesize",
+                "2147483648",
+                &download_url,
+                "-o",
+                &installer_path.to_string_lossy(),
+            ])
             .status()
             .await
             .map_err(|e| format!("Downloader error: {}", e))?;
@@ -987,16 +1102,21 @@ async fn download_and_apply_update(
         let mut hash = Sha256::new();
         let mut buffer = [0_u8; 65536];
         loop {
-            let count = file.read(&mut buffer)
+            let count = file
+                .read(&mut buffer)
                 .map_err(|_| "Could not verify the downloaded installer.".to_string())?;
-            if count == 0 { break; }
+            if count == 0 {
+                break;
+            }
             hash.update(&buffer[..count]);
         }
         drop(file);
         if format!("{:x}", hash.finalize()) != expected.to_ascii_lowercase() {
             let _ = std::fs::remove_file(&installer_path);
             let _ = std::fs::remove_dir(&temp_dir);
-            return Err("The installer checksum does not match the release. Update cancelled.".to_string());
+            return Err(
+                "The installer checksum does not match the release. Update cancelled.".to_string(),
+            );
         }
 
         let mut spawn_cmd = std::process::Command::new(&installer_path);
@@ -1047,14 +1167,37 @@ mod update_validation_tests {
     #[tokio::test]
     async fn refuses_untrusted_installers_and_missing_checksums() {
         let hash = "a".repeat(64);
-        for url in ["http://github.com/ahmeddwalid/OpenLargePrint/releases/download/v1/setup.exe",
-                    "https://example.com/setup.exe",
-                    "https://github.com/other/project/releases/download/v1/setup.exe"] {
-            assert!(download_and_apply_update(url.into(), Some(hash.clone())).await.is_err());
+        for url in [
+            "http://github.com/ahmeddwalid/OpenLargePrint/releases/download/v1/setup.exe",
+            "https://example.com/setup.exe",
+            "https://github.com/other/project/releases/download/v1/setup.exe",
+        ] {
+            assert!(download_and_apply_update(url.into(), Some(hash.clone()))
+                .await
+                .is_err());
         }
         let url = "https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v1/setup.exe";
         for hash in [None, Some(String::new()), Some("z".repeat(64))] {
             assert!(download_and_apply_update(url.into(), hash).await.is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod engine_health_tests {
+    use super::validate_engine_health;
+    #[test]
+    fn rejects_missing_and_stale_engine_versions() {
+        for value in [
+            serde_json::json!({"status":"ready"}),
+            serde_json::json!({"status":"ready","engine_version":"0.1.0"}),
+            serde_json::json!({"status":"failed","engine_version":env!("CARGO_PKG_VERSION")}),
+        ] {
+            assert!(validate_engine_health(&value).is_err());
+        }
+        assert!(validate_engine_health(
+            &serde_json::json!({"status":"ready","engine_version":env!("CARGO_PKG_VERSION")})
+        )
+        .is_ok());
     }
 }

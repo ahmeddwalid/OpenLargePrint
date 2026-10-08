@@ -18,11 +18,21 @@ from openlargeprint.models import (
 def test_model_catalog_defaults():
     """Verify pinned model catalog includes required default models."""
     defaults = PINNED_MODELS.list_defaults()
-    assert "ch_PP-OCRv4_det" in defaults
-    assert "ch_PP-OCRv4_rec" in defaults
-    assert "ch_ppocr_mobile_v2.0_cls" in defaults
-    assert len(defaults) == 3
-    assert "paddleocr_vl_1.6" not in PINNED_MODELS.models
+    # Everything a conversion uses ships with the application (SEC-009).
+    assert set(defaults) == {
+        "pp_doc_layoutv2", "PP-OCRv6_det_small", "PP-OCRv6_rec_small",
+        "ch_ppocr_mobile_v2.0_cls", "arabic_PP-OCRv5_rec_mobile",
+    }
+    for artifact in defaults.values():
+        assert artifact.code_license == "Apache-2.0" and artifact.weight_license == "Apache-2.0"
+        assert len(artifact.sha256) == 64 and artifact.file_size_bytes > 0
+
+
+def test_bundled_models_resolve_and_verify():
+    """Models in the wheel or the bundled weights folder are found and hash-checked."""
+    manager = ModelManager()
+    for key in ("PP-OCRv6_det_small", "PP-OCRv6_rec_small", "ch_ppocr_mobile_v2.0_cls"):
+        assert manager.get_model_path(key, verify=True).is_file()
 
 
 def test_model_cache_dir_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -155,3 +165,59 @@ def test_download_model_verifies_hash(tmp_path: Path):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def _download_manager(tmp_path):
+    payload = b"verified-model"
+    artifact = ModelArtifact(
+        key="bounded", name="Bounded model", task=ModelTask.RECOGNITION,
+        framework=ModelFramework.ONNX, version="1", sha256=hashlib.sha256(payload).hexdigest(),
+        file_size_bytes=len(payload), code_license="Apache-2.0", weight_license="Apache-2.0",
+        download_url="https://example.invalid/model.onnx",
+    )
+    return ModelManager(ModelCatalog(models={"bounded": artifact}), tmp_path), payload
+
+
+def test_failed_model_download_removes_temporary_file(tmp_path, monkeypatch):
+    import urllib.request
+    mgr, _ = _download_manager(tmp_path)
+    def fail(*args, **kwargs):
+        raise OSError("Connection failed")
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    with pytest.raises(OSError):
+        mgr.download_model("bounded")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_oversized_model_response_stops_at_pinned_limit(tmp_path, monkeypatch):
+    import io
+    import urllib.request
+    mgr, payload = _download_manager(tmp_path)
+    response = io.BytesIO(payload + b"x" * 1000000)
+    consumed = []
+    original_read = response.read
+    def read(size=-1):
+        data = original_read(size)
+        consumed.append(len(data))
+        return data
+    response.read = read
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: response)
+    with pytest.raises(ModelIntegrityError):
+        mgr.download_model("bounded")
+    assert sum(consumed) <= len(payload) + 1
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_model_replace_preserves_previous_verified_copy(tmp_path, monkeypatch):
+    import os
+    mgr, payload = _download_manager(tmp_path / "cache")
+    source = tmp_path / "source.onnx"
+    source.write_bytes(payload)
+    dest = mgr.install_model("bounded", source)
+    def fail(*args, **kwargs):
+        raise OSError("Replacement failed")
+    monkeypatch.setattr(os, "replace", fail)
+    with pytest.raises(OSError):
+        mgr.install_model("bounded", source)
+    assert dest.read_bytes() == payload
+    assert list(mgr.cache_dir.iterdir()) == [dest]

@@ -2,14 +2,25 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 # SEC-009: Verify no network traffic during conversion
 # QA-001..003: Run full test suite on every PR
 
 jobs:
+  versions:
+    name: Version numbers agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 packaging/check_versions.py
+
   python-tests:
     name: Python Engine Tests
     runs-on: ${{ matrix.os }}
@@ -27,6 +38,13 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
       - name: Install dependencies
         run: uv sync --locked --dev --extra dev --python ${{ matrix.python-version }}
+      - name: Cache pinned models
+        uses: actions/cache@v4
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
       - name: Run pytest with coverage
         run: uv run pytest tests/ --cov=openlargeprint --cov-report=xml -v
       - name: Upload coverage
@@ -49,6 +67,13 @@ jobs:
         run: uv python install 3.12
       - name: Install dependencies
         run: uv sync --locked --dev --extra dev --python 3.12
+      - name: Cache pinned models
+        uses: actions/cache@v4
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
       # The corpus is a gate, not a metric dump: a case that loses text, pages,
       # a table, or images fails the build instead of being reported as a pass.
       - name: Compare the corpus against per-case expectations
@@ -79,23 +104,31 @@ jobs:
         os: [ubuntu-22.04, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-      - name: Build required engine resource
+      # cargo only checks that the sidecar file exists; the release workflow builds
+      # and tests the real engine on both systems.
+      - name: Placeholder engine binary for cargo
+        shell: bash
         run: |
-          uv sync --locked --dev --extra dev --python 3.12
-          uv run python packaging/build_sidecar.py
+          mkdir -p src-tauri/binaries
+          case "$RUNNER_OS" in
+            Windows) touch src-tauri/binaries/openlargeprint-sidecar-x86_64-pc-windows-msvc.exe ;;
+            *) touch src-tauri/binaries/openlargeprint-sidecar-x86_64-unknown-linux-gnu ;;
+          esac
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - name: Install Linux desktop libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Cargo check
         run: cargo check
         working-directory: src-tauri
       - name: Cargo clippy
         run: cargo clippy -- -D warnings
+        working-directory: src-tauri
+      - name: Cargo test
+        run: cargo test
         working-directory: src-tauri
 
   sbom-validation:
@@ -127,6 +160,13 @@ jobs:
         run: uv python install 3.12
       - name: Install dependencies
         run: uv sync --locked --dev --extra dev --python 3.12
+      - name: Cache pinned models
+        uses: actions/cache@v4
+        with:
+          path: src/openlargeprint/models/weights
+          key: models-${{ hashFiles('src/openlargeprint/models/manifest.py') }}
+      - name: Fetch pinned models (verified by SHA-256)
+        run: uv run python scripts/fetch_models.py
       - name: Verify standard conversion emits zero network traffic
         run: uv run pytest tests/test_security_hardening.py::test_offline_conversion_network_isolation -v
 
@@ -145,4 +185,7 @@ jobs:
         working-directory: ui
       - name: Run component tests
         run: npm test -- --run
+        working-directory: ui
+      - name: Type-check
+        run: npx tsc --noEmit
         working-directory: ui

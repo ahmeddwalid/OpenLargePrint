@@ -1,11 +1,9 @@
 """Tests for PDF page classifier (PDF-001, PDF-007)."""
 
-import io
 from pathlib import Path
 from PIL import Image
 import pikepdf
 import pypdfium2 as pdfium
-import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 

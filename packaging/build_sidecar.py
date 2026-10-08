@@ -8,6 +8,7 @@ following Tauri 2 external-binary naming conventions:
 """
 
 import os
+from sidecar_freshness import record_build, fingerprint
 import importlib.util
 import platform
 import shutil
@@ -37,8 +38,28 @@ def get_target_triple() -> str:
     return f"{machine}-unknown-{system}"
 
 
+def require_models(repo_root: Path) -> None:
+    """The installer carries every pinned model; a build without them must not ship (PKG-002)."""
+    sys.path.insert(0, str(repo_root / "src"))
+    from openlargeprint.models.manager import ModelManager
+    from openlargeprint.models.manifest import PINNED_MODELS
+
+    manager = ModelManager()
+    missing = []
+    for key in PINNED_MODELS.models:
+        try:
+            manager.get_model_path(key, verify=True)
+        except Exception as error:
+            missing.append(f"{key} ({type(error).__name__})")
+    if missing:
+        raise RuntimeError("Models missing or damaged: " + ", ".join(missing)
+                           + ". Run: python scripts/fetch_models.py")
+
+
 def build_sidecar() -> Path:
     repo_root = Path(__file__).resolve().parent.parent
+    require_models(repo_root)
+    source_fingerprint = fingerprint(repo_root)
     dist_dir = repo_root / "packaging" / "dist"
     tauri_bin_dir = repo_root / "src-tauri" / "binaries"
     tauri_bin_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +90,7 @@ def build_sidecar() -> Path:
             "-m",
             "PyInstaller",
             "--clean",
+            "--noconfirm",
             "--distpath",
             str(dist_dir),
             "--workpath",
@@ -81,6 +103,7 @@ def build_sidecar() -> Path:
             "-m",
             "PyInstaller",
             "--clean",
+            "--noconfirm",
             "--noupx",
             bundle_flag,
             "--name",
@@ -97,7 +120,7 @@ def build_sidecar() -> Path:
             "--collect-all",
             "pikepdf",
             "--collect-all",
-            "rapidocr_onnxruntime",
+            "onnxruntime",
             "--collect-all",
             "openlargeprint",
             "--collect-all",
@@ -139,6 +162,9 @@ def build_sidecar() -> Path:
         ]
 
     try:
+        if not (spec_file.exists() and "--reuse-spec" in sys.argv):
+            cmd[-1:-1] = ["--additional-hooks-dir", str(repo_root / "packaging" / "hooks"),
+                          "--hidden-import", "rapidocr", "--hidden-import", "rapid_layout"]
         # Check if PyInstaller is installed
         if importlib.util.find_spec("PyInstaller") is None:
             raise ImportError("PyInstaller is unavailable")
@@ -151,19 +177,36 @@ def build_sidecar() -> Path:
             if not built_binary.is_file():
                 raise RuntimeError("The sidecar build did not produce its expected executable.")
             engine_dest = tauri_bin_dir / "engine"
+            if not engine_dest.resolve().is_relative_to(tauri_bin_dir.resolve()):
+                raise RuntimeError("Engine build directory escapes the binaries directory.")
             if engine_dest.exists():
                 shutil.rmtree(engine_dest)
             shutil.copytree(built_dir, engine_dest)
+            # The canonical externalBin must run by itself during development and
+            # packaging health checks, with native libraries beside the executable.
+            runtime_dest = tauri_bin_dir / "_internal"
+            if not runtime_dest.resolve().is_relative_to(tauri_bin_dir.resolve()):
+                raise RuntimeError("Runtime build directory escapes the binaries directory.")
+            if runtime_dest.exists():
+                shutil.rmtree(runtime_dest)
+            shutil.copytree(engine_dest / "_internal", runtime_dest)
             if built_binary.exists():
                 shutil.copy2(built_binary, final_binary_path)
             print(f"Successfully packaged onedir engine to: {engine_dest} and binary to {final_binary_path}")
+            if fingerprint(repo_root) != source_fingerprint:
+                raise RuntimeError("Processing sources changed during the build; rebuild the sidecar.")
+            record_build(repo_root, final_binary_path)
             return final_binary_path
         else:
             built_binary = dist_dir / f"openlargeprint-sidecar-{target_triple}{ext}"
-            if built_binary.exists():
-                shutil.copy2(built_binary, final_binary_path)
-                print(f"Successfully packaged and copied sidecar to: {final_binary_path}")
-                return final_binary_path
+            if not built_binary.is_file():
+                raise RuntimeError("The sidecar build did not produce its expected executable.")
+            shutil.copy2(built_binary, final_binary_path)
+            print(f"Successfully packaged and copied sidecar to: {final_binary_path}")
+            if fingerprint(repo_root) != source_fingerprint:
+                raise RuntimeError("Processing sources changed during the build; rebuild the sidecar.")
+            record_build(repo_root, final_binary_path)
+            return final_binary_path
     except ImportError as error:
         raise RuntimeError("PyInstaller is required to build a standalone release sidecar. Run uv sync --dev first.") from error
     raise RuntimeError("The sidecar build did not produce its expected executable.")

@@ -4,10 +4,8 @@ import io
 import json
 from pathlib import Path
 import pypdfium2 as pdfium
-import pytest
 
 from openlargeprint.sidecar.protocol import (
-    CommandType,
     EventType,
 )
 from openlargeprint.sidecar.runner import SidecarRunner
@@ -42,6 +40,19 @@ def test_sidecar_health_check():
     assert event["type"] == EventType.HEALTH.value
     assert event["status"] == "ready"
     assert event["ocr_available"] is True
+
+
+def test_failed_recognition_health_never_reports_ready(monkeypatch):
+    from openlargeprint.ocr.paddle_engine import PaddleRapidOcrEngine
+    def fail(self):
+        raise RuntimeError("Unusable recognition installation")
+    monkeypatch.setattr(PaddleRapidOcrEngine, "_get_engine", fail)
+    output = io.StringIO()
+    runner = SidecarRunner(in_stream=io.StringIO('{"command": "health"}\n'), out_stream=output)
+    runner.run_loop()
+    event = json.loads(output.getvalue())
+    assert event["status"] != "ready"
+    assert event["ocr_available"] is False
 
 
 def test_sidecar_inspect_pdf(tmp_path: Path):
@@ -118,7 +129,9 @@ def test_sidecar_convert_with_progress_and_checkpoint(tmp_path: Path):
     progress_events = [ev for ev in out_lines if ev["type"] == EventType.PROGRESS.value]
     assert len(progress_events) >= 1
     p_ev = progress_events[0]
-    assert "Importing Word document" in p_ev["message"] or "Extracting" in p_ev["message"]
+    assert p_ev["stage"] == "preparing"
+    assert all(ev["percent"] < 100 for ev in progress_events)
+    assert progress_events[-1]["stage"] == "exporting"
 
     # Check SuccessEvent
     success_ev = [ev for ev in out_lines if ev["type"] == EventType.SUCCESS.value][0]

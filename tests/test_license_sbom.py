@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-import pytest
 
 
 def test_sbom_inventory_completeness():
@@ -43,7 +42,10 @@ def test_sbom_inventory_completeness():
         "pypdfium2",
         "pikepdf",
         "python-docx",
-        "rapidocr-onnxruntime",
+        "rapidocr",
+        "rapid-layout",
+        "onnxruntime",
+        "Atkinson Hyperlegible",
         "reportlab",
         "arabic-reshaper",
         "python-pptx",

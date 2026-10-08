@@ -1,6 +1,5 @@
 """Unit tests for table layout evaluation, fitting, splitting, and linearization (TBL-001, TBL-002, FN-002)."""
 
-import pytest
 from openlargeprint.ir.models import TableCell, TableStructure
 from openlargeprint.layout.table import (
     TableTier,
@@ -119,7 +118,9 @@ def test_evaluate_table_fit_tier3_linearize():
     assert "Jurisdiction: England & Wales" in eval_res.linearized_text
     # TBL-002: Must include visible warning, never silent
     assert eval_res.warning is not None
-    assert "TBL-001" in eval_res.warning or "TBL-002" in eval_res.warning
+    # Readers see plain language, never requirement IDs (UI-005).
+    assert "TBL-" not in eval_res.warning
+    assert "listed on its own" in eval_res.warning
 
 
 def test_split_table_by_columns():

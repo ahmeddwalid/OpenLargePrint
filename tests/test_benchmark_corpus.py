@@ -1,15 +1,12 @@
 """Tests for evaluation metrics and rights-safe benchmark corpus runner (QA-001..003, PERF-002)."""
 
 from pathlib import Path
-import pytest
 
 from openlargeprint.qa import (
     BenchmarkCorpusBuilder,
     BenchmarkReport,
     BenchmarkRunner,
     calculate_cer,
-    calculate_image_retention,
-    calculate_page_anchor_fidelity,
     calculate_reading_order_accuracy,
     calculate_table_structural_score,
     calculate_wer,

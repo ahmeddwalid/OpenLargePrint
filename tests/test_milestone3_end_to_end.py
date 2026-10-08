@@ -82,8 +82,8 @@ def test_milestone3_multiformat_and_selective_export(tmp_path: Path):
     assert out_reader.exists()
 
     reader_content = out_reader.read_text(encoding="utf-8")
-    assert "OpenLargePrint Reader" in reader_content
-    assert "btn-size-inc" in reader_content
+    assert 'aria-label="Reading settings"' in reader_content
+    assert 'id="larger"' in reader_content
     assert "Chapter 1: The Rule of Law" in reader_content
 
     # 4. Selective Page Range Export: Export ONLY Page 2 (OUT-010)

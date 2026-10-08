@@ -4,6 +4,79 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-08
+
+This release rebuilds how PDFs are read. Pages keep their pictures, tables,
+exercises and footnotes, and the result reads like a book rather than a list of
+lines.
+
+### Added
+
+- Layout analysis with PP-DocLayoutV2, bundled with the app. It finds titles,
+  paragraphs, lists, tables, pictures, captions, footnotes and page headers, and
+  the order to read them in, including two-column pages.
+- Scanned pages are read with PP-OCRv6 (Latin script) and PP-OCRv5 (Arabic),
+  bundled with the app. There is no separate accuracy pack to install.
+- Exercises keep their answer lines as blanks to write on, and underlined words
+  stay underlined.
+- Tables are rebuilt from their ruling lines or from the white space between
+  columns. Tables too wide for large print are split into parts or listed row
+  by row, with a note saying so. Table captions are kept.
+- Numbered items, lettered sub-items and dialogues (A: / B:) keep their own
+  numbers and letters with hanging indents. Bold, italic and underlined words
+  inside sentences keep their emphasis.
+- Running heads and page numbers move out of the text. The printed page number
+  is shown next to each "Original page" marker.
+- Words printed inside pictures (signs, labels, speech bubbles) are listed under
+  the picture.
+- Word output uses real Heading, List, Quote, Caption and Footnote styles, so
+  Word's navigation pane and table of contents work, and embeds the reading
+  font so the document looks the same on any computer.
+- The Reader page (HTML) embeds its fonts and has controls for text size, line
+  spacing, colours, line length and printing.
+- Linux packages: AppImage, RPM and DEB.
+
+### Changed
+
+- The home screen has three steps: choose a document, choose a text size, then
+  choose format and paper and convert. The large-print copy is saved next to
+  the original as "Name - large print.pdf". The last choices are remembered.
+- Colours, language and updates moved to a Settings button. The recognition
+  mode menu and the page artwork option were removed; the searchable copy of
+  the original is under More options.
+- The reading font is Atkinson Hyperlegible in every output, with DejaVu Sans
+  for symbols and Noto Sans Arabic for Arabic.
+- Windows releases are not code-signed for now (see the README).
+
+### Fixed
+
+- Text hidden under a scanned picture (an old OCR layer) is no longer trusted;
+  the page is recognised again.
+- Ligatures (fi, fl, ffi), letter-spaced headings and symbol-font bullets and
+  checkboxes are read correctly.
+- Without the layout model, pictures and ruled tables were dropped; they are now
+  kept, and columns are read in order.
+- Word files are written with their XML in the order Word requires, so Word no
+  longer offers to repair them. Arabic text in Word is the same size as Latin
+  text.
+- A page that cannot be converted is shown as the original page image with a
+  note, and the rest of the book is converted.
+- Pages shown sideways (a landscape table printed in a portrait book, or a
+  rotated page) are read in the direction their text runs instead of coming out
+  as single letters.
+- Arabic paragraphs in the large-print PDF print their lines in reading order,
+  with brackets facing the right way.
+- A file name no longer decides the recognition language: a weak reading is
+  compared with the other script's recogniser, so English scans in a file with
+  an Arabic name (and the reverse) are read correctly.
+- Headings drawn as outlines, and tables pasted in as pictures, are kept.
+- The first start of the conversion engine may take longer than 15 seconds on
+  slow disks; the app now waits for it instead of reporting an error.
+
+### Removed
+
+- The optional English accuracy pack and its scripts.
+
 ## [0.5.0] - 2026-09-27
 
 ### Added

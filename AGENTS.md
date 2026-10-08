@@ -1,14 +1,33 @@
-# OpenLargePrint — AGENTS.md
+# OpenLargePrint — working rules (AGENTS.md)
 
-Status: Draft v0.1
-Audience: **any** AI coding agent working in this repository, regardless of vendor or harness.
-Precedence: `SPEC.md` defines what must be true; `DESIGN.md` defines how the system is structured; this file defines how an agent must behave while making changes. If an instruction here ever conflicts with `SPEC.md` or `DESIGN.md`, stop and flag the conflict rather than guessing.
+Audience: everyone who changes this repository, people and coding tools alike.
+Precedence: `SPEC.md` defines what must be true; `DESIGN.md` defines how the system is structured; this file defines how changes are made. If an instruction here ever conflicts with `SPEC.md` or `DESIGN.md`, stop and flag the conflict rather than guessing.
 
 ---
 
+## 0. Rules that are never broken
+
+These exist because a wrong shortcut has real consequences for a reader who depends on the output being accurate (a law text) and usable (low vision). If a task seems to need bending one, stop and say so instead of working around it.
+
+- Never recognise (OCR) text that already has usable native text. Check the page classification first.
+- Never pass recognised text through a generative model to "clean it up". Uncertainty stays visible and traceable.
+- Never let an importer or exporter bypass `DocumentIR`, even for one format.
+- Never drop a page or section on failure. Flag it, keep the original page, convert the rest.
+- Never lose a block's source page and bounding box. Merged blocks carry the union.
+- Never expose a general shell or unrestricted filesystem bridge to the webview. Tauri commands stay narrow and typed.
+- Never add a network call to the conversion path. A conversion makes zero network requests.
+- Never shrink primary controls or crowd the three-step home screen. Extra settings go under "More options".
+- Never call a platform supported because the framework runs there. The packaged app must be built and tested on it.
+- Never add a dependency or model without checking and recording its license (code and weights separately).
+- Never let PDF quality slip for DOCX/PPTX polish. PDF is how the reader's books arrive.
+- Never call a screen finished without checking it against §7.
+- Never treat paper size as an afterthought. A4 is the default; A3 is a first-class choice for the whole book or a selection.
+
+Working style: name the `SPEC.md` requirement IDs a change addresses; prefer the smallest change that satisfies them; and when a structural decision changes (schema, IPC protocol, engine routing, security boundary), update `DESIGN.md` in the same change.
+
 ## 1. Before you start any task
 
-1. Read `SPEC.md` and `DESIGN.md` in full at the start of a session, not just the section that seems relevant — the non-negotiable principles in `SPEC.md §2` apply everywhere.
+1. Read `SPEC.md` and `DESIGN.md` in full before starting, not just the section that seems relevant — the non-negotiable principles in `SPEC.md §2` apply everywhere.
 2. Identify which requirement ID(s) (e.g. `PDF-002`, `OCR-006`, `A11Y-003`, `SEC-009`) your change touches. Reference them in your commit message and PR description.
 3. If a task seems to require violating a principle in `SPEC.md §2` or a security requirement in `SPEC.md §4.12`, stop and raise it instead of proceeding.
 
@@ -38,7 +57,7 @@ Every change must be validated against the layer(s) it touches:
 - A dependency that requires a GPU with a non-trivial VRAM floor, or whose recommended path is cloud/Docker-only, may be added as an optional benchmark/comparison engine but must not become a default requirement (`PERF-001`, `OCR-006`).
 - A dependency with commercial-use thresholds (revenue/MAU caps) or attribution requirements beyond a permissive open license requires an explicit, recorded decision before it can enter the default distribution (`LIC-002`) — do not add it silently because it tested well.
 - When in doubt about a license, do not merge the dependency; flag it for review instead of assuming public availability or "it's just for research" makes it fine.
-- See `DESIGN.md §4.1` for the currently chosen default stack (PaddleOCR PP-OCRv6/PP-StructureV3, optional PaddleOCR-VL-1.6, Docling, pypdfium2, pikepdf, OCRmyPDF, LibreOffice) and for named candidates (olmOCR, Surya, MinerU) that are intentionally excluded from the default distribution today. Don't reintroduce an excluded candidate without a fresh `LIC-002` review — FOSS OCR licensing and capability shifts over time, so re-check rather than assuming the old exclusion still holds or still doesn't.
+- See `DESIGN.md §4` for the shipped stack (PP-DocLayoutV2, PP-OCRv6 and PP-OCRv5 Arabic through RapidOCR and ONNX Runtime, pypdfium2, pikepdf, LibreOffice for legacy formats). olmOCR, Surya and MinerU are intentionally excluded from the default distribution (`sbom.json` records why). Don't reintroduce an excluded candidate without a fresh `LIC-002` review — FOSS OCR licensing and capability shifts over time, so re-check rather than assuming the old exclusion still holds or still doesn't.
 
 ## 5. Security review checklist
 
@@ -146,7 +165,7 @@ This is a desktop tool, not a marketing site, so some items above (hero patterns
 
 ## 8. Document-integrity rules
 
-These follow directly from `SPEC.md §2` and are restated here because they are the easiest rules for an agent to accidentally violate while "helpfully" improving something:
+These follow directly from `SPEC.md §2` and are restated here because they are the easiest rules to break by accident while "helpfully" improving something:
 
 - Do not OCR a page that already has usable native text.
 - Do not convert every PDF page into a screenshot/raster "for simplicity" — that throws away exact text and defeats the entire project.

@@ -5,7 +5,10 @@ from __future__ import annotations
 import unicodedata
 import arabic_reshaper
 from openlargeprint.ir.models import TextDirection
-from .direction import is_arabic_char, is_rtl_char
+from .direction import is_arabic_char
+
+
+_MIRRORED = {a: b for pair in ("()", "[]", "{}", "<>", "«»", "‹›") for a, b in (pair, pair[::-1])}
 
 
 def _get_char_direction(char: str) -> str:
@@ -20,6 +23,11 @@ def _get_char_direction(char: str) -> str:
     if bidi_type in ("L", "EN"):
         return "LTR"
     return "NEUTRAL"
+
+
+def shape_arabic(text: str) -> str:
+    """Arabic letters in their joined presentation forms (for measuring and painting)."""
+    return arabic_reshaper.reshape(text) if text else text
 
 
 def reorder_bidi_line(line: str, base_direction: TextDirection = TextDirection.RTL) -> str:
@@ -81,7 +89,9 @@ def reorder_bidi_line(line: str, base_direction: TextDirection = TextDirection.R
     formatted_runs: list[str] = []
     for content, r_dir in merged_runs:
         if r_dir == "RTL":
-            formatted_runs.append(content[::-1])
+            # Paired punctuation shown inside right-to-left text uses its mirrored glyph
+            # (UAX #9 rule L4), so "(المادة)" keeps its brackets facing the right way.
+            formatted_runs.append("".join(_MIRRORED.get(c, c) for c in reversed(content)))
         else:
             formatted_runs.append(content)
 

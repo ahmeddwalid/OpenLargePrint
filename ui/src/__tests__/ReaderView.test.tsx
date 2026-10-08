@@ -65,7 +65,7 @@ describe('ReaderView', () => {
     expect(screen.getByRole('img', { name: /diagram/i })).toBeInTheDocument();
     expect(screen.getByText('First item')).toBeInTheDocument();
     expect(screen.getByText('A footnote.')).toBeInTheDocument();
-    expect(screen.getByText(/Original Page 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Original page 1/i)).toBeInTheDocument();
   });
 
   it('exposes a reading-width control (DESIGN.md §8)', () => {
@@ -181,5 +181,39 @@ describe('ReaderView', () => {
 
     const ttsBtn = screen.getByRole('button', { name: /read aloud/i });
     expect(ttsBtn).toBeInTheDocument();
+  });
+
+  it('renders source markers, emphasis, blanks, notes and picture text like the exports (IR 1.1)', () => {
+    const ir: DocumentIR = {
+      schema_version: '1.1.0',
+      source_file: 'book.pdf',
+      source_mime: 'application/pdf',
+      page_count: 1,
+      pages: [{ page_number: 1, printed_page: '41' }],
+      blocks: [
+        { id: 'm', block_type: 'page_marker', source_page: 1 },
+        { id: 'l', block_type: 'list_item', text: '1 She went ______ school.', list_marker: '1', source_page: 1,
+          styles: [{ start: 2, end: 5, bold: true }] },
+        { id: 'd', block_type: 'list_item', text: 'A: Hello there', list_marker: 'A:', role: 'dialogue', source_page: 1 },
+        { id: 'a', block_type: 'aside', text: 'Remember the rule.', source_page: 1 },
+        { id: 'c', block_type: 'caption', text: 'EXIT', role: 'figure_text', source_page: 1 },
+        { id: 'p', block_type: 'paragraph', text: 'Hard to read.', source_page: 1,
+          warnings: ['Some words here were hard to read. Compare with the original page.'] },
+      ],
+    };
+    const { container } = render(
+      <ReaderView documentIR={ir} initialSize={20} currentTheme="light"
+        onThemeChange={vi.fn()} onBack={vi.fn()} onExport={vi.fn()} />
+    );
+    expect(screen.getByText('Original page 1 (printed 41)')).toBeInTheDocument();
+    // The source's own number is the marker: no extra bullet is added.
+    expect(container.querySelector('#l .reader-item-marker')?.textContent).toBe('1');
+    expect(container.textContent).not.toContain('•');
+    expect(container.querySelector('#l strong')?.textContent).toBe('She');
+    expect(screen.getAllByRole('img', { name: 'blank' })).toHaveLength(1);
+    expect(container.querySelector('#d')).toHaveClass('dialogue');
+    expect(container.querySelector('#a')).toHaveClass('reader-aside');
+    expect(screen.getByText('In the picture:')).toBeInTheDocument();
+    expect(screen.getByText(/compare with the original page/i)).toBeInTheDocument();
   });
 });

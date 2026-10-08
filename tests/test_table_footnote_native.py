@@ -1,13 +1,14 @@
 """Tests for native PDF Table, Footnote, and Caption extraction (TBL-001, FN-001, FN-002)."""
 
 from pathlib import Path
-import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 from openlargeprint.importers.pdf.native import NativePdfImporter
 from openlargeprint.ir.models import BlockType
 from openlargeprint.security.isolation import JobWorkspace
+
+from conftest import requires_layout_model
 
 
 def create_native_table_footnote_pdf(pdf_path: Path):
@@ -58,6 +59,7 @@ def create_native_table_footnote_pdf(pdf_path: Path):
     c.save()
 
 
+@requires_layout_model
 def test_native_table_and_footnote_extraction(tmp_path: Path):
     """Verify that NativePdfImporter extracts TableStructure, Footnotes, and Captions accurately."""
     pdf_path = tmp_path / "table_footnote.pdf"

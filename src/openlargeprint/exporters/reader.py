@@ -1,592 +1,305 @@
-"""Semantic HTML Reader exporter with instant client-side restyling (OUT-002, A11Y-001..004)."""
+"""Self-contained large-print Reader page (OUT-002, A11Y-001..005).
+
+One HTML file with the text, the pictures and the reading font inside it, so it
+opens the same way on any computer, offline. Text size, line spacing and
+colours change instantly in the page itself (OUT-002).
+"""
 
 from __future__ import annotations
 
 import base64
 import html
+from collections import Counter
 from pathlib import Path
-import re
-from typing import Optional
+from typing import List, Optional
 
 from openlargeprint.ir.models import Block, BlockType, DocumentIR, TextDirection
+from openlargeprint.layout.table import evaluate_table_fit, iter_visible_cells, TableTier
 from openlargeprint.security.isolation import log_safe_info
 from .base import BaseExporter, ExportOptions
-from .fonts import css_font_stack
+from .common import (
+    BLANK_TOKEN,
+    PRINT_REMINDER,
+    caption_label,
+    has_original_crop,
+    is_retained_page,
+    page_label,
+    pages_by_number,
+    reader_note,
+    split_marker,
+    styled_segments,
+    table_as_entries,
+)
+from .fonts import bundled_font_dir
+
+
+def _data_url(path: str, mime: str) -> Optional[str]:
+    file = Path(path)
+    if not file.is_file():
+        return None
+    return f"data:{mime};base64,{base64.b64encode(file.read_bytes()).decode('ascii')}"
+
+
+def _font_faces(arabic: bool = False) -> str:
+    faces = []
+    if arabic:
+        # Only books with Arabic text carry the Arabic font, so others stay small.
+        url = _data_url(str(bundled_font_dir() / "NotoSansArabic.ttf"), "font/ttf")
+        if url:
+            faces.append(f'@font-face {{ font-family: "Noto Sans Arabic"; font-weight: 100 900; '
+                         f'src: url("{url}") format("truetype"); }}')
+    for weight, style, name in (("400", "normal", "Regular"), ("700", "normal", "Bold"),
+                                ("400", "italic", "Italic"), ("700", "italic", "BoldItalic")):
+        url = _data_url(str(bundled_font_dir() / f"AtkinsonHyperlegible-{name}.ttf"), "font/ttf")
+        if url:
+            faces.append(f'@font-face {{ font-family: "Atkinson Hyperlegible"; font-weight: {weight}; '
+                         f'font-style: {style}; src: url("{url}") format("truetype"); }}')
+    return "\n".join(faces)
+
+
+STYLE = """
+:root { --size: %(size)spt; --spacing: %(spacing)s; --width: 38em;
+  --paper: #fbfaf6; --ink: #1b1a17; --muted: #55524a; --line: #b9b3a3; --shade: #ece8dc; --focus: #3d5a2b; }
+:root[data-theme="sepia"] { --paper: #f4ecd8; --ink: #2b2318; --muted: #5d5241; --line: #b8a88a; --shade: #e8dcc0; }
+:root[data-theme="dark"] { --paper: #121210; --ink: #f2f0e8; --muted: #b9b4a6; --line: #55524a; --shade: #262521; --focus: #b8cf9a; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink);
+  font-family: "Atkinson Hyperlegible", "DejaVu Sans", "Segoe UI", Arial, sans-serif;
+  font-size: var(--size); line-height: var(--spacing); }
+[dir="rtl"] { font-family: "Noto Sans Arabic", "Segoe UI", "Arial", sans-serif; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.bar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+  padding: 10px 16px; background: var(--shade); border-bottom: 1px solid var(--line); font-size: 17px; line-height: 1.3; }
+.bar .group { display: flex; align-items: center; gap: 6px; }
+.bar button { min-width: 48px; min-height: 48px; padding: 0 14px; font: inherit; font-weight: 700; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.bar button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.bar .label { color: var(--muted); }
+main { max-width: var(--width); margin: 0 auto; padding: 1.2em 1em 4em; }
+h1 { font-size: 1.55em; line-height: 1.25; margin: 1.2em 0 .4em; }
+h2 { font-size: 1.3em; line-height: 1.25; margin: 1.1em 0 .35em; }
+h3 { font-size: 1.1em; line-height: 1.3; margin: 1em 0 .3em; }
+p { margin: 0 0 .6em; }
+.item { display: grid; grid-template-columns: max-content 1fr; column-gap: .55em; margin: 0 0 .35em; }
+.item .marker { min-width: 1.2em; }
+.item.dialogue .marker { font-weight: 700; }
+.indent-1 { margin-inline-start: 1.7em; } .indent-2 { margin-inline-start: 3.4em; } .indent-3 { margin-inline-start: 5.1em; }
+.blank { display: inline-block; min-width: 5em; border-bottom: 2px solid currentColor; height: 1em; vertical-align: -0.15em; }
+.page { margin: 2em 0 1em; padding-top: .4em; border-top: 1px solid var(--line); color: var(--muted);
+  font-size: max(12pt, .65em); font-weight: 700; }
+figure { margin: 1em 0; text-align: center; }
+figure img { max-width: 100%%; height: auto; }
+.caption, figcaption { color: var(--muted); font-style: italic; margin: .2em 0 .8em; }
+.caption .label { font-weight: 700; }
+.note { color: var(--muted); font-style: italic; font-size: max(14pt, .82em); margin: 0 0 .6em; }
+blockquote { margin: 0 0 .8em 1.4em; font-style: italic; }
+.aside { border: 1px solid var(--line); border-radius: 4px; padding: .5em .7em; margin: 0 0 .8em; }
+.footnote { font-size: max(14pt, .82em); border-top: 1px solid var(--line); padding-top: .3em; margin-top: 1em; }
+table { border-collapse: collapse; width: 100%%; margin: .6em 0 1.2em; font-size: max(14pt, .88em); }
+th, td { border: 1px solid var(--line); padding: .35em .5em; vertical-align: top; text-align: start; }
+th { background: var(--shade); }
+table caption { caption-side: top; text-align: start; color: var(--muted); font-style: italic; padding-bottom: .3em; }
+.entry .lead { font-weight: 700; margin: .4em 0 .1em; }
+.entry .detail { margin: 0 0 .2em 1.4em; }
+@media print { .bar { display: none; } body { background: #fff; color: #000; } main { max-width: none; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+"""
+
+SCRIPT = """
+(function () {
+  var root = document.documentElement, size = %(size)s, label = document.getElementById("size");
+  function setSize(value) { size = Math.max(12, Math.min(48, value)); root.style.setProperty("--size", size + "pt");
+    label.textContent = size + " pt"; }
+  document.getElementById("smaller").onclick = function () { setSize(size - 2); };
+  document.getElementById("larger").onclick = function () { setSize(size + 2); };
+  document.querySelectorAll("[data-spacing]").forEach(function (b) { b.onclick = function () {
+    root.style.setProperty("--spacing", b.dataset.spacing);
+    document.querySelectorAll("[data-spacing]").forEach(function (o) { o.setAttribute("aria-pressed", o === b); }); }; });
+  document.querySelectorAll("[data-theme-choice]").forEach(function (b) { b.onclick = function () {
+    root.setAttribute("data-theme", b.dataset.themeChoice);
+    document.querySelectorAll("[data-theme-choice]").forEach(function (o) { o.setAttribute("aria-pressed", o === b); }); }; });
+  document.querySelectorAll("[data-width]").forEach(function (b) { b.onclick = function () {
+    root.style.setProperty("--width", b.dataset.width);
+    document.querySelectorAll("[data-width]").forEach(function (o) { o.setAttribute("aria-pressed", o === b); }); }; });
+  document.getElementById("print").onclick = function () { window.print(); };
+})();
+"""
 
 
 class ReaderExporter(BaseExporter):
-    """Renders DocumentIR into an accessible, self-contained semantic HTML5 Reader."""
+    """Renders DocumentIR into a single accessible HTML file."""
 
     def export(self, doc: DocumentIR, output_path: Path, options: Optional[ExportOptions] = None) -> Path:
-        """Render DocumentIR into an interactive, accessible HTML reader file."""
-        if options is None:
-            options = ExportOptions()
-
+        options = options or ExportOptions()
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        log_safe_info(f"Generating Semantic HTML Reader -> {output_path.name}")
-
-        html_content = self._build_reader_html(doc, options)
-        output_path.write_text(html_content, encoding="utf-8")
-
-        log_safe_info(f"Semantic HTML Reader saved: {output_path.name}")
+        log_safe_info(f"Writing Reader page at {options.body_pt}pt")
+        output_path.write_text(self.render(doc, options), encoding="utf-8")
         return output_path
 
-    def _build_reader_html(self, doc: DocumentIR, options: ExportOptions) -> str:
-        """Construct the complete standalone HTML document."""
-        title = html.escape(doc.metadata.title or "OpenLargePrint Document")
-        body_blocks_html = []
-        toc_items_html = []
-
+    def render(self, doc: DocumentIR, options: ExportOptions) -> str:
+        self._options = options
+        self._pages = pages_by_number(doc)
+        title = html.escape(doc.metadata.title or "Large print")
+        languages = Counter(b.language for b in doc.blocks if b.text and b.language)
+        lang = languages.most_common(1)[0][0] if languages else "en"
+        arabic = any(b.text_direction == TextDirection.RTL for b in doc.blocks)
+        body: List[str] = [f"<h1>{title}</h1>", f'<p class="note">{html.escape(PRINT_REMINDER)}</p>']
         for block in doc.blocks:
-            b_html, toc_item = self._render_block(block, options)
-            if b_html:
-                body_blocks_html.append(b_html)
-            if toc_item:
-                toc_items_html.append(toc_item)
-
-        content_html = "\n".join(body_blocks_html)
-        toc_html = "\n".join(toc_items_html)
-
+            body.append(self._block(block))
+        spacing = options.line_spacing
+        spacing_buttons = "".join(
+            f'<button type="button" data-spacing="{v}" aria-pressed="{str(abs(v - spacing) < 0.01).lower()}">{v:g}</button>'
+            for v in (1.3, 1.5, 1.8))
         return f"""<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="{html.escape(lang)}" data-theme="light">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title} — OpenLargePrint Reader</title>
-  <style>
-    :root {{
-      --base-font-size: {options.body_pt:g}pt;
-      --line-height: {options.line_spacing};
-      --reading-width: 85ch;
-      --reading-font-family: {css_font_stack(options.font_family, options.fallback_font)};
-      --reading-font-arabic: "Amiri", "Scheherazade New", "Traditional Arabic", "Noto Sans Arabic", "Geeza Pro", "Arial", sans-serif;
-      --bg-color: #faf8f5;
-      --surface-color: #f1ede4;
-      --text-color: #1c1b18;
-      --heading-color: #0d0d0d;
-      --muted-color: #655d50;
-      --border-color: #cbbe9f;
-      --focus-outline: #485a34;
-      --button-bg: #e9e5d8;
-      --button-hover: #dddcca;
-    }}
-
-    [data-theme="dark"] {{
-      --bg-color: #161614;
-      --surface-color: #22221f;
-      --text-color: #f5f4ef;
-      --heading-color: #ffffff;
-      --muted-color: #9e9a8f;
-      --border-color: #47453e;
-      --focus-outline: #bccba0;
-      --button-bg: #2d2d29;
-      --button-hover: #47453e;
-    }}
-
-    [data-theme="sepia"] {{
-      --bg-color: #f3efdf;
-      --surface-color: #e9e5d8;
-      --text-color: #2d261e;
-      --heading-color: #1f1812;
-      --muted-color: #655d50;
-      --border-color: #cbbe9f;
-      --focus-outline: #485a34;
-      --button-bg: #dddcca;
-      --button-hover: #cbbe9f;
-    }}
-
-    * {{
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }}
-
-    body {{
-      font-family: var(--reading-font-family);
-      background-color: var(--bg-color);
-      color: var(--text-color);
-      line-height: var(--line-height);
-      font-size: var(--base-font-size);
-      transition: background-color 0.15s ease, color 0.15s ease;
-    }}
-
-    /* RTL / Arabic support (LANG-001, LANG-002) */
-    [dir="rtl"], .rtl {{
-      direction: rtl;
-      text-align: right;
-      font-family: var(--reading-font-arabic), var(--reading-font-family);
-    }}
-
-    /* Accessible focus state (A11Y-003) */
-    :focus-visible {{
-      outline: 3px solid var(--focus-outline);
-      outline-offset: 2px;
-    }}
-
-    /* Toolbar meeting A11Y-001 touch target standards (min 44px) */
-    .reader-toolbar {{
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background-color: var(--surface-color);
-      border-bottom: 2px solid var(--border-color);
-      padding: 10px 20px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }}
-
-    .toolbar-group {{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }}
-
-    .toolbar-btn {{
-      min-width: 44px;
-      min-height: 44px;
-      padding: 8px 14px;
-      font-size: 16px;
-      font-weight: 600;
-      background-color: var(--button-bg);
-      color: var(--text-color);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      user-select: none;
-    }}
-
-    .toolbar-btn:hover {{
-      background-color: var(--button-hover);
-    }}
-
-    .size-indicator {{
-      min-width: 44px;
-      text-align: center;
-      font-weight: bold;
-      font-size: 16px;
-    }}
-
-    /* Layout structure */
-    .reader-container {{
-      display: flex;
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 20px;
-      gap: 30px;
-    }}
-
-    .reader-toc {{
-      width: 280px;
-      flex-shrink: 0;
-      background-color: var(--surface-color);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px;
-      max-height: calc(100vh - 120px);
-      position: sticky;
-      top: 80px;
-      overflow-y: auto;
-    }}
-
-    .reader-toc h2 {{
-      font-size: 18px;
-      margin-bottom: 12px;
-      color: var(--heading-color);
-    }}
-
-    .reader-toc ul {{
-      list-style: none;
-    }}
-
-    .reader-toc li {{
-      margin-bottom: 8px;
-    }}
-
-    .reader-toc a {{
-      color: var(--text-color);
-      text-decoration: none;
-      font-size: 15px;
-      display: block;
-      padding: 6px 8px;
-      border-radius: 4px;
-    }}
-
-    .reader-toc a:hover {{
-      background-color: var(--button-bg);
-    }}
-
-    .reader-main {{
-      flex-grow: 1;
-      max-width: var(--reading-width);
-      margin: 0 auto;
-    }}
-
-    /* Content styling */
-    h1, h2, h3, h4 {{
-      color: var(--heading-color);
-      margin-top: 1.4em;
-      margin-bottom: 0.6em;
-      line-height: 1.25;
-    }}
-
-    h1 {{ font-size: 1.6em; }}
-    h2 {{ font-size: 1.35em; }}
-    h3 {{ font-size: 1.15em; }}
-
-    p {{
-      margin-bottom: 0.8em;
-    }}
-
-    ul, ol {{
-      margin-left: 1.6em;
-      margin-bottom: 0.8em;
-    }}
-
-    li {{
-      margin-bottom: 0.4em;
-    }}
-
-    .list-numbered {{
-      margin-left: 1.6em;
-      text-indent: -1.6em;
-      margin-bottom: 0.4em;
-    }}
-
-    blockquote {{
-      border-left: 4px solid var(--border-color);
-      padding-left: 16px;
-      margin: 1em 0;
-      font-style: italic;
-      color: var(--muted-color);
-    }}
-
-    .page-marker {{
-      margin: 2em 0 1.2em 0;
-      padding: 8px 16px;
-      background-color: var(--button-bg);
-      border: 1px dashed var(--border-color);
-      border-radius: 6px;
-      text-align: center;
-      font-size: 0.8em;
-      font-weight: bold;
-      color: var(--muted-color);
-    }}
-
-    .figure-container {{
-      margin: 1.5em 0;
-      text-align: center;
-    }}
-
-    .figure-container img {{
-      max-width: 100%;
-      height: auto;
-      border-radius: 4px;
-      border: 1px solid var(--border-color);
-    }}
-
-    .figure-caption {{
-      font-size: 0.85em;
-      font-style: italic;
-      color: var(--muted-color);
-      margin-top: 6px;
-    }}
-
-    .footnote-block {{
-      font-size: 0.85em;
-      font-style: italic;
-      color: var(--muted-color);
-      border-top: 1px solid var(--border-color);
-      padding-top: 8px;
-      margin-top: 1.5em;
-    }}
-
-    .caption-block {{
-      font-weight: bold;
-      font-size: 0.9em;
-      color: var(--heading-color);
-      margin: 12px 0 6px 0;
-      text-align: center;
-    }}
-
-    .caption-block.rtl {{
-      text-align: right;
-    }}
-
-    .table-container {{
-      margin: 1.5em 0;
-      overflow-x: auto;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      background-color: var(--surface-color);
-    }}
-
-    .large-print-table {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.9em;
-      text-align: left;
-    }}
-
-    .large-print-table.rtl {{
-      text-align: right;
-    }}
-
-    .large-print-table th, .large-print-table td {{
-      padding: 10px 14px;
-      border: 1px solid var(--border-color);
-      vertical-align: top;
-    }}
-
-    .large-print-table th {{
-      background-color: var(--button-bg);
-      font-weight: bold;
-      color: var(--heading-color);
-    }}
-
-    .large-print-table tr:hover {{
-      background-color: var(--button-bg);
-    }}
-
-    .table-warning {{
-      background-color: #FFF3CD;
-      color: #856404;
-      border: 1px solid #FFEEBA;
-      border-radius: 4px;
-      padding: 8px 12px;
-      margin-bottom: 8px;
-      font-size: 0.85em;
-    }}
-
-    /* Print media styling */
-    @media print {{
-      .reader-toolbar, .reader-toc {{
-        display: none !important;
-      }}
-      body {{
-        background: white !important;
-        color: black !important;
-      }}
-      .reader-main {{
-        max-width: 100% !important;
-      }}
-    }}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+{_font_faces(arabic)}
+{STYLE % {"size": f"{options.body_pt:g}", "spacing": options.line_spacing}}
+</style>
 </head>
 <body>
-  <!-- Header with Accessible Controls (A11Y-001..004) -->
-  <header class="reader-toolbar" role="banner">
-    <div class="toolbar-group">
-      <span style="font-weight: bold; font-size: 17px;">OpenLargePrint</span>
-    </div>
-
-    <!-- Font Size Controls (OUT-002) -->
-    <div class="toolbar-group" aria-label="Text Size Adjustment">
-      <button id="btn-size-dec" class="toolbar-btn" aria-label="Decrease Text Size" title="Smaller text (A-)">A−</button>
-      <span id="current-size-label" class="size-indicator" aria-live="polite">{options.body_pt:g}pt</span>
-      <button id="btn-size-inc" class="toolbar-btn" aria-label="Increase Text Size" title="Larger text (A+)">A+</button>
-    </div>
-
-    <!-- Reading Width Control (DESIGN.md §8) -->
-    <div class="toolbar-group" aria-label="Reading Width">
-      <label for="reading-width-select" style="font-weight: 600;">Width</label>
-      <select id="reading-width-select" class="toolbar-btn" aria-label="Reading width">
-        <option value="55">Narrow</option>
-        <option value="70">Comfortable</option>
-        <option value="85" selected>Wide</option>
-        <option value="110">Full</option>
-      </select>
-    </div>
-
-    <!-- Line Spacing Controls (OUT-002) -->
-    <div class="toolbar-group" aria-label="Line Spacing">
-      <button id="btn-spacing-14" class="toolbar-btn" title="Line Spacing 1.4">1.4</button>
-      <button id="btn-spacing-15" class="toolbar-btn" title="Line Spacing 1.5">1.5</button>
-      <button id="btn-spacing-16" class="toolbar-btn" title="Line Spacing 1.6">1.6</button>
-    </div>
-
-    <!-- Theme Switcher (A11Y-004) -->
-    <div class="toolbar-group" aria-label="Visual Theme">
-      <button id="theme-light" class="toolbar-btn" title="Light Theme">Light</button>
-      <button id="theme-sepia" class="toolbar-btn" title="Warm Sepia Theme">Sepia</button>
-      <button id="theme-dark" class="toolbar-btn" title="High-Contrast Dark Theme">Dark</button>
-    </div>
-
-    <!-- Print / Export Action (OUT-010, OUT-011) -->
-    <div class="toolbar-group" aria-label="Print and Export">
-      <button id="btn-print" class="toolbar-btn" style="background-color: var(--text-color); color: var(--bg-color);" title="Print or Save Selection">Print / Export</button>
-    </div>
-  </header>
-
-  <div class="reader-container">
-    <!-- Table of Contents Sidebar -->
-    <nav class="reader-toc" role="navigation" aria-label="Document Outline">
-      <h2>Contents</h2>
-      <ul>
-        {toc_html}
-      </ul>
-    </nav>
-
-    <!-- Reflowed Semantic Document Content -->
-    <main class="reader-main" role="main">
-      {content_html}
-    </main>
+<div class="bar" role="toolbar" aria-label="Reading settings">
+  <div class="group" role="group" aria-label="Text size"><span class="label">Size</span>
+    <button type="button" id="smaller" aria-label="Smaller text">A&minus;</button>
+    <span id="size" aria-live="polite">{options.body_pt:g} pt</span>
+    <button type="button" id="larger" aria-label="Larger text">A+</button>
   </div>
-
-  <!-- Instant client-side re-styling script (OUT-002, zero network traffic SEC-009) -->
-  <script>
-    let currentSize = {options.body_pt:g};
-    const root = document.documentElement;
-    const sizeLabel = document.getElementById("current-size-label");
-
-    function setFontSize(newSize) {{
-      if (newSize < 14) newSize = 14;
-      if (newSize > 48) newSize = 48;
-      currentSize = newSize;
-      root.style.setProperty("--base-font-size", currentSize + "pt");
-      if (sizeLabel) sizeLabel.textContent = currentSize + "pt";
-    }}
-
-    document.getElementById("btn-size-dec").addEventListener("click", () => setFontSize(currentSize - 2));
-    document.getElementById("btn-size-inc").addEventListener("click", () => setFontSize(currentSize + 2));
-
-    document.getElementById("btn-spacing-14").addEventListener("click", () => root.style.setProperty("--line-height", "1.4"));
-    document.getElementById("btn-spacing-15").addEventListener("click", () => root.style.setProperty("--line-height", "1.5"));
-    document.getElementById("btn-spacing-16").addEventListener("click", () => root.style.setProperty("--line-height", "1.6"));
-
-    const widthSelect = document.getElementById("reading-width-select");
-    if (widthSelect) {{
-      widthSelect.addEventListener("change", () => root.style.setProperty("--reading-width", widthSelect.value + "ch"));
-    }}
-
-    document.getElementById("theme-light").addEventListener("click", () => root.setAttribute("data-theme", "light"));
-    document.getElementById("theme-sepia").addEventListener("click", () => root.setAttribute("data-theme", "sepia"));
-    document.getElementById("theme-dark").addEventListener("click", () => root.setAttribute("data-theme", "dark"));
-
-    document.getElementById("btn-print").addEventListener("click", () => window.print());
-  </script>
+  <div class="group" role="group" aria-label="Line spacing"><span class="label">Spacing</span>{spacing_buttons}</div>
+  <div class="group" role="group" aria-label="Colours">
+    <button type="button" data-theme-choice="light" aria-pressed="true">Light</button>
+    <button type="button" data-theme-choice="sepia" aria-pressed="false">Sepia</button>
+    <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+  </div>
+  <div class="group" role="group" aria-label="Line length"><span class="label">Width</span>
+    <button type="button" data-width="28em" aria-pressed="false">Narrow</button>
+    <button type="button" data-width="38em" aria-pressed="true">Medium</button>
+    <button type="button" data-width="52em" aria-pressed="false">Wide</button>
+  </div>
+  <div class="group"><button type="button" id="print">Print</button></div>
+</div>
+<main>
+{chr(10).join(part for part in body if part)}
+</main>
+<script>{SCRIPT % {"size": f"{options.body_pt:g}"}}</script>
 </body>
 </html>
 """
 
-    def _render_block(self, block: Block, options: ExportOptions) -> tuple[Optional[str], Optional[str]]:
-        """Render a single semantic block to HTML, returning (block_html, toc_item_html)."""
-        # Page marker (OUT-005)
+    # ------------------------------------------------------------------
+    def _text(self, text: str, block: Optional[Block] = None, offset: int = 0) -> str:
+        parts = []
+        for segment, tags in styled_segments(text, block.styles if block else [], offset):
+            escaped = html.escape(segment).replace(BLANK_TOKEN, '<span class="blank" aria-label="blank"></span>')
+            escaped = escaped.replace("\n", "<br>")
+            tag_map = {"b": "strong", "i": "em", "u": "u"}
+            parts.append("".join(f"<{tag_map[t]}>" for t in tags) + escaped
+                         + "".join(f"</{tag_map[t]}>" for t in reversed(tags)))
+        return "".join(parts)
+
+    def _dir(self, block: Block) -> str:
+        return ' dir="rtl"' if block.text_direction == TextDirection.RTL else ""
+
+    def _image(self, block: Block, alt: str) -> str:
+        asset = block.image_asset
+        url = _data_url(asset.file_path, asset.mime_type) if asset and asset.file_path else None
+        if not url:
+            return ""
+        return f'<figure><img src="{url}" alt="{html.escape(alt)}"></figure>'
+
+    def _notes(self, block: Block) -> str:
+        out = []
+        note = reader_note(block)
+        if note:
+            out.append(f'<p class="note">{html.escape(note)}</p>')
+        if has_original_crop(block):
+            out.append(self._image(block, f"The original lines from page {block.source_page}"))
+        return "".join(out)
+
+    def _block(self, block: Block) -> str:
+        d = self._dir(block)
         if block.type == BlockType.PAGE_MARKER:
-            if options.include_page_markers and block.page_marker is not None:
-                anchor_id = f"orig-page-{block.page_marker}"
-                b_html = f'<div class="page-marker" id="{anchor_id}">— Original Page {block.page_marker} —</div>'
-                toc_html = f'<li><a href="#{anchor_id}">Page {block.page_marker}</a></li>'
-                return b_html, toc_html
-            return None, None
-
-        is_rtl = block.text_direction == TextDirection.RTL
-        dir_attr = ' dir="rtl"' if is_rtl else ""
-
-        # Headings
+            if not self._options.include_page_markers or block.page_marker is None:
+                return ""
+            label = page_label(block.page_marker, self._pages.get(block.page_marker))
+            return f'<p class="page" id="page-{block.page_marker}">{html.escape(label)}</p>'
         if block.type in (BlockType.TITLE, BlockType.HEADING):
-            level = block.level or 1
-            tag = "h1" if block.type == BlockType.TITLE or level == 1 else (f"h{min(level, 4)}")
-            heading_id = f"heading-{block.id}"
-            safe_text = html.escape(block.text or "")
-            tag_class = ' class="rtl"' if is_rtl else ""
-            b_html = f'<{tag} id="{heading_id}"{tag_class}{dir_attr}>{safe_text}</{tag}>'
-            toc_dir = ' dir="rtl"' if is_rtl else ""
-            toc_html = f'<li><a href="#{heading_id}"{toc_dir}>{safe_text}</a></li>'
-            return b_html, toc_html
-
-        # Lists
+            level = 1 if block.type == BlockType.TITLE else max(1, min(3, block.level or 2))
+            return f"<h{level}{d}>{self._text(block.text or '', block)}</h{level}>"
         if block.type == BlockType.LIST:
-            raw_text = (block.text or "").strip()
-            is_numbered = bool(re.match(r"^(?:\d{1,4}(?:\.\d{1,4})*[\.\)]?|[a-zA-Z][\.\)]|\([0-9a-zA-Z]+\))\s+", raw_text))
-            if is_numbered:
-                safe_text = html.escape(raw_text)
-                p_class = ' class="list-item list-numbered rtl"' if is_rtl else ' class="list-item list-numbered"'
-                return f'<p{p_class}{dir_attr}>{safe_text}</p>', None
+            marker, rest = split_marker(block)
+            classes = ["item"] + (["dialogue"] if block.role == "dialogue" else []) \
+                + ([f"indent-{min(3, block.indent_level)}"] if block.indent_level else [])
+            if marker:
+                inner = (f'<span class="marker">{html.escape(marker)}</span>'
+                         f'<span>{self._text(rest, block, len(block.text or "") - len(rest))}</span>')
             else:
-                raw_text = raw_text.lstrip("•-* \t")
-                safe_text = html.escape(raw_text)
-                list_class = ' class="rtl"' if is_rtl else ""
-                return f"<ul{list_class}{dir_attr}><li>{safe_text}</li></ul>", None
-
-        # Quotes
-        if block.type == BlockType.QUOTE:
-            safe_text = html.escape(block.text or "")
-            quote_class = ' class="rtl"' if is_rtl else ""
-            return f"<blockquote{quote_class}{dir_attr}><p>{safe_text}</p></blockquote>", None
-
-        # Captions
+                inner = f'<span></span><span>{self._text(block.text or "", block)}</span>'
+            return f'<div class="{" ".join(classes)}"{d}>{inner}</div>{self._notes(block)}'
         if block.type == BlockType.CAPTION:
-            safe_text = html.escape(block.text or "")
-            cap_class = "caption-block rtl" if is_rtl else "caption-block"
-            return f'<figcaption class="{cap_class}"{dir_attr}>{safe_text}</figcaption>', None
-
-        # Footnotes (FN-001, FN-002)
+            label = caption_label(block)
+            prefix = f'<span class="label">{html.escape(label)}</span>' if label else ""
+            return f'<p class="caption"{d}>{prefix}{self._text(block.text or "", block)}</p>'
+        if block.type == BlockType.QUOTE:
+            return f"<blockquote{d}>{self._text(block.text or '', block)}</blockquote>"
         if block.type == BlockType.FOOTNOTE:
-            safe_text = html.escape(block.text or "")
-            fn_class = "footnote-block rtl" if is_rtl else "footnote-block"
-            return f'<aside class="{fn_class}"{dir_attr} role="doc-footnote"><p>{safe_text}</p></aside>', None
-
-        # Tables (TBL-001, TBL-002, FN-002)
+            return f'<p class="footnote" role="doc-footnote"{d}>{self._text(block.text or "", block)}</p>'
+        if block.type == BlockType.ASIDE:
+            cls = "note" if block.role == "page_note" else "aside"
+            return f'<p class="{cls}"{d}>{self._text(block.text or "", block)}</p>'
         if block.type == BlockType.TABLE and block.table_structure:
-            ts = block.table_structure
-            table_parts = []
-
-            # Warning banner if present (TBL-002)
-            if block.warnings:
-                for w in block.warnings:
-                    table_parts.append(f'<div class="table-warning" role="note">⚠️ {html.escape(w)}</div>')
-
-            # Retained source table image if available (TBL-001)
-            if block.image_asset and block.image_asset.file_path and Path(block.image_asset.file_path).exists():
-                img_bytes = Path(block.image_asset.file_path).read_bytes()
-                b64_src = f"data:{block.image_asset.mime_type};base64,{base64.b64encode(img_bytes).decode('ascii')}"
-                alt = html.escape(block.image_asset.alt_text or f"Original table scan from page {block.source_page}")
-                table_parts.append(f'<div class="figure-container"><img src="{b64_src}" alt="{alt}"></div>')
-
-            table_parts.append('<div class="table-container" role="region" aria-label="Data Table" tabindex="0">')
-            table_class = "large-print-table rtl" if is_rtl else "large-print-table"
-            table_parts.append(f'<table class="{table_class}"{dir_attr}>')
-
-            if ts.caption:
-                table_parts.append(f'<caption>{html.escape(ts.caption)}</caption>')
-
-            start_row = 0
-            if ts.has_header and ts.rows:
-                table_parts.append("<thead><tr>")
-                for cell in ts.rows[0]:
-                    table_parts.append(f'<th scope="col">{html.escape(cell.text or "")}</th>')
-                table_parts.append("</tr></thead>")
-                start_row = 1
-
-            table_parts.append("<tbody>")
-            for row in ts.rows[start_row:]:
-                table_parts.append("<tr>")
-                for cell in row:
-                    table_parts.append(f'<td>{html.escape(cell.text or "")}</td>')
-                table_parts.append("</tr>")
-            table_parts.append("</tbody>")
-            table_parts.append("</table></div>")
-
-            return "\n".join(table_parts), None
-
-        # Images (IMG-001)
+            return self._table(block)
         if block.type == BlockType.IMAGE and block.image_asset:
             asset = block.image_asset
-            if asset.file_path and Path(asset.file_path).exists():
-                img_bytes = Path(asset.file_path).read_bytes()
-                b64_src = f"data:{asset.mime_type};base64,{base64.b64encode(img_bytes).decode('ascii')}"
-                alt = html.escape(asset.alt_text or f"Figure from page {block.source_page}")
-                return f'<div class="figure-container"><img src="{b64_src}" alt="{alt}"></div>', None
-            return None, None
+            alt = asset.alt_text or f"Picture from page {block.source_page}"
+            note = reader_note(block) if is_retained_page(block) else None
+            prefix = f'<p class="note">{html.escape(note)}</p>' if note else ""
+            return prefix + self._image(block, alt)
+        return f"<p{d}>{self._text(block.text or '', block)}</p>{self._notes(block)}"
 
-        # Default body paragraph
-        safe_text = html.escape(block.text or "")
-        p_class = ' class="rtl"' if is_rtl else ""
-        return f"<p{p_class}{dir_attr}>{safe_text}</p>", None
+    def _table(self, block: Block) -> str:
+        table = block.table_structure
+        d = self._dir(block)
+        out = []
+        fit = evaluate_table_fit(table, available_width=520, font_pt=14.0, min_readable_pt=14.0)
+        for note in dict.fromkeys(n for n in (reader_note(block), fit.warning) if n):
+            out.append(f'<p class="note">{html.escape(note)}</p>')
+        if block.image_asset:
+            out.append(self._image(block, block.image_asset.alt_text or f"Original table from page {block.source_page}"))
+        if fit.tier == TableTier.LINEARIZE:
+            if table.caption:
+                out.append(f'<p class="caption"{d}>{self._text(table.caption)}</p>')
+            for lead, details in table_as_entries(table):
+                rows = "".join(
+                    f'<p class="detail">{"<strong>" + html.escape(label) + ":</strong> " if label else ""}{self._text(value)}</p>'
+                    for label, value in details)
+                out.append(f'<div class="entry"{d}><p class="lead">{self._text(lead)}</p>{rows}</div>')
+            return "".join(out)
+        parts = fit.split_tables if fit.tier == TableTier.SPLIT and fit.split_tables else [table]
+        for part in parts:
+            out.append(self._grid(part, d))
+        return "".join(out)
+
+    def _grid(self, table, d: str) -> str:
+        visible = {(r, c): (rs, cs) for r, c, _, rs, cs in iter_visible_cells(table)}
+        rows_html = []
+        for r, row in enumerate(table.rows):
+            tag = "th" if r == 0 and table.has_header else "td"
+            cells = []
+            for c, cell in enumerate(row):
+                if (r, c) not in visible:
+                    continue
+                rs, cs = visible[(r, c)]
+                attrs = (' scope="col"' if tag == "th" else "") + (f' rowspan="{rs}"' if rs > 1 else "") \
+                    + (f' colspan="{cs}"' if cs > 1 else "")
+                cells.append(f"<{tag}{attrs}>{self._text(cell.text or '')}</{tag}>")
+            rows_html.append(f"<tr>{''.join(cells)}</tr>")
+        head = rows_html[0] if table.has_header and rows_html else ""
+        body_rows = rows_html[1:] if head else rows_html
+        caption = f"<caption>{self._text(table.caption)}</caption>" if table.caption else ""
+        return (f"<table{d}>" + caption + (f"<thead>{head}</thead>" if head else "")
+                + f"<tbody>{''.join(body_rows)}</tbody></table>")

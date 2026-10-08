@@ -15,7 +15,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from PIL import Image
 
-from openlargeprint.importers.base import BaseImporter
+from openlargeprint.ir.models import SCHEMA_VERSION
 from openlargeprint.ir.models import (
     Block,
     BlockType,
@@ -136,7 +136,7 @@ class DocxImporter(BaseImporter):
         )
 
         return DocumentIR(
-            schema_version="1.0.0",
+            schema_version=SCHEMA_VERSION,
             metadata=metadata,
             pages=pages,
             blocks=blocks,
@@ -376,7 +376,6 @@ class DocxImporter(BaseImporter):
             for c_idx, cell in enumerate(row.cells):
                 cell_text = cell.text.strip()
                 cell_direction = detect_text_direction(cell_text)
-                cell_lang = detect_language(cell_text)
                 if cell_direction == TextDirection.RTL:
                     is_rtl_table = True
 

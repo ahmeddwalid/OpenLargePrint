@@ -34,7 +34,8 @@
 param(
     [Parameter(Mandatory = $true)][string[]]$Path,
     [string]$Thumbprint = $env:OLP_CODESIGN_THUMBPRINT,
-    [string]$TimestampUrl = "http://timestamp.digicert.com"
+    [string]$TimestampUrl = "http://timestamp.digicert.com",
+    [switch]$RequirePublicTrust
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,7 +63,7 @@ function Resolve-Signtool {
     return $found
 }
 
-if (-not $Thumbprint) {
+if (-not $Thumbprint -and -not $RequirePublicTrust) {
     $discovered = Get-ChildItem "Cert:\CurrentUser\My" -ErrorAction SilentlyContinue |
         Where-Object { $_.Subject -match "OpenLargePrint" } |
         Select-Object -First 1
@@ -75,6 +76,7 @@ if (-not $Thumbprint) {
 if (-not $Thumbprint) {
     throw "No signing certificate supplied. Set OLP_CODESIGN_THUMBPRINT, pass -Thumbprint, or create a development certificate with packaging/create_self_signed_cert.ps1."
 }
+if ($Thumbprint -notmatch '^[a-fA-F0-9]{40}$') { throw "Invalid certificate thumbprint." }
 
 $signtool = Resolve-Signtool
 Write-Host "Using signtool: $signtool" -ForegroundColor DarkGray
@@ -85,6 +87,13 @@ foreach ($target in $Path) {
     }
 
     $resolved = (Resolve-Path $target).Path
+    # Keep valid vendor signatures; verify them under the same release policy.
+    $existing = Get-AuthenticodeSignature -FilePath $resolved
+    if ($existing.Status -eq 'Valid' -and $existing.TimeStamperCertificate) {
+        & "$PSScriptRoot\verify_signatures.ps1" -Path $resolved -RequirePublicTrust:$RequirePublicTrust
+        if ($LASTEXITCODE -eq 0) { continue }
+        throw "Existing vendor signature failed the public release policy: $resolved"
+    }
     $signArgs = @(
         "sign",
         "/sha1", $Thumbprint,
@@ -106,6 +115,8 @@ foreach ($target in $Path) {
     }
 
     Write-Host "Signed and verified: $resolved" -ForegroundColor Green
+    & "$PSScriptRoot\verify_signatures.ps1" -Path $resolved -RequirePublicTrust:$RequirePublicTrust
+    if ($LASTEXITCODE -ne 0) { throw "Signature policy verification failed: $resolved" }
 }
 
 exit 0

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "OpenLargePrint",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "project_license": "GPL-3.0-or-later",
   "description": "Software Bill of Materials (SBOM) and license inventory as mandated by LIC-001 and LIC-002",
   "dependencies": [
@@ -61,17 +61,6 @@
       "purpose": "Image dimension and aspect-ratio validation"
     },
     {
-      "component": "rapidocr-onnxruntime",
-      "version": "1.4.4",
-      "code_license": "Apache-2.0",
-      "model_weight_license": "Apache-2.0",
-      "download_source": "PyPI",
-      "native_code": true,
-      "network_behavior": "none",
-      "parses_untrusted_content": true,
-      "purpose": "Default CPU-friendly text recognition and layout engine using PaddleOCR ONNX models"
-    },
-    {
       "component": "onnxruntime",
       "version": "1.30.0",
       "code_license": "MIT",
@@ -81,17 +70,6 @@
       "network_behavior": "none",
       "parses_untrusted_content": true,
       "purpose": "High-performance on-device CPU inference runtime for ONNX models"
-    },
-    {
-      "component": "opencv-python-headless",
-      "version": "5.0.0.93",
-      "code_license": "Apache-2.0",
-      "model_weight_license": null,
-      "download_source": "PyPI",
-      "native_code": true,
-      "network_behavior": "none",
-      "parses_untrusted_content": true,
-      "purpose": "Headless image array manipulation and geometric transformations for OCR"
     },
     {
       "component": "reportlab",
@@ -176,80 +154,337 @@
       "version": "bundled",
       "code_license": "OFL-1.1",
       "model_weight_license": null,
-      "download_source": "https://github.com/google/fonts/tree/main/ofl/notosansarabic",
+      "download_source": "https://github.com/notofonts/arabic",
       "native_code": false,
       "network_behavior": "none",
       "parses_untrusted_content": false,
-      "purpose": "Offline Arabic interface and Reader typography",
+      "purpose": "Arabic text in large-print outputs",
       "sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e"
+    },
+    {
+      "component": "rapidocr",
+      "version": "3.9.2",
+      "code_license": "Apache-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; the recognition worker blocks sockets",
+      "parses_untrusted_content": true,
+      "purpose": "Text detection and recognition pipeline for scanned pages (PP-OCRv6, PP-OCRv5 Arabic)"
+    },
+    {
+      "component": "omegaconf",
+      "version": "2.3.1",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Recognition configuration"
+    },
+    {
+      "component": "antlr4-python3-runtime",
+      "version": "4.9.3",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Configuration parser used by omegaconf"
+    },
+    {
+      "component": "colorlog",
+      "version": "6.12.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Logging inside the recognition packages"
+    },
+    {
+      "component": "requests",
+      "version": "2.34.2",
+      "code_license": "Apache-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; the recognition worker blocks sockets",
+      "parses_untrusted_content": false,
+      "purpose": "Imported by the recognition packages for model download; never called, models are bundled and verified"
+    },
+    {
+      "component": "certifi",
+      "version": "2026.7.22",
+      "code_license": "MPL-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Dependency of requests (unused at run time)"
+    },
+    {
+      "component": "charset-normalizer",
+      "version": "3.5.1",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Dependency of requests and reportlab"
+    },
+    {
+      "component": "idna",
+      "version": "3.20",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Dependency of requests (unused at run time)"
+    },
+    {
+      "component": "urllib3",
+      "version": "2.8.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Dependency of requests (unused at run time)"
+    },
+    {
+      "component": "rapid-layout",
+      "version": "1.2.1",
+      "code_license": "Apache-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none in conversion; the recognition worker blocks sockets",
+      "parses_untrusted_content": true,
+      "purpose": "Pre- and post-processing for the PP-DocLayoutV2 layout model; its own downloader and bundled models are unused"
+    },
+    {
+      "component": "opencv-python",
+      "version": "5.0.0.93",
+      "code_license": "Apache-2.0 (Linux wheels include Qt under LGPL-3.0)",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "Image processing for recognition, layout and ruling-line detection"
+    },
+    {
+      "component": "numpy",
+      "version": "2.5.3",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Array maths for image and model processing"
+    },
+    {
+      "component": "shapely",
+      "version": "2.1.2",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Text-box geometry in recognition post-processing"
+    },
+    {
+      "component": "pyclipper",
+      "version": "1.4.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Text-region polygon expansion in recognition post-processing"
+    },
+    {
+      "component": "pyyaml",
+      "version": "6.0.3",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Recognition and layout configuration files"
+    },
+    {
+      "component": "tqdm",
+      "version": "4.70.1",
+      "code_license": "MPL-2.0 AND MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Progress utility imported by the recognition packages"
+    },
+    {
+      "component": "six",
+      "version": "1.17.0",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Compatibility helper imported by the recognition packages"
+    },
+    {
+      "component": "flatbuffers",
+      "version": "25.12.19",
+      "code_license": "Apache-2.0",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "ONNX Runtime model format support"
+    },
+    {
+      "component": "protobuf",
+      "version": "7.36.2",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "ONNX Runtime model metadata"
+    },
+    {
+      "component": "lxml",
+      "version": "6.1.3",
+      "code_license": "BSD-3-Clause",
+      "model_weight_license": null,
+      "download_source": "PyPI; exact artifact digests in uv.lock",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "XML for Word and PowerPoint import and export"
+    },
+    {
+      "component": "Atkinson Hyperlegible",
+      "version": "bundled",
+      "code_license": "OFL-1.1",
+      "model_weight_license": null,
+      "download_source": "https://github.com/googlefonts/atkinson-hyperlegible",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Reading font for large-print PDF, Word and Reader output (embedded in outputs)",
+      "sha256": "053599de31e1cd688d6a3e59a644af811daa5059cf3fb4e930fe5549a63866cc"
+    },
+    {
+      "component": "DejaVu Sans",
+      "version": "bundled",
+      "code_license": "Bitstream-Vera AND LicenseRef-Public-Domain",
+      "model_weight_license": null,
+      "download_source": "https://dejavu-fonts.github.io",
+      "native_code": false,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Fallback for symbols, arrows, checkboxes and phonetic characters missing from the reading font",
+      "sha256": "c7f1e8500351af269214650aabba9fc7dfa2de6c422dbe73796ddfce02dbffcc"
     }
   ],
   "models": [
     {
-      "model_key": "ch_PP-OCRv4_det",
-      "version": "v4.0.0",
+      "model_key": "pp_doc_layoutv2",
+      "version": "PP-DocLayoutV2/RapidLayout-1.2.0",
       "code_license": "Apache-2.0",
       "weight_license": "Apache-2.0",
-      "sha256": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
-      "download_source": "https://pypi.org/project/rapidocr-onnxruntime/1.4.4/",
+      "sha256": "0bd2ea0997fe0789f0300292291f8bbf897d890b44a9a3bd5be72afd6198aa90",
+      "download_source": "https://www.modelscope.cn/models/RapidAI/RapidLayout/resolve/v1.2.0/onnx/pp_doc_layout/pp_doc_layoutv2.onnx",
       "native_code": false,
-      "network_behavior": "none",
+      "network_behavior": "none: bundled in the installer and verified by SHA-256 before use",
       "parses_untrusted_content": true,
-      "purpose": "Ultra-lightweight text detection on CPU",
-      "distribution": "Bundled in rapidocr-onnxruntime 1.4.4; hash verified before inference"
+      "purpose": "Finds titles, paragraphs, lists, tables, figures, captions and page furniture, in reading order",
+      "distribution": "Bundled in the installer"
+    },
+    {
+      "model_key": "PP-OCRv6_det_small",
+      "version": "PP-OCRv6/RapidOCR-3.9.2",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f",
+      "download_source": "Bundled in the rapidocr wheel (PyPI)",
+      "native_code": false,
+      "network_behavior": "none: bundled in the installer and verified by SHA-256 before use",
+      "parses_untrusted_content": true,
+      "purpose": "Finds lines of text on scanned pages",
+      "distribution": "Bundled in the installer"
+    },
+    {
+      "model_key": "PP-OCRv6_rec_small",
+      "version": "PP-OCRv6/RapidOCR-3.9.2",
+      "code_license": "Apache-2.0",
+      "weight_license": "Apache-2.0",
+      "sha256": "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884",
+      "download_source": "Bundled in the rapidocr wheel (PyPI)",
+      "native_code": false,
+      "network_behavior": "none: bundled in the installer and verified by SHA-256 before use",
+      "parses_untrusted_content": true,
+      "purpose": "Reads Latin-script and Chinese text, including word spacing and punctuation",
+      "distribution": "Bundled in the installer"
     },
     {
       "model_key": "ch_ppocr_mobile_v2.0_cls",
-      "version": "v2.0.0",
+      "version": "PP-OCRv2/RapidOCR-3.9.2",
       "code_license": "Apache-2.0",
       "weight_license": "Apache-2.0",
       "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
-      "download_source": "https://pypi.org/project/rapidocr-onnxruntime/1.4.4/",
+      "download_source": "Bundled in the rapidocr wheel (PyPI)",
       "native_code": false,
-      "network_behavior": "none",
+      "network_behavior": "none: bundled in the installer and verified by SHA-256 before use",
       "parses_untrusted_content": true,
-      "purpose": "Text direction and orientation classification",
-      "distribution": "Bundled in rapidocr-onnxruntime 1.4.4; hash verified before inference"
+      "purpose": "Detects upside-down text lines before recognition",
+      "distribution": "Bundled in the installer"
     },
     {
-      "model_key": "ch_PP-OCRv4_rec",
-      "version": "v4.0.0",
+      "model_key": "arabic_PP-OCRv5_rec_mobile",
+      "version": "PP-OCRv5/RapidOCR-3.9.2",
       "code_license": "Apache-2.0",
       "weight_license": "Apache-2.0",
-      "sha256": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
-      "download_source": "https://pypi.org/project/rapidocr-onnxruntime/1.4.4/",
+      "sha256": "c1192e632d0baa9146ae5b756a0e635e3dc63c1733737ebfd1629e87144e9295",
+      "download_source": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile.onnx",
       "native_code": false,
-      "network_behavior": "none",
+      "network_behavior": "none: bundled in the installer and verified by SHA-256 before use",
       "parses_untrusted_content": true,
-      "purpose": "Chinese/English text recognition on CPU",
-      "distribution": "Bundled in rapidocr-onnxruntime 1.4.4; hash verified before inference"
-    },
-    {
-      "model_key": "arabic_PP-OCRv3_rec",
-      "version": "v3.0.0",
-      "code_license": "Apache-2.0",
-      "weight_license": "Apache-2.0",
-      "sha256": "7982d371612785238fd99080cff36354deaec84fdc6ff7da9c82af4243fa0c9a",
-      "download_source": "https://github.com/monkt/paddleocr-onnx",
-      "native_code": false,
-      "network_behavior": "none",
-      "parses_untrusted_content": true,
-      "purpose": "Optional on-device Arabic text recognition model (PaddleOCR v3 ONNX)",
-      "distribution": "Optional download; not bundled in base installer (OCR-003)"
+      "purpose": "Reads Arabic script on scanned pages",
+      "distribution": "Bundled in the installer"
     }
   ],
   "excluded_candidates": [
     {
       "name": "olmOCR",
-      "reason": "Excluded from default distribution due to high VRAM footprint and non-permissive/commercial thresholds (DESIGN.md \u00a74.1, LIC-002)"
+      "reason": "Excluded from default distribution due to high VRAM footprint and non-permissive/commercial thresholds (DESIGN.md §4.1, LIC-002)"
     },
     {
       "name": "Surya",
-      "reason": "Excluded from default distribution due to commercial license terms and MAU thresholds (DESIGN.md \u00a74.1, LIC-002)"
+      "reason": "Excluded from default distribution due to commercial license terms and MAU thresholds (DESIGN.md §4.1, LIC-002)"
     },
     {
       "name": "MinerU",
-      "reason": "Excluded from default distribution due to AGPL license and heavyweight deployment requirements (DESIGN.md \u00a74.1, LIC-002)"
+      "reason": "Excluded from default distribution due to AGPL license and heavyweight deployment requirements (DESIGN.md §4.1, LIC-002)"
     }
   ]
 }

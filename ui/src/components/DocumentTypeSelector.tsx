@@ -1,77 +1,41 @@
 import React from 'react';
 import { OutputFormat } from '../types';
+import { useI18n } from '../i18n/i18n';
+
+type MainFormat = Exclude<OutputFormat, 'searchable_pdf'>;
 
 interface DocumentTypeSelectorProps {
   value: OutputFormat;
-  onChange: (format: OutputFormat) => void;
+  onChange: (format: MainFormat) => void;
 }
 
-interface FormatOption {
-  id: OutputFormat;
-  title: string;
-  description: string;
-}
+const FORMATS: MainFormat[] = ['pdf', 'docx', 'html'];
 
-const FORMAT_OPTIONS: FormatOption[] = [
-  {
-    id: 'pdf',
-    title: 'PDF',
-    description: 'Print-ready reflowed document at selected point size',
-  },
-  {
-    id: 'docx',
-    title: 'Word document',
-    description: 'Edit the enlarged document in Word',
-  },
-  {
-    id: 'html',
-    title: 'HTML reader',
-    description: 'Read offline and adjust text size',
-  },
-  {
-    id: 'searchable_pdf',
-    title: 'Searchable original PDF',
-    description: 'Keeps the original size. Adds searchable text; does not enlarge.',
-  },
-];
-
-export const DocumentTypeSelector: React.FC<DocumentTypeSelectorProps> = ({
-  value,
-  onChange,
-}) => {
+/** The three large-print outputs. The searchable copy of the original lives under "More options". */
+export const DocumentTypeSelector: React.FC<DocumentTypeSelectorProps> = ({ value, onChange }) => {
+  const { t } = useI18n();
   return (
-    <section className="decision-step" aria-labelledby="step-format-label">
-      <h2 id="step-format-label" className="step-label">
-        3. Choose export format
-      </h2>
-      <div
-        className="format-options"
-        role="radiogroup"
-        aria-labelledby="step-format-label"
-      >
-        {FORMAT_OPTIONS.map((opt) => {
-          const isSelected = value === opt.id;
+    <fieldset className="choice-group">
+      <legend className="choice-legend">{t('format.step_label')}</legend>
+      <div className="choice-row" role="radiogroup" aria-label={t('format.step_label')}>
+        {FORMATS.map((id) => {
+          const selected = value === id;
           return (
-            <label
-              key={opt.id}
-              className={`radio-card ${isSelected ? 'selected' : ''}`}
-              htmlFor={`format-${opt.id}`}
-            >
+            <label key={id} className={`radio-card ${selected ? 'selected' : ''}`} htmlFor={`format-${id}`}>
               <input
                 type="radio"
-                id={`format-${opt.id}`}
+                id={`format-${id}`}
                 name="export-format"
-                value={opt.id}
-                checked={isSelected}
-                onChange={() => onChange(opt.id)}
-                aria-checked={isSelected}
+                value={id}
+                checked={selected}
+                onChange={() => onChange(id)}
               />
-              <span className="radio-title" style={{ marginBottom: '4px' }}>{opt.title}</span>
-              <span className="radio-sub">{opt.description}</span>
+              <span className="radio-title">{t(`format.${id}`)}</span>
+              <span className="radio-sub">{t(`format.${id}_detail`)}</span>
             </label>
           );
         })}
       </div>
-    </section>
+    </fieldset>
   );
 };

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Tuple
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 from openlargeprint.ir.models import PageClassification, PageMetadata
@@ -31,7 +30,11 @@ def classify_pdf_page(page: pdfium.PdfPage, page_number: int) -> PageMetadata:
     # 2. Raster coverage calculation
     total_image_area = 0.0
     image_count = 0
-    for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]):
+    visible_objects = 0
+    for obj in page.get_objects(max_depth=16):
+        visible_objects += 1
+        if obj.type != pdfium_c.FPDF_PAGEOBJ_IMAGE:
+            continue
         try:
             l, b, r, t = obj.get_bounds()
             w = abs(r - l)
@@ -72,11 +75,12 @@ def classify_pdf_page(page: pdfium.PdfPage, page_number: int) -> PageMetadata:
         "raster_coverage": round(raster_coverage, 4),
         "image_count": image_count,
         "is_broken": is_broken,
+        "is_blank": char_count == 0 and visible_objects == 0,
     }
 
     if is_broken:
         classification = PageClassification.BROKEN_DIGITAL
-    elif len(clean_text) < 20:
+    elif not clean_text:
         classification = PageClassification.SCANNED
     else:
         if raster_coverage > 0.60:

@@ -8,10 +8,8 @@ from openlargeprint.exporters import ExportOptions, PaperSize, PdfExporter, Pres
 from openlargeprint.ir.models import (
     Block,
     BlockType,
-    BoundingBox,
     DocumentIR,
     DocumentMetadata,
-    ExtractionMethod,
     PageClassification,
     PageMetadata,
 )
@@ -72,8 +70,8 @@ def test_pdf_export_a4_dimensions(tmp_path: Path):
     tp = page.get_textpage()
     text = tp.get_text_range()
     assert "Inner Morality" in text
-    assert "Print at 100% / actual size" in text
-    assert "Original Page 1" in text
+    assert "print at 100% (actual size)" in text
+    assert "Original page 1" in text
 
 
 def test_pdf_export_a3_dimensions(tmp_path: Path):
@@ -143,3 +141,43 @@ def test_pdf_table_row_longer_than_a_page(tmp_path):
         assert len(pdf) > 1
         text = "".join(page.get_textpage().get_text_range() for page in pdf)
         assert "FINAL SENTENCE" in " ".join(text.split())
+
+
+def test_arabic_paragraph_lines_stay_in_reading_order(tmp_path):
+    """Wrapped Arabic lines read top to bottom, brackets face the right way, Latin runs stay whole (LANG-001)."""
+    import pypdfium2 as pdfium
+    from openlargeprint.exporters import ExportOptions, PdfExporter
+    from openlargeprint.ir.models import (Block, BlockType, DocumentIR, DocumentMetadata, PageClassification,
+                                          PageMetadata, TextDirection)
+
+    first = "العقد شريعة المتعاقدين"
+    text = (f"{first} (المادة 147 من القانون المدني)، فلا يجوز نقضه ولا تعديله إلا باتفاق الطرفين "
+            "أو للأسباب التي يقررها القانون وفقًا لـ Civil Code 2024 وما بعدها من نصوص.")
+    doc = DocumentIR(
+        metadata=DocumentMetadata(title="Arabic", page_count=1),
+        pages=[PageMetadata(page_number=1, width=595, height=842, classification=PageClassification.NATIVE)],
+        blocks=[Block(id="ar", type=BlockType.PARAGRAPH, text=text, source_page=1, language="ar",
+                      text_direction=TextDirection.RTL)],
+    )
+    out = tmp_path / "arabic.pdf"
+    PdfExporter().export(doc, out, ExportOptions(include_page_markers=False))
+
+    page = pdfium.PdfDocument(out)[0]
+    textpage = page.get_textpage()
+    chars = [(textpage.get_charbox(i), textpage.get_text_range(i, 1)) for i in range(textpage.count_chars())]
+    lines = {}
+    for (left, bottom, right, top), ch in chars:
+        if ch.strip() and any("؀" <= c <= "ۿ" or c.isascii() for c in ch):
+            lines.setdefault(round((top + bottom) / 2 / 8), []).append((left, ch))
+    def arabic(ch):
+        return "\u0600" <= ch <= "\u06ff" or "\ufb50" <= ch <= "\ufeff"
+
+    body = [sorted(v) for k, v in sorted(lines.items(), reverse=True) if any(arabic(c) for _, c in v)]
+    assert len(body) >= 2, "the paragraph should wrap onto several lines"
+
+    painted = ["".join(ch for _, ch in line) for line in body]  # each line left to right
+    assert "147" in painted[0], "the first words (with the article number) must be on the top line"
+    assert all("Civil" not in line for line in painted[:1]), "later words must not jump to the top line"
+    civil = next(line for line in body if any(ch == "C" for _, ch in line))
+    left_to_right = "".join(ch for _, ch in civil)
+    assert "CivilCode2024" in left_to_right.replace(" ", "")

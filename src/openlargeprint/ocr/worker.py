@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing
 import time
+import sys
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from multiprocessing.util import Finalize
@@ -15,6 +16,12 @@ from .base import CancellationToken, EnginePageResult
 OCR_PAGE_TIMEOUT_SECONDS = 120.0
 POLL_INTERVAL_SECONDS = 0.1
 SHUTDOWN_TIMEOUT_SECONDS = 2.0
+
+
+def _deny_worker_network(event: str, args: tuple) -> None:
+    """Keep recognition subprocesses offline, including upstream fallbacks."""
+    if event in ("socket.connect", "socket.getaddrinfo", "urllib.Request"):
+        raise PermissionError("Recognition runs offline. Prepare models separately.")
 
 
 def _stop_worker(process: BaseProcess, sender: Connection, receiver: Connection) -> None:
@@ -36,15 +43,13 @@ def _recognize(
     rec_model_path: str | None = None,
     rec_keys_path: str | None = None,
     language: str = "en",
+    backend: str = "baseline",
 ) -> None:
+    sys.addaudithook(_deny_worker_network)
+    if backend != "baseline":
+        raise ValueError("Unsupported recognition backend")
     from .paddle_engine import PaddleRapidOcrEngine
-
-    engine = PaddleRapidOcrEngine(
-        use_gpu=use_gpu,
-        rec_model_path=rec_model_path,
-        rec_keys_path=rec_keys_path,
-        language=language,
-    )
+    engine = PaddleRapidOcrEngine(use_gpu=use_gpu, language=language)
     try:
         while True:
             try:
@@ -72,7 +77,11 @@ class OcrWorker:
         rec_model_path: str | None = None,
         rec_keys_path: str | None = None,
         language: str = "en",
+        backend: str = "baseline",
     ):
+        if backend != "baseline":
+            raise ValueError("Unsupported recognition backend")
+        self.backend = backend
         self.use_gpu = use_gpu
         self.timeout_seconds = timeout_seconds
         self.rec_model_path = rec_model_path
@@ -114,6 +123,7 @@ class OcrWorker:
                     self.rec_model_path,
                     self.rec_keys_path,
                     self.language,
+                    self.backend,
                 ),
                 daemon=True,
             )

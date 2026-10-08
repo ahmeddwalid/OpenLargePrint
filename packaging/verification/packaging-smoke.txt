@@ -1,0 +1,1 @@
+Packaging smoke test passed: native/scanned multi-page conversion, A4/A3 PDF and DOCX, selected pages, icons, and frontend assets.

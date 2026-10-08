@@ -9,7 +9,8 @@ import docx
 import pikepdf
 import pypdfium2 as pdfium
 import pytest
-from docx.shared import Pt
+
+from conftest import effective_line_spacing, effective_size
 from PIL import Image
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -133,8 +134,8 @@ def test_docx_honors_custom_body_size(tmp_path: Path):
     )
     doc = docx.Document(str(out))
     body = next(p for p in doc.paragraphs if "Custom sized body" in p.text)
-    assert body.runs[0].font.size == Pt(30)
-    assert body.paragraph_format.line_spacing == 1.7
+    assert effective_size(body) == pytest.approx(30.0)
+    assert effective_line_spacing(body) == 1.7
 
 
 def test_reader_html_uses_points_and_has_width_control(tmp_path: Path):
@@ -148,10 +149,13 @@ def test_reader_html_uses_points_and_has_width_control(tmp_path: Path):
     ReaderExporter().export(ir, out, ExportOptions(preset=PresetName.LARGE))
     html = out.read_text(encoding="utf-8")
 
-    assert "--base-font-size: 20pt" in html
-    assert "--base-font-size: 20px" not in html
-    assert 'id="reading-width-select"' in html
-    assert 'id="current-size-label"' in html
+    assert "--size: 20pt" in html
+    assert "20px" not in html
+    assert 'id="size"' in html and "20 pt" in html
+    assert 'aria-label="Line length"' in html
+    for width in ("Narrow", "Medium", "Wide"):
+        assert f">{width}</button>" in html
+    assert html.count("data-width=") == 3
 
 
 # --- Layout fidelity (TBL-001, OUT-009) ----------------------------------------
@@ -195,10 +199,11 @@ def test_pdf_tall_image_is_height_clamped(tmp_path: Path):
     out = tmp_path / "tall.pdf"
     PdfExporter().export(ir, out, ExportOptions(paper_size=PaperSize.A4))
 
-    # The page must still be A4 and the document must be exactly one page
-    # (an unclamped image would overflow onto additional pages).
+    # The picture is clamped to one sheet: at most the title page plus the picture's
+    # own page, never a picture overflowing onto further pages.
     pdf = pdfium.PdfDocument(out)
-    assert len(pdf) == 1
+    assert len(pdf) <= 2
+    assert all(abs(pdf[i].get_size()[0] - 595.3) < 1 for i in range(len(pdf)))
 
 
 def test_docx_table_body_rows_can_split(tmp_path: Path):
@@ -380,7 +385,7 @@ def test_failed_extraction_preserves_real_page_image(tmp_path: Path, monkeypatch
     orchestrator = PipelineOrchestrator()
     def fail(*args, **kwargs):
         raise RuntimeError("extraction failed")
-    monkeypatch.setattr(orchestrator.pdf_importer, "_extract_native_text", fail)
+    monkeypatch.setattr(orchestrator.pdf_importer, "_process_page", fail)
     store = JobAssetStore(job_id="failure-retention", root=tmp_path / "cache")
     result = orchestrator.convert(source, tmp_path / "retained.docx", asset_store=store)
     retained = [b for b in result.document_ir.blocks if b.image_asset]
@@ -447,22 +452,21 @@ def test_cropbox_filters_bleed_and_normalizes_coordinates(tmp_path: Path):
 
 
 def test_font_proportional_spacing_preserves_large_titles():
-    """Font-proportional spacing must prevent split words in titles while separating real words."""
-    from openlargeprint.importers.pdf.native import NativePdfImporter, TextLine
+    """Kerning inside a large title never splits a word; a real word gap does."""
+    from openlargeprint.importers.pdf.textlayer import _Char, _chars_to_words
 
-    importer = NativePdfImporter()
-    # 72pt font: normal kerning between 'GR' and 'AMMAR' is ~3.5pt (< 0.22 * 72 = 15.8pt)
-    frags = [
-        TextLine(text="GR", rect=(50.0, 500.0, 120.0, 570.0), font_size=72.0, font_name="Helvetica-Bold", is_bold=True, page_num=1),
-        TextLine(text="AMMAR", rect=(123.5, 500.0, 300.0, 570.0), font_size=72.0, font_name="Helvetica-Bold", is_bold=True, page_num=1),
-        # Distinct word separated by 25pt gap (> 15.8pt)
-        TextLine(text="BOOK", rect=(325.0, 500.0, 450.0, 570.0), font_size=72.0, font_name="Helvetica-Bold", is_bold=True, page_num=1),
-    ]
+    def glyphs(text, x, advance=12.0, gap_after=None):
+        out = []
+        for ch in text:
+            out.append(_Char(ch, x, 500.0, x + advance, 570.0, 560.0, 72.0, True, False, False))
+            x += advance
+        return out, x
 
-    lines = importer._aggregate_fragments_into_lines(frags, 1)
-    assert len(lines) == 1
-    assert lines[0].text == "GRAMMAR BOOK"
-
+    first, x = glyphs("GR", 50.0)
+    second, x = glyphs("AMMAR", x + 3.5)   # kerning between R and A
+    third, _ = glyphs("BOOK", x + 25.0)     # a real space
+    words = _chars_to_words(first + second + third)
+    assert [w.text for w in words] == ["GRAMMAR", "BOOK"]
 
 def test_numbered_outlines_do_not_render_bullets_in_exporters(tmp_path: Path):
     """Numbered outlines and TOC entries must retain clean numbering without prepended bullet symbols."""
@@ -496,12 +500,14 @@ def test_numbered_outlines_do_not_render_bullets_in_exporters(tmp_path: Path):
     p1 = [p for p in paragraphs if "Present continuous" in p.text][0]
     p2 = [p for p in paragraphs if "Regular bulleted" in p.text][0]
     assert p1.style.name != "List Bullet", "Numbered outline must not use List Bullet style"
-    assert p2.style.name == "List Bullet", "Bulleted item should use List Bullet style"
+    assert p2.text == "• Regular bulleted item", "Keep the exact source marker without adding a second automatic bullet"
 
     # HTML Reader check
     html_out = tmp_path / "out.html"
     ReaderExporter().export(ir, html_out, ExportOptions())
     html_content = html_out.read_text(encoding="utf-8")
-    assert '<p class="list-item list-numbered">1. Present continuous' in html_content
-    assert '<ul><li>Regular bulleted item</li></ul>' in html_content
+    assert "1. Present continuous (I am doing)" in html_content
+    assert "• Regular bulleted item" in html_content
+    assert "• 1." not in html_content
+    assert "list-style" not in html_content and "<li" not in html_content
 

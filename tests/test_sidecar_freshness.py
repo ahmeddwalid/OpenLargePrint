@@ -1,0 +1,76 @@
+"""Development must not silently launch a stale frozen engine (PKG-002)."""
+import importlib.util
+from pathlib import Path
+
+path = Path(__file__).resolve().parents[1] / "packaging" / "sidecar_freshness.py"
+spec = importlib.util.spec_from_file_location("sidecar_freshness", path)
+
+
+def test_fingerprint_changes_with_source_and_binary(tmp_path):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    (tmp_path / "src/openlargeprint").mkdir(parents=True)
+    source = tmp_path / "src/openlargeprint/version.py"
+    source.write_text("first")
+    binary = tmp_path / "engine.exe"
+    binary.write_bytes(b"old")
+    module.record_build(tmp_path, binary)
+    assert module.is_fresh(tmp_path, binary)
+    source.write_text("second")
+    assert not module.is_fresh(tmp_path, binary)
+    module.record_build(tmp_path, binary)
+    binary.write_bytes(b"tampered")
+    assert not module.is_fresh(tmp_path, binary)
+def test_onefile_build_refuses_missing_output(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+    import pytest
+    packaging_dir = Path(__file__).parents[1] / "packaging"
+    monkeypatch.syspath_prepend(str(packaging_dir))
+    spec = importlib.util.spec_from_file_location("build_sidecar_test", packaging_dir / "build_sidecar.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "packaging/build_sidecar.py"))
+    monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sys, "argv", ["build_sidecar.py"])
+    monkeypatch.setattr(module, "require_models", lambda root: None)
+    with pytest.raises(RuntimeError, match="expected executable"):
+        module.build_sidecar()
+
+
+def test_build_refuses_to_package_without_verified_models(tmp_path, monkeypatch):
+    """An installer without its models would fail on every scanned page (PKG-002, SEC-006)."""
+    import importlib.util
+    import pytest
+    from openlargeprint.models import manager as manager_module
+
+    packaging_dir = Path(__file__).parents[1] / "packaging"
+    monkeypatch.syspath_prepend(str(packaging_dir))
+    spec = importlib.util.spec_from_file_location("build_sidecar_models", packaging_dir / "build_sidecar.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def missing(self, key, verify=True):
+        raise FileNotFoundError(key)
+
+    monkeypatch.setattr(manager_module.ModelManager, "get_model_path", missing)
+    ran = []
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: ran.append(a))
+    with pytest.raises(RuntimeError, match="Models missing or damaged: pp_doc_layoutv2"):
+        module.build_sidecar()
+    assert ran == []  # PyInstaller never started
+
+
+def test_hook_changes_invalidate_frozen_sidecar(tmp_path):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    hooks = tmp_path / "packaging/hooks"
+    hooks.mkdir(parents=True)
+    hook = hooks / "hook-rapidocr.py"
+    hook.write_text("datas = []")
+    binary = tmp_path / "engine.exe"
+    binary.write_bytes(b"engine")
+    module.record_build(tmp_path, binary)
+    hook.write_text("datas = ['config.yaml']")
+    assert not module.is_fresh(tmp_path, binary)

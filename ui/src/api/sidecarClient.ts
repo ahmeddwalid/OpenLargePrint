@@ -23,6 +23,7 @@ const BACKEND_BLOCK_TYPE_MAP: Record<string, DocumentBlock['block_type']> = {
   figure: 'figure',
   caption: 'caption',
   page_marker: 'page_marker',
+  aside: 'aside',
 };
 
 export interface SidecarCallbacks {
@@ -217,6 +218,7 @@ export class SidecarClient {
             stage: payload.stage || 'converting',
             humanMessage: payload.message || `Processing page ${payload.current_page}`,
             percent: payload.percent || 0,
+            elapsedSeconds: payload.elapsed_seconds || 0,
           });
         });
 
@@ -265,6 +267,10 @@ export class SidecarClient {
                 warnings: b.warnings || [],
                 reading_order_index: b.reading_order_index,
                 confidence: b.confidence,
+                list_marker: b.list_marker ?? null,
+                indent_level: b.indent_level ?? 0,
+                role: b.role ?? null,
+                styles: Array.isArray(b.styles) ? b.styles : [],
               };
             });
 
@@ -274,6 +280,10 @@ export class SidecarClient {
               source_mime: 'application/pdf',
               page_count: p.page_count || p.document_ir.metadata?.page_count || 1,
               blocks: mappedBlocks,
+              pages: (p.document_ir.pages || []).map((page: any) => ({
+                page_number: page.page_number,
+                printed_page: page.details?.printed_page ? String(page.details.printed_page) : undefined,
+              })),
               warnings: p.warnings || p.document_ir.warnings || [],
             };
           } else {

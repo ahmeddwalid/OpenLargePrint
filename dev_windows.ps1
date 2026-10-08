@@ -73,7 +73,11 @@ try {
 
 # 4. Check or Build Development Sidecar Binary
 $SidecarTarget = Join-Path $RepoRoot "src-tauri\binaries\openlargeprint-sidecar-x86_64-pc-windows-msvc.exe"
-$NeedsSidecarBuild = $RebuildSidecar -or (-not (Test-Path $SidecarTarget))
+& "$RepoRoot\.venv\Scripts\python.exe" "$RepoRoot\packaging\sidecar_freshness.py" $SidecarTarget
+$NeedsSidecarBuild = $RebuildSidecar -or ($LASTEXITCODE -ne 0)
+if ($SkipSidecar -and $NeedsSidecarBuild) {
+    throw "The sidecar is missing or stale. Rebuild it before launching the desktop app."
+}
 
 if ($NeedsSidecarBuild -and (-not $SkipSidecar)) {
     Write-Host "[4/4] Building standalone Python sidecar for development..." -ForegroundColor Green

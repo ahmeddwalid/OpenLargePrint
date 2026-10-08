@@ -1,10 +1,18 @@
-"""Pinned model artifact definitions and SHA-256 integrity manifest (SEC-006, LIC-001, OCR-004..006)."""
+"""Pinned model artifacts and their SHA-256 integrity manifest (SEC-006, LIC-001, OCR-002).
+
+Every model used by a conversion is listed here with its exact size and digest.
+All of them ship inside the application; a normal conversion never downloads
+anything (SEC-009). ``download_url`` is used only by the build scripts that
+assemble the installer.
+"""
 
 from __future__ import annotations
 
 from enum import Enum
 from typing import Dict, Optional
 from pydantic import BaseModel, Field
+
+ARABIC_DICTIONARY_SHA256 = "637c27c88512c22089bef927b34ada08f748dc132ac70facd68d8202384c2726"
 
 
 class ModelTask(str, Enum):
@@ -13,35 +21,38 @@ class ModelTask(str, Enum):
     CLASSIFICATION = "classification"
     LAYOUT = "layout"
     TABLE = "table"
-    VLM = "vlm"
 
 
 class ModelFramework(str, Enum):
     ONNX = "onnx"
-    PADDLE = "paddle"
-    PYTORCH = "pytorch"
 
 
 class ModelArtifact(BaseModel):
-    """Metadata and integrity specification for a pinned model weight artifact (SEC-006)."""
+    """Metadata and integrity specification for one pinned model file (SEC-006)."""
 
-    key: str = Field(..., description="Unique internal identifier for the model artifact")
-    name: str = Field(..., description="Human-readable model name")
-    task: ModelTask = Field(..., description="Target OCR/layout stage")
-    framework: ModelFramework = Field(..., description="Underlying inference framework")
-    version: str = Field(..., description="Pinned upstream version")
-    sha256: str = Field(..., description="Cryptographic SHA-256 checksum of weights")
-    file_size_bytes: int = Field(..., description="Expected file size in bytes")
-    code_license: str = Field(..., description="Code license of the underlying architecture")
-    weight_license: str = Field(..., description="Model weight distribution license (LIC-001)")
-    download_url: Optional[str] = Field(None, description="Official upstream repository URL")
-    is_default: bool = Field(True, description="True if required for standard CPU installation")
-    description: str = Field("", description="Purpose and performance characteristics")
+    key: str
+    name: str
+    task: ModelTask
+    framework: ModelFramework = ModelFramework.ONNX
+    version: str
+    sha256: str
+    file_size_bytes: int
+    code_license: str
+    weight_license: str
+    download_url: Optional[str] = None
+    # Files that ship inside a Python wheel are located relative to that package
+    # instead of the application's model folder.
+    package: Optional[str] = None
+    filename: Optional[str] = None
+    is_default: bool = True
+    description: str = ""
+
+    @property
+    def file_name(self) -> str:
+        return self.filename or f"{self.key}.onnx"
 
 
 class ModelCatalog(BaseModel):
-    """Collection of verified, pinned model artifacts."""
-
     models: Dict[str, ModelArtifact] = Field(default_factory=dict)
 
     def get(self, key: str) -> Optional[ModelArtifact]:
@@ -51,65 +62,51 @@ class ModelCatalog(BaseModel):
         return {k: m for k, m in self.models.items() if m.is_default}
 
 
-# Pinned baseline models used by OpenLargePrint (RapidOCR ONNX default stack)
-PINNED_MODELS = ModelCatalog(
-    models={
-        "ch_PP-OCRv4_det": ModelArtifact(
-            key="ch_PP-OCRv4_det",
-            name="PP-OCRv4 Text Detection (ONNX)",
-            task=ModelTask.DETECTION,
-            framework=ModelFramework.ONNX,
-            version="v4.0.0",
-            sha256="d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
-            file_size_bytes=4745517,
-            code_license="Apache-2.0",
-            weight_license="Apache-2.0",
-            download_url=None,
-            is_default=True,
-            description="Ultra-lightweight CPU text detector bounding box predictor",
-        ),
-        "ch_ppocr_mobile_v2.0_cls": ModelArtifact(
-            key="ch_ppocr_mobile_v2.0_cls",
-            name="PP-OCR Direction Classifier (ONNX)",
-            task=ModelTask.CLASSIFICATION,
-            framework=ModelFramework.ONNX,
-            version="v2.0.0",
-            sha256="e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
-            file_size_bytes=585532,
-            code_license="Apache-2.0",
-            weight_license="Apache-2.0",
-            download_url=None,
-            is_default=True,
-            description="Text orientation angle (0 vs 180 degrees) classifier",
-        ),
-        "ch_PP-OCRv4_rec": ModelArtifact(
-            key="ch_PP-OCRv4_rec",
-            name="PP-OCRv4 Chinese/English Text Recognition (ONNX)",
-            task=ModelTask.RECOGNITION,
-            framework=ModelFramework.ONNX,
-            version="v4.0.0",
-            sha256="48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
-            file_size_bytes=10857958,
-            code_license="Apache-2.0",
-            weight_license="Apache-2.0",
-            download_url=None,
-            is_default=True,
-            description="CPU-optimized Chinese/English text recognition engine",
-        ),
-        "arabic_PP-OCRv3_rec": ModelArtifact(
-            key="arabic_PP-OCRv3_rec",
-            name="PP-OCRv3 Arabic Text Recognition (ONNX)",
-            task=ModelTask.RECOGNITION,
-            framework=ModelFramework.ONNX,
-            version="v3.0.0",
-            sha256="7982d371612785238fd99080cff36354deaec84fdc6ff7da9c82af4243fa0c9a",
-            file_size_bytes=8978664,
-            code_license="Apache-2.0",
-            weight_license="Apache-2.0",
-            download_url="https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/rec.onnx",
-            is_default=False,
-            description="Optional on-device Arabic text recognition model (PaddleOCR v3 ONNX)",
-        ),
-    }
-)
+_MODELSCOPE_OCR = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx"
+_MODELSCOPE_LAYOUT = "https://www.modelscope.cn/models/RapidAI/RapidLayout/resolve/v1.2.0/onnx"
 
+PINNED_MODELS = ModelCatalog(models={
+    "pp_doc_layoutv2": ModelArtifact(
+        key="pp_doc_layoutv2", name="PP-DocLayoutV2 layout and reading order",
+        task=ModelTask.LAYOUT, version="PP-DocLayoutV2/RapidLayout-1.2.0",
+        sha256="0bd2ea0997fe0789f0300292291f8bbf897d890b44a9a3bd5be72afd6198aa90",
+        file_size_bytes=213963993, code_license="Apache-2.0", weight_license="Apache-2.0",
+        download_url=f"{_MODELSCOPE_LAYOUT}/pp_doc_layout/pp_doc_layoutv2.onnx",
+        description="Finds titles, paragraphs, lists, tables, figures, captions and page furniture, in reading order",
+    ),
+    "PP-OCRv6_det_small": ModelArtifact(
+        key="PP-OCRv6_det_small", name="PP-OCRv6 small text detection",
+        task=ModelTask.DETECTION, version="PP-OCRv6/RapidOCR-3.9.2",
+        sha256="090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f",
+        file_size_bytes=9929594, code_license="Apache-2.0", weight_license="Apache-2.0",
+        download_url=f"{_MODELSCOPE_OCR}/PP-OCRv6/det/PP-OCRv6_det_small.onnx",
+        package="rapidocr", filename="models/PP-OCRv6_det_small.onnx",
+        description="Finds lines of text on scanned pages",
+    ),
+    "PP-OCRv6_rec_small": ModelArtifact(
+        key="PP-OCRv6_rec_small", name="PP-OCRv6 small text recognition",
+        task=ModelTask.RECOGNITION, version="PP-OCRv6/RapidOCR-3.9.2",
+        sha256="6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884",
+        file_size_bytes=21234383, code_license="Apache-2.0", weight_license="Apache-2.0",
+        download_url=f"{_MODELSCOPE_OCR}/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx",
+        package="rapidocr", filename="models/PP-OCRv6_rec_small.onnx",
+        description="Reads Latin-script and Chinese text, including word spacing and punctuation",
+    ),
+    "ch_ppocr_mobile_v2.0_cls": ModelArtifact(
+        key="ch_ppocr_mobile_v2.0_cls", name="PP-OCR text-line orientation",
+        task=ModelTask.CLASSIFICATION, version="PP-OCRv2/RapidOCR-3.9.2",
+        sha256="e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
+        file_size_bytes=585532, code_license="Apache-2.0", weight_license="Apache-2.0",
+        download_url=f"{_MODELSCOPE_OCR}/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+        package="rapidocr", filename="models/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+        description="Detects upside-down text lines before recognition",
+    ),
+    "arabic_PP-OCRv5_rec_mobile": ModelArtifact(
+        key="arabic_PP-OCRv5_rec_mobile", name="PP-OCRv5 Arabic text recognition",
+        task=ModelTask.RECOGNITION, version="PP-OCRv5/RapidOCR-3.9.2",
+        sha256="c1192e632d0baa9146ae5b756a0e635e3dc63c1733737ebfd1629e87144e9295",
+        file_size_bytes=8023828, code_license="Apache-2.0", weight_license="Apache-2.0",
+        download_url=f"{_MODELSCOPE_OCR}/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile.onnx",
+        description="Reads Arabic script on scanned pages",
+    ),
+})

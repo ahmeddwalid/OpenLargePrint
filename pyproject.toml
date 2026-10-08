@@ -1,6 +1,6 @@
 [project]
 name = "openlargeprint"
-version = "0.5.0"
+version = "0.6.0"
 description = "Accessible, structure-preserving document reconstruction and large-print conversion engine"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -14,8 +14,9 @@ dependencies = [
     "pikepdf>=8.0.0",
     "python-docx>=1.1.0",
     "pillow>=10.0.0",
-    "rapidocr-onnxruntime==1.4.4",
-    "opencv-python-headless>=4.8.0",
+    "rapidocr==3.9.2",
+    "rapid-layout==1.2.1",
+    "onnxruntime>=1.18.0",
     "reportlab>=4.0.0",
     "arabic-reshaper>=3.0.1",
     "python-pptx>=1.0.0",

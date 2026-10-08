@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 import docx
 import pypdfium2 as pdfium
-import pytest
+
+from conftest import effective_size
 
 from openlargeprint.exporters import ExportOptions, PaperSize, PresetName
 from openlargeprint.pipeline import PipelineOrchestrator
@@ -31,8 +32,7 @@ def test_docx_end_to_end_all_exporters(tmp_path: Path):
     assert len(doc.tables) >= 1
 
     # Verify font size is 20pt for standard paragraph
-    body_runs = [r for p in doc.paragraphs for r in p.runs if r.font.size]
-    assert any(r.font.size.pt == 20.0 for r in body_runs)
+    assert any(p.runs and effective_size(p) == 20.0 for p in doc.paragraphs)
 
     # 2. Convert to Reflowed Large-Print PDF
     out_pdf = tmp_path / "output_large.pdf"
@@ -54,7 +54,7 @@ def test_docx_end_to_end_all_exporters(tmp_path: Path):
     html_content = out_reader.read_text(encoding="utf-8")
     assert "<!DOCTYPE html>" in html_content
     assert "Contract Law Treatise" in html_content
-    assert "large-print-table" in html_content
+    assert "<table" in html_content and "<th scope=\"col\">" in html_content
 
 
 def test_pptx_end_to_end_all_exporters(tmp_path: Path):
@@ -131,4 +131,4 @@ def test_office_cli_commands(tmp_path: Path):
     ]
     res_i = subprocess.run(cmd_inspect, capture_output=True, text=True, encoding="utf-8")
     assert res_i.returncode == 0
-    assert '"schema_version": "1.0.0"' in res_i.stdout
+    assert '"schema_version": "1.1.0"' in res_i.stdout
