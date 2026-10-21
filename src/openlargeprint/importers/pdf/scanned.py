@@ -11,7 +11,7 @@ from typing import List, Sequence, Tuple
 
 from openlargeprint.ocr.base import EnginePageResult, OcrDetectedLine
 from .glyphs import clean_recognized_text
-from .textlayer import Word
+from .textlayer import Word, is_rtl_char
 
 
 def _poly_box(polygon: Sequence[Tuple[float, float]]) -> Tuple[float, float, float, float]:
@@ -55,14 +55,18 @@ def _line_words(line: OcrDetectedLine, text: str) -> List[Tuple[str, Tuple[float
                 result.append((current_text, current_boxes, current_conf))
             return [(t, (min(b[0] for b in bs), min(b[1] for b in bs), max(b[2] for b in bs), max(b[3] for b in bs)),
                      min(cs)) for t, bs, cs in result]
-    # No usable token boxes: share the line width out by character count.
+    # No usable token boxes: share the line width out by character count. An
+    # Arabic line is in reading order, so its first word is at the right.
     total = sum(len(p) for p in parts) + len(parts) - 1
     width = max(1.0, lx1 - lx0)
+    rtl = sum(is_rtl_char(ch) for ch in text) > sum(ch.isalpha() and not is_rtl_char(ch) for ch in text)
     out = []
     cursor = 0
     for part in parts:
         a = lx0 + width * cursor / total
         b = lx0 + width * (cursor + len(part)) / total
+        if rtl:
+            a, b = lx0 + lx1 - b, lx0 + lx1 - a
         out.append((part, (a, ly0, b, ly1), line.confidence))
         cursor += len(part) + 1
     return out

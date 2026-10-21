@@ -94,6 +94,17 @@
       "purpose": "Contextual Arabic glyph shaping (isolated, initial, medial, final forms)"
     },
     {
+      "component": "python-bidi",
+      "version": "0.6.12",
+      "code_license": "LGPL-3.0-or-later",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": false,
+      "purpose": "Unicode bidirectional algorithm that puts Arabic recognition results into reading order (used by RapidOCR)"
+    },
+    {
       "component": "python-pptx",
       "version": "1.0.2",
       "code_license": "MIT",

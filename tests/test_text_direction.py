@@ -132,11 +132,6 @@ def test_presentation_forms_fold_to_letters_in_reading_order():
     assert fold_presentation_forms("x² ＡＢ") == "x² ＡＢ"  # other compatibility forms stay
 
 
-def test_ocr_lines_fold_presentation_forms():
-    from openlargeprint.ocr.paddle_engine import arabic_visual_to_logical
-    from openlargeprint.text.normalize import fold_presentation_forms
-    assert fold_presentation_forms(arabic_visual_to_logical("ﻻ")) == "لا"
-
 
 def test_arabic_indic_numbers_keep_their_digit_order():
     from openlargeprint.text.bidi import reorder_bidi_line

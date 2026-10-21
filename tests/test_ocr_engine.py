@@ -10,7 +10,6 @@ from openlargeprint.ocr import (
     PaddleRapidOcrEngine,
     RoutingMode,
 )
-from openlargeprint.ocr.paddle_engine import arabic_visual_to_logical
 
 
 def _text_image(text: str, size=(900, 120)) -> Image.Image:
@@ -94,8 +93,33 @@ def test_cancelled_token_skips_recognition():
     assert result.lines == []
 
 
-def test_arabic_visual_order_becomes_reading_order():
-    # Recognisers read left to right; Arabic is stored right to left.
-    assert arabic_visual_to_logical("مالس") == "سلام"
+def test_arabic_recognition_output_is_put_in_reading_order():
+    # The Arabic recogniser reads left to right; RapidOCR turns its output into
+    # reading order with python-bidi. Without that package every Arabic page fails.
+    from rapidocr.utils.utils import reorder_bidi_for_display
+    assert reorder_bidi_for_display(("مالس",)) == ("سلام",)
     # Numbers and Latin words inside Arabic keep their own direction.
-    assert arabic_visual_to_logical("2024 ماع") == "عام 2024"
+    assert reorder_bidi_for_display(("2024 ماع",)) == ("عام 2024",)
+
+
+def _arabic_image(text: str) -> Image.Image:
+    import arabic_reshaper
+    from PIL import features
+    from openlargeprint.exporters.fonts import arabic_choice, font_path
+    shown = text if features.check_feature("raqm") else arabic_reshaper.reshape(text)[::-1]
+    image = Image.new("RGB", (1100, 120), "white")
+    font = ImageFont.truetype(str(font_path(arabic_choice("noto-naskh-arabic"))), 44)
+    ImageDraw.Draw(image).text((30, 25), shown, fill="black", font=font)
+    return image
+
+
+def test_arabic_recognition_reads_words_in_reading_order():
+    # Needs python-bidi: without it RapidOCR's Arabic recogniser fails on every page.
+    engine = PaddleRapidOcrEngine(language="ar")
+    try:
+        result = engine.analyze_page(_arabic_image("العقد شريعة المتعاقدين"), page_num=1)
+    finally:
+        engine.close()
+    text = " ".join(line.text for line in result.lines)
+    assert "العقد شريعة المتعاقدين" in text, text
+

@@ -30,32 +30,6 @@ def _is_arabic(ch: str) -> bool:
     return "؀" <= ch <= "ۿ" or "ݐ" <= ch <= "ݿ" or "ﭐ" <= ch <= "﷿" or "ﹰ" <= ch <= "﻿"
 
 
-def arabic_visual_to_logical(text: str) -> str:
-    """Convert recogniser output from image order to reading order.
-
-    CTC recognisers read a line left to right, so Arabic comes out in visual
-    order. This is the same deterministic step PaddleOCR applies to its Arabic
-    models (``pred_reverse``): the line is reversed, and runs of non-Arabic
-    characters (digits, Latin words) are kept in their original direction.
-    """
-    runs: List[str] = []
-    current = ""
-    for ch in text:
-        if _is_arabic(ch) or ch in " ،؛؟":
-            if current and not (_is_arabic(current[-1]) or current[-1] in " ،؛؟"):
-                runs.append(current)
-                current = ""
-            current += ch
-        else:
-            if current and (_is_arabic(current[-1]) or current[-1] in " ،؛؟"):
-                runs.append(current[::-1])
-                current = ""
-            current += ch
-    if current:
-        runs.append(current[::-1] if (_is_arabic(current[-1]) or current[-1] in " ،؛؟") else current)
-    return "".join(reversed(runs)).strip()
-
-
 class PaddleRapidOcrEngine:
     """CPU recogniser adapter; the heavy work happens in the isolated worker."""
 
@@ -149,7 +123,9 @@ class PaddleRapidOcrEngine:
                 continue
             words: List[OcrWord] = []
             if self.language == "ar":
-                clean = fold_presentation_forms(arabic_visual_to_logical(clean))
+                # RapidOCR returns Arabic in reading order (it applies the Unicode
+                # bidi algorithm to the recogniser's left-to-right output).
+                clean = fold_presentation_forms(clean)
             elif index < len(word_results):
                 for item in word_results[index] or ():
                     try:
