@@ -9,12 +9,15 @@ describe('remembered settings', () => {
   });
 
   it('remembers the last choices', () => {
-    saveSettings({ textSize: 28, customBodyPt: null, paperSize: 'A3', outputFormat: 'docx' });
-    expect(loadSettings()).toEqual({ textSize: 28, customBodyPt: null, paperSize: 'A3', outputFormat: 'docx' });
+    const chosen = {
+      textSize: 28, customBodyPt: null, paperSize: 'A3', outputFormat: 'docx', latinFont: 'lexend', arabicFont: 'amiri',
+    } as const;
+    saveSettings(chosen);
+    expect(loadSettings()).toEqual(chosen);
   });
 
   it('ignores damaged or out-of-range values', () => {
-    localStorage.setItem('openlargeprint_settings', '{"textSize": 7, "customBodyPt": 400, "paperSize": "B5", "outputFormat": "exe"}');
+    localStorage.setItem('openlargeprint_settings', '{"textSize": 7, "customBodyPt": 400, "paperSize": "B5", "outputFormat": "exe", "latinFont": "../x", "arabicFont": 3}');
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
     localStorage.setItem('openlargeprint_settings', 'not json');
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);

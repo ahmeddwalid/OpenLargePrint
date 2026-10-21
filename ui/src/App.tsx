@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AdvancedOptions } from './components/AdvancedOptions';
 import { DocumentTypeSelector } from './components/DocumentTypeSelector';
 import { FilePicker } from './components/FilePicker';
+import { FontSelector } from './components/FontSelector';
 import { PaperSizeSelector } from './components/PaperSizeSelector';
 import { ProgressScreen } from './components/ProgressScreen';
 import { ReaderView } from './components/ReaderView';
@@ -77,6 +78,8 @@ export const App: React.FC = () => {
   const [customBodyPt, setCustomBodyPt] = useState<number | null>(initialSettings.customBodyPt);
   const [paperSize, setPaperSize] = useState<PaperSize>(initialSettings.paperSize);
   const [mainFormat, setMainFormat] = useState<Exclude<OutputFormat, 'searchable_pdf'>>(initialSettings.outputFormat);
+  const [latinFont, setLatinFont] = useState<string>(initialSettings.latinFont);
+  const [arabicFont, setArabicFont] = useState<string>(initialSettings.arabicFont);
   const [customOutputPath, setCustomOutputPath] = useState<string | null>(null);
   const [downloadsDir, setDownloadsDir] = useState<string | null>(null);
   const [pageRange, setPageRange] = useState<string>('');
@@ -86,8 +89,8 @@ export const App: React.FC = () => {
   const outputFormat: OutputFormat = searchableOriginal ? 'searchable_pdf' : mainFormat;
 
   useEffect(() => {
-    saveSettings({ textSize, customBodyPt, paperSize, outputFormat: mainFormat });
-  }, [textSize, customBodyPt, paperSize, mainFormat]);
+    saveSettings({ textSize, customBodyPt, paperSize, outputFormat: mainFormat, latinFont, arabicFont });
+  }, [textSize, customBodyPt, paperSize, mainFormat, latinFont, arabicFont]);
 
   // Workflow State
   const [viewMode, setViewMode] = useState<ViewMode>('home');
@@ -182,6 +185,8 @@ export const App: React.FC = () => {
       pageRange,
       monochrome,
       pageBreakOnSourcePage,
+      latinFont,
+      arabicFont,
       outputPath: targetOutputPath,
     };
 
@@ -341,6 +346,8 @@ export const App: React.FC = () => {
       pageRange: selection.pages ? selection.pages.join(',') : '',
       monochrome,
       pageBreakOnSourcePage,
+      latinFont,
+      arabicFont,
       outputPath: targetOutputPath,
     };
 
@@ -443,6 +450,12 @@ export const App: React.FC = () => {
               customBodyPt={customBodyPt}
               onCustomBodyPtChange={setCustomBodyPt}
             />
+            <FontSelector
+              latin={latinFont}
+              arabic={arabicFont}
+              onLatinChange={setLatinFont}
+              onArabicChange={setArabicFont}
+            />
 
             {/* Step 3: Format, paper and where it is saved, then convert (UI-001, UI-006) */}
             <section className="decision-step" aria-labelledby="step-3-label">
@@ -540,6 +553,10 @@ export const App: React.FC = () => {
             onThemeChange={setTheme}
             onBack={() => setViewMode('home')}
             onExport={handleExportReader}
+            latinFont={latinFont}
+            arabicFont={arabicFont}
+            onLatinFontChange={setLatinFont}
+            onArabicFontChange={setArabicFont}
           />
         )}
       </main>

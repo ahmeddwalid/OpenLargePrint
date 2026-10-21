@@ -87,3 +87,6 @@ scratch-*.log
 
 src/openlargeprint/models/weights/
 .claude/
+
+# Reading fonts copied in from the engine at build time
+ui/public/fonts/reading/

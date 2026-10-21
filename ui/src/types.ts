@@ -46,6 +46,9 @@ export interface DocumentBlock {
   /** Finer meaning: "figure_text", "dialogue", "page_note", "contents", ... */
   role?: string | null;
   styles?: InlineStyle[];
+  /** 'rtl' for Arabic and other right-to-left text. */
+  text_direction?: 'ltr' | 'rtl';
+  language?: string | null;
 }
 
 export interface PageInfo {
@@ -87,6 +90,8 @@ export interface ConversionSettings {
   outputPath?: string;
   monochrome?: boolean;
   pageBreakOnSourcePage?: boolean;
+  latinFont?: string;
+  arabicFont?: string;
 }
 
 export interface ProgressInfo {

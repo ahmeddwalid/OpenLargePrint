@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppTheme, DocumentBlock, DocumentIR, InlineStyle } from '../types';
 import { sidecar } from '../api/sidecarClient';
 import { useI18n } from '../i18n/i18n';
+import { ARABIC_FONTS, DEFAULT_ARABIC_FONT, DEFAULT_LATIN_FONT, LATIN_FONTS, fontStack } from '../fonts';
 
 interface ReaderViewProps {
   documentIR: DocumentIR;
@@ -11,17 +12,12 @@ interface ReaderViewProps {
   onThemeChange: (theme: AppTheme) => void;
   onBack: () => void;
   onExport: (selection: { pages?: number[]; fontPt: number; lineSpacing: number }) => void;
+  latinFont?: string;
+  arabicFont?: string;
+  onLatinFontChange?: (id: string) => void;
+  onArabicFontChange?: (id: string) => void;
 }
 
-export type ReaderFont = 'system' | 'hyperlegible' | 'lexend' | 'mono';
-
-// Atkinson Hyperlegible is the font of every exported file, so the reader matches them.
-const FONT_FAMILIES: Record<ReaderFont, string> = {
-  hyperlegible: '"Atkinson Hyperlegible", "Noto Sans Arabic", sans-serif',
-  system: 'var(--font-family)',
-  lexend: 'Georgia, "Noto Sans Arabic", serif',
-  mono: 'Consolas, "Courier New", monospace',
-};
 
 const HighlightedText: React.FC<{
   text: string;
@@ -146,12 +142,16 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   onThemeChange,
   onBack,
   onExport,
+  latinFont = DEFAULT_LATIN_FONT,
+  arabicFont = DEFAULT_ARABIC_FONT,
+  onLatinFontChange = () => {},
+  onArabicFontChange = () => {},
 }) => {
   const { t } = useI18n();
   const [fontSize, setFontSize] = useState<number>(initialSize);
   const [lineHeight, setLineHeight] = useState<number>(1.6);
   const [readingWidth, setReadingWidth] = useState<number>(85);
-  const [readerFont, setReaderFont] = useState<ReaderFont>('hyperlegible');
+  const hasArabic = documentIR.blocks.some((b) => b.text_direction === 'rtl');
   const [showRuler, setShowRuler] = useState<boolean>(false);
   const [rulerTop, setRulerTop] = useState<number>(180);
   const [selectedPageFilter, setSelectedPageFilter] = useState<number | 'all'>('all');
@@ -567,15 +567,15 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           </button>
         </div>
 
-        {/* Font Family Selection */}
+        {/* Font choice: the same fonts the exported files use */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="reader-font-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
             {t('reader.font_label')}
           </label>
           <select
             id="reader-font-select"
-            value={readerFont}
-            onChange={(e) => setReaderFont(e.target.value as ReaderFont)}
+            value={latinFont}
+            onChange={(e) => onLatinFontChange(e.target.value)}
             style={{
               minHeight: '48px',
               padding: '6px 10px',
@@ -585,12 +585,35 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            <option value="hyperlegible">Atkinson Hyperlegible</option>
-            <option value="system">Source Sans 3</option>
-            <option value="lexend">{t('reader.font_serif')}</option>
-            <option value="mono">{t('reader.font_mono')}</option>
+            {LATIN_FONTS.map((font) => (
+              <option key={font.id} value={font.id}>{font.family}</option>
+            ))}
           </select>
         </div>
+        {hasArabic && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label htmlFor="reader-arabic-font-select" style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
+              {t('reader.arabic_font_label')}
+            </label>
+            <select
+              id="reader-arabic-font-select"
+              value={arabicFont}
+              onChange={(e) => onArabicFontChange(e.target.value)}
+            style={{
+              minHeight: '48px',
+              padding: '6px 10px',
+              backgroundColor: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+            >
+              {ARABIC_FONTS.map((font) => (
+                <option key={font.id} value={font.id}>{font.family}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Spacing Selection */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -898,12 +921,26 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             fontSize: `${fontSize / 12}rem`,
             lineHeight: lineHeight,
             maxWidth: `${readingWidth}ch`,
-            fontFamily: FONT_FAMILIES[readerFont],
+            fontFamily: fontStack(latinFont, arabicFont),
           }}
           tabIndex={0}
           aria-label={t('reader.content_aria')}
         >
           {filteredBlocks.map((block: DocumentBlock) => {
+            const node = renderBlock(block);
+            // Arabic blocks read right to left; the wrapper adds no box of its own.
+            return block.text_direction === 'rtl' ? (
+              <div key={block.id} dir="rtl" lang={block.language || 'ar'} style={{ display: 'contents' }}>
+                {node}
+              </div>
+            ) : node;
+          })}
+        </main>
+      </div>
+    </div>
+  );
+
+  function renderBlock(block: DocumentBlock): React.ReactElement | null {
             const isSpeaking = speakingBlockId === block.id;
             const isSearchMatch = activeMatchBlock?.id === block.id;
             const speakingClass = isSpeaking ? 'reader-block-speaking' : undefined;
@@ -1161,8 +1198,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   tabIndex={-1}
                   className={speakingClass}
                   style={{
-                    borderLeft: '4px solid var(--border-color)',
-                    paddingLeft: '16px',
+                    borderInlineStart: '4px solid var(--border-color)',
+                    paddingInlineStart: '16px',
                     margin: '1em 0',
                     fontStyle: 'italic',
                     color: 'var(--text-muted)',
@@ -1224,9 +1261,5 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 <BlockNote block={block} />
               </p>
             );
-          })}
-        </main>
-      </div>
-    </div>
-  );
+  }
 };

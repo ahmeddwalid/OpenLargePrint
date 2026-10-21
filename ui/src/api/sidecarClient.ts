@@ -271,6 +271,8 @@ export class SidecarClient {
                 indent_level: b.indent_level ?? 0,
                 role: b.role ?? null,
                 styles: Array.isArray(b.styles) ? b.styles : [],
+                text_direction: b.text_direction === 'rtl' ? 'rtl' : 'ltr',
+                language: b.language ?? null,
               };
             });
 

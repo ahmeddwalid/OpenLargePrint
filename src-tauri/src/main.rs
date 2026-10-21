@@ -840,6 +840,11 @@ async fn start_conversion(
             convert_cmd["page_range"] = serde_json::json!(r.trim());
         }
     }
+    for (setting, field) in [("latinFont", "latin_font"), ("arabicFont", "arabic_font")] {
+        if let Some(font) = font_choice(&settings, setting) {
+            convert_cmd[field] = serde_json::json!(font);
+        }
+    }
 
     if let Some(pt) = custom_body_pt {
         convert_cmd["custom_body_pt"] = serde_json::json!(pt);
@@ -855,6 +860,18 @@ async fn start_conversion(
         "status": "started",
         "output_path": output_path.to_string_lossy()
     }))
+}
+
+/// A font id from the settings: short lowercase words joined by hyphens. The
+/// engine checks it against its own list and falls back to the default.
+fn font_choice<'a>(settings: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    settings.get(key).and_then(|v| v.as_str()).filter(|id| {
+        id.len() <= 40
+            && !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    })
 }
 
 /// Re-render the currently loaded document without re-parsing it (OUT-002, OUT-010).
@@ -915,6 +932,11 @@ async fn export_from_ir(
     if let Some(r) = page_range {
         if !r.trim().is_empty() {
             export_cmd["page_range"] = serde_json::json!(r.trim());
+        }
+    }
+    for (setting, field) in [("latinFont", "latin_font"), ("arabicFont", "arabic_font")] {
+        if let Some(font) = font_choice(&settings, setting) {
+            export_cmd[field] = serde_json::json!(font);
         }
     }
     if let Some(pt) = custom_body_pt {

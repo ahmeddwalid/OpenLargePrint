@@ -105,3 +105,12 @@ def test_reader_page_carries_the_chosen_fonts(tmp_path: Path):
     html = out.read_text(encoding="utf-8")
     assert 'font-family: "Andika"' in html and 'font-family: "Tajawal"' in html
     assert "Atkinson" not in html
+
+
+def test_interface_font_list_matches_the_engine():
+    import re
+    source = (Path(__file__).resolve().parent.parent / "ui" / "src" / "fonts.ts").read_text(encoding="utf-8")
+    latin, arabic = source.split("export const ARABIC_FONTS")
+    pairs = lambda text: re.findall(r"\{ id: '([^']+)', family: '([^']+)' \}", text)
+    assert pairs(latin) == [(f.id, f.family) for f in LATIN_FONTS.values()]
+    assert pairs(arabic) == [(f.id, f.family) for f in ARABIC_FONTS.values()]

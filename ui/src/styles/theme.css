@@ -1,46 +1,9 @@
-@font-face {
-  font-family: "Atkinson Hyperlegible";
-  src: url("/fonts/AtkinsonHyperlegible-Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Atkinson Hyperlegible";
-  src: url("/fonts/AtkinsonHyperlegible-Bold.ttf") format("truetype");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Atkinson Hyperlegible";
-  src: url("/fonts/AtkinsonHyperlegible-Italic.ttf") format("truetype");
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Atkinson Hyperlegible";
-  src: url("/fonts/AtkinsonHyperlegible-BoldItalic.ttf") format("truetype");
-  font-weight: 700;
-  font-style: italic;
-  font-display: swap;
-}
+@import "./reading-fonts.css";
 
 @font-face {
   font-family: "Source Sans 3";
   src: url("/fonts/SourceSans3.ttf") format("truetype");
   font-weight: 200 900;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Noto Sans Arabic";
-  src: url("/fonts/NotoSansArabic.ttf") format("truetype");
-  font-weight: 100 900;
   font-display: swap;
 }
 
@@ -1128,4 +1091,56 @@ button.convert-btn { margin-top: 20px; min-width: min(100%, 18rem); }
 
 @media (max-width: 720px) {
   .choice-columns { grid-template-columns: 1fr; }
+}
+
+/* Reading font choice (step 2) */
+.font-selector {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.font-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+
+.font-summary h3 {
+  margin: 0 0 4px;
+}
+
+.font-preview {
+  margin: 2px 0;
+  font-size: 1.375rem;
+  line-height: 1.5;
+}
+
+.font-choices {
+  display: grid;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+.font-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: 12px;
+}
+
+.font-card {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.font-card.selected {
+  box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
+.font-sample {
+  font-size: 1.25rem;
+  line-height: 1.45;
+  color: var(--text-primary);
 }

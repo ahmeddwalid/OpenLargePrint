@@ -2,11 +2,12 @@
  * Remembered choices and the default save location (UI-001, UI-006).
  *
  * The reader should not have to make the same three choices every time, so the
- * last text size, format and paper size are kept on this computer. The large-print
+ * last text size, font, format and paper size are kept on this computer. The large-print
  * file is saved next to the original as "<name> - large print.<ext>" unless the
  * reader picks another place.
  */
 
+import { ARABIC_FONTS, DEFAULT_ARABIC_FONT, DEFAULT_LATIN_FONT, LATIN_FONTS } from '../fonts';
 import { OutputFormat, PaperSize, TextSize } from '../types';
 
 export interface SavedSettings {
@@ -14,6 +15,8 @@ export interface SavedSettings {
   customBodyPt: number | null;
   paperSize: PaperSize;
   outputFormat: Exclude<OutputFormat, 'searchable_pdf'>;
+  latinFont: string;
+  arabicFont: string;
 }
 
 export const DEFAULT_SETTINGS: SavedSettings = {
@@ -21,6 +24,8 @@ export const DEFAULT_SETTINGS: SavedSettings = {
   customBodyPt: null,
   paperSize: 'A4',
   outputFormat: 'pdf',
+  latinFont: DEFAULT_LATIN_FONT,
+  arabicFont: DEFAULT_ARABIC_FONT,
 };
 
 const SETTINGS_KEY = 'openlargeprint_settings';
@@ -37,6 +42,8 @@ export function loadSettings(): SavedSettings {
       customBodyPt: Number.isFinite(custom) && custom >= 14 && custom <= 48 ? custom : null,
       paperSize: data.paperSize === 'A3' ? 'A3' : 'A4',
       outputFormat: data.outputFormat === 'docx' || data.outputFormat === 'html' ? data.outputFormat : 'pdf',
+      latinFont: LATIN_FONTS.some((f) => f.id === data.latinFont) ? data.latinFont : DEFAULT_LATIN_FONT,
+      arabicFont: ARABIC_FONTS.some((f) => f.id === data.arabicFont) ? data.arabicFont : DEFAULT_ARABIC_FONT,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
