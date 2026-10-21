@@ -23,6 +23,8 @@ from typing import Dict, List, Tuple
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 
+from openlargeprint.text.normalize import fold_presentation_forms
+
 from .classifier import REPLACEMENT_GLYPHS
 from .glyphs import map_symbol_char
 
@@ -256,8 +258,12 @@ def extract_native_text(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage,
         mapped = map_symbol_char(ch, font_name)
         if mapped:
             ch = mapped
-        # Typographic ligatures (fi, fl, ffi) are one glyph but two or three letters.
+        # Typographic ligatures (fi, fl, ffi) are one glyph but two or three letters,
+        # and Arabic presentation forms stand for ordinary letters.
         ch = unicodedata.normalize("NFKC" if 0xFB00 <= ord(ch[0]) <= 0xFB06 else "NFC", ch)
+        ch = fold_presentation_forms(ch)
+        if not ch.strip():
+            continue
         # The nominal size is often 1pt with the real size in the text matrix, so the
         # glyph's loose box (ascent to descent, about 1.2 em) is the dependable measure.
         if y_bottom > y_top:
@@ -272,8 +278,68 @@ def extract_native_text(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage,
         pending_space = False
         result.visible_chars += 1
 
-    result.words = _chars_to_words(chars)
+    result.words = _chars_to_words(_restore_clusters(chars))
     return result
+
+
+def _restore_clusters(chars: List[_Char]) -> List[_Char]:
+    """Put the letters of a multi-letter Arabic glyph back in reading order.
+
+    A ligature such as lam-alef is one glyph whose ToUnicode entry holds two
+    letters. Depending on how the PDF was written, PDFium reports them in
+    reading order or reversed (it turns the whole right-to-left run around,
+    ligature included), so "لا" can come out as "ال" and "ين" as "ني". Inside
+    one glyph every letter but the last has to join the next one, which settles
+    most clusters; the rest follow the clusters on the same page that were
+    settled that way.
+    """
+    groups: List[List[_Char]] = []
+    i = 0
+    while i < len(chars):
+        j = i + 1
+        if is_rtl_char(chars[i].ch):
+            while j < len(chars) and is_rtl_char(chars[j].ch) and not chars[j].space_before \
+                    and _same_box(chars[i], chars[j]):
+                j += 1
+        groups.append(chars[i:j])
+        i = j
+    verdicts = [_cluster_verdict(g) if len(g) > 1 else None for g in groups]
+    reversed_votes = sum(v is True for v in verdicts)
+    reversed_page = reversed_votes > 0 and reversed_votes >= sum(v is False for v in verdicts)
+    out: List[_Char] = []
+    for group, verdict in zip(groups, verdicts):
+        if len(group) > 1 and (verdict or (verdict is None and reversed_page)):
+            group = group[::-1]
+            group[0].space_before, group[-1].space_before = group[-1].space_before, group[0].space_before
+        out.extend(group)
+    return out
+
+
+# Arabic letters that never join the letter after them (alef forms, dal, thal,
+# ra, zay, waw, teh marbuta, hamza and their Persian and Urdu relatives).
+_RIGHT_JOINING = set("\u0621\u0622\u0623\u0624\u0625\u0627\u0629\u062f\u0630\u0631\u0632\u0648"
+                     "\u0671\u0672\u0673\u0675\u0676\u0677\u0688\u0689\u068a\u068b\u068c\u068d"
+                     "\u068e\u068f\u0690\u0691\u0692\u0693\u0694\u0695\u0696\u0697\u0698\u0699"
+                     "\u06c0\u06c3\u06c4\u06c5\u06c6\u06c7\u06c8\u06c9\u06ca\u06cb\u06cd\u06d2\u06d3")
+
+
+def _joins_through(letters: str) -> bool:
+    letters = "".join(ch for ch in letters if unicodedata.category(ch) != "Mn")
+    return all(ch not in _RIGHT_JOINING for ch in letters[:-1])
+
+
+def _cluster_verdict(group: List[_Char]):
+    """True when the letters are reversed, False when in order, None when unsure."""
+    text = "".join(c.ch for c in group)
+    forward, backward = _joins_through(text), _joins_through(text[::-1])
+    if forward == backward:
+        return None
+    return backward
+
+
+def _same_box(a: _Char, b: _Char) -> bool:
+    tol = 0.02 * max(a.size, b.size)
+    return abs(a.x0 - b.x0) <= tol and abs(a.x1 - b.x1) <= tol and abs(a.base - b.base) <= tol
 
 
 def is_rtl_char(ch: str) -> bool:

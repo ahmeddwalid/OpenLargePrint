@@ -1,5 +1,8 @@
 """Tests for native PDF text extraction, column ordering, and provenance (PDF-002, PDF-006, OUT-005)."""
 
+import shutil
+
+import pytest
 from pathlib import Path
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -129,3 +132,49 @@ def test_line_aggregation_and_bullet_normalization(tmp_path: Path):
     assert len(bullet_blocks) == 1
     assert bullet_blocks[0].type == BlockType.LIST
 
+
+
+# --- multi-letter Arabic glyphs ----------------------------------------------
+
+def _cluster_chars(spec):
+    from openlargeprint.importers.pdf.textlayer import _Char
+    return [_Char(ch, x0, 0.0, x1, 12.0, 10.0, 10.0, False, False, space, "Noto")
+            for ch, x0, x1, space in spec]
+
+
+def test_lam_alef_ligature_keeps_its_reading_order():
+    # PDFium's report for "لا يجوز ... إلا" set by LibreOffice: each ligature's two
+    # letters share one box and arrive reversed.
+    from openlargeprint.importers.pdf.textlayer import _chars_to_words, _restore_clusters
+    chars = _cluster_chars([
+        ("ي", 209.7, 212.9, False), ("ج", 202.9, 210.1, False), ("و", 198.5, 203.3, False),
+        ("ز", 194.0, 198.5, False),
+        ("إ", 165.9, 168.7, True), ("ا", 160.5, 165.8, False), ("ل", 160.5, 165.8, False),
+        ("ف", 108.1, 112.2, True), ("ن", 97.1, 108.4, False), ("ي", 97.1, 108.4, False),
+    ])
+    words = [w.text for w in _chars_to_words(_restore_clusters(chars))]
+    assert words == ["يجوز", "إلا", "فين"]
+
+
+def test_word_start_ligature_keeps_the_space_before_it():
+    from openlargeprint.importers.pdf.textlayer import _chars_to_words, _restore_clusters
+    chars = _cluster_chars([
+        ("ق", 74.7, 78.7, False), ("ا", 71.8, 75.0, False), ("ل", 65.1, 71.8, False),
+        ("ا", 56.7, 62.1, True), ("ل", 56.7, 62.1, False),
+    ])
+    assert [w.text for w in _chars_to_words(_restore_clusters(chars))] == ["قال", "لا"]
+
+
+@pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice is not installed")
+def test_libreoffice_arabic_ligatures_round_trip(tmp_path):
+    import subprocess
+    import pypdfium2 as pdfium
+    from openlargeprint.importers.pdf.textlayer import PageFrame, extract_native_text
+    sentence = "لا يجوز نقضه إلا باتفاق الطرفين فلا تعديل"
+    html = tmp_path / "ar.html"
+    html.write_text(f'<html><body dir="rtl"><p>{sentence}</p></body></html>', encoding="utf-8")
+    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(tmp_path), str(html)],
+                   check=True, capture_output=True, timeout=180)
+    page = pdfium.PdfDocument(str(tmp_path / "ar.pdf"))[0]
+    words = extract_native_text(page, page.get_textpage(), PageFrame(page)).words
+    assert set(sentence.split()) == {w.text for w in words}

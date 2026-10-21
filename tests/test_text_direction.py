@@ -123,3 +123,16 @@ def test_brackets_in_right_to_left_text_are_mirrored_for_painting():
     # Painted left to right: the bracket left of the enclosed word must open to the right.
     assert visual.index("(") < visual.index(")")
     assert reorder_bidi_line("see (note) here", TextDirection.LTR) == "see (note) here"
+
+
+def test_presentation_forms_fold_to_letters_in_reading_order():
+    from openlargeprint.text.normalize import fold_presentation_forms
+    assert fold_presentation_forms("ﻻ") == "لا"
+    assert fold_presentation_forms("ﺍﻟﺴﻼﻡ") == "السلام"
+    assert fold_presentation_forms("x² ＡＢ") == "x² ＡＢ"  # other compatibility forms stay
+
+
+def test_ocr_lines_fold_presentation_forms():
+    from openlargeprint.ocr.paddle_engine import arabic_visual_to_logical
+    from openlargeprint.text.normalize import fold_presentation_forms
+    assert fold_presentation_forms(arabic_visual_to_logical("ﻻ")) == "لا"

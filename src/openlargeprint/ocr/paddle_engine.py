@@ -18,6 +18,7 @@ from typing import List, Optional, Tuple
 from PIL import Image
 
 from openlargeprint.security.isolation import log_safe_info
+from openlargeprint.text.normalize import fold_presentation_forms
 from .base import CancellationToken, EngineCapabilities, EnginePageResult, OcrDetectedLine, OcrWord
 from .worker import OcrWorker
 
@@ -148,7 +149,7 @@ class PaddleRapidOcrEngine:
                 continue
             words: List[OcrWord] = []
             if self.language == "ar":
-                clean = arabic_visual_to_logical(clean)
+                clean = fold_presentation_forms(arabic_visual_to_logical(clean))
             elif index < len(word_results):
                 for item in word_results[index] or ():
                     try:
