@@ -144,13 +144,13 @@ export const App: React.FC = () => {
     const timer = setTimeout(async () => {
       try {
         const res = await checkForUpdates(false);
-        if (res.available && res.latestVersion && !isUpdateDismissed(res.latestVersion)) {
+        if (res?.available && res.latestVersion && !isUpdateDismissed(res.latestVersion)) {
           setUpdateInfo(res);
         }
       } catch {
-        // Quiet fallback if offline or unreachable
+        // Offline or GitHub unreachable: the automatic check stays quiet; "Look now" reports it.
       }
-    }, 2000);
+    }, 3000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -401,7 +401,7 @@ export const App: React.FC = () => {
         </div>
 
         <div className="header-controls">
-          <SettingsMenu theme={theme} onThemeChange={setTheme} />
+          <SettingsMenu theme={theme} onThemeChange={setTheme} onUpdateFound={setUpdateInfo} />
         </div>
       </header>
 

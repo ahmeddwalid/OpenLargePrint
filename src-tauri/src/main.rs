@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod updater;
+
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -1060,106 +1062,11 @@ async fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
-#[tauri::command]
-async fn download_and_apply_update(
-    download_url: String,
-    expected_sha256: Option<String>,
-) -> Result<(), String> {
-    let url = tauri::Url::parse(&download_url).map_err(|_| "Invalid update URL.".to_string())?;
-    if url.scheme() != "https"
-        || url.host_str() != Some("github.com")
-        || !url
-            .path()
-            .starts_with("/ahmeddwalid/OpenLargePrint/releases/download/")
-        || !url.path().ends_with(".exe")
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.port().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err("Updates must come from the OpenLargePrint release repository.".to_string());
-    }
-    let expected = expected_sha256
-        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .ok_or_else(|| "A valid installer checksum is required.".to_string())?;
-
-    #[cfg(not(target_os = "windows"))]
-    let _ = expected;
-
-    #[cfg(target_os = "windows")]
-    {
-        let temp_dir = std::env::temp_dir().join(uuid_short());
-        std::fs::create_dir(&temp_dir)
-            .map_err(|_| "Could not create the update directory.".to_string())?;
-        let installer_path = temp_dir.join("OpenLargePrint_setup_update.exe");
-        let status = tokio::process::Command::new("curl.exe")
-            .args([
-                "--fail",
-                "-sSL",
-                "--proto",
-                "=https",
-                "--proto-redir",
-                "=https",
-                "--max-time",
-                "300",
-                "--max-filesize",
-                "2147483648",
-                &download_url,
-                "-o",
-                &installer_path.to_string_lossy(),
-            ])
-            .status()
-            .await
-            .map_err(|e| format!("Downloader error: {}", e))?;
-
-        if !status.success() {
-            return Err("Download process failed to complete successfully".to_string());
-        }
-
-        use sha2::{Digest, Sha256};
-        use std::io::Read;
-        let mut file = std::fs::File::open(&installer_path)
-            .map_err(|_| "Could not read the downloaded installer.".to_string())?;
-        let mut hash = Sha256::new();
-        let mut buffer = [0_u8; 65536];
-        loop {
-            let count = file
-                .read(&mut buffer)
-                .map_err(|_| "Could not verify the downloaded installer.".to_string())?;
-            if count == 0 {
-                break;
-            }
-            hash.update(&buffer[..count]);
-        }
-        drop(file);
-        if format!("{:x}", hash.finalize()) != expected.to_ascii_lowercase() {
-            let _ = std::fs::remove_file(&installer_path);
-            let _ = std::fs::remove_dir(&temp_dir);
-            return Err(
-                "The installer checksum does not match the release. Update cancelled.".to_string(),
-            );
-        }
-
-        let mut spawn_cmd = std::process::Command::new(&installer_path);
-        spawn_cmd
-            .spawn()
-            .map_err(|e| format!("Failed to start installer: {}", e))?;
-
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        std::process::exit(0);
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Err("In-app update application is supported on Windows".to_string())
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppSession::default())
+        .manage(updater::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             open_file_dialog,
             choose_save_dialog,
@@ -1176,33 +1083,12 @@ fn main() {
             get_review_data,
             retry_page,
             get_app_version,
-            download_and_apply_update
+            updater::check_for_update,
+            updater::install_update,
+            updater::open_release_page
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenLargePrint application");
-}
-
-#[cfg(test)]
-mod update_validation_tests {
-    use super::download_and_apply_update;
-
-    #[tokio::test]
-    async fn refuses_untrusted_installers_and_missing_checksums() {
-        let hash = "a".repeat(64);
-        for url in [
-            "http://github.com/ahmeddwalid/OpenLargePrint/releases/download/v1/setup.exe",
-            "https://example.com/setup.exe",
-            "https://github.com/other/project/releases/download/v1/setup.exe",
-        ] {
-            assert!(download_and_apply_update(url.into(), Some(hash.clone()))
-                .await
-                .is_err());
-        }
-        let url = "https://github.com/ahmeddwalid/OpenLargePrint/releases/download/v1/setup.exe";
-        for hash in [None, Some(String::new()), Some("z".repeat(64))] {
-            assert!(download_and_apply_update(url.into(), hash).await.is_err());
-        }
-    }
 }
 
 #[cfg(test)]

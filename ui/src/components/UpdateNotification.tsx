@@ -1,184 +1,92 @@
 import React, { useState } from 'react';
-import { UpdateInfo, dismissUpdate } from '../api/update-checker';
+import { UpdateInfo, dismissUpdate, installUpdate, openReleasePage } from '../api/update-checker';
+import { useI18n } from '../i18n/i18n';
 
 interface UpdateNotificationProps {
   updateInfo: UpdateInfo;
   onDismiss?: () => void;
 }
 
-export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
-  updateInfo,
-  onDismiss,
-}) => {
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+type Phase = { kind: 'idle' } | { kind: 'downloading'; percent: number } | { kind: 'starting' } | { kind: 'failed'; reason: string };
+
+export const UpdateNotification: React.FC<UpdateNotificationProps> = ({ updateInfo, onDismiss }) => {
+  const { t } = useI18n();
+  const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [showNotes, setShowNotes] = useState(false);
 
   if (!updateInfo.available || !updateInfo.latestVersion) {
     return null;
   }
 
-  const handleInstallUpdate = async () => {
-    if (!updateInfo.downloadUrl || !updateInfo.expectedSha256) {
-      if (updateInfo.releaseUrl) {
-        window.open(updateInfo.releaseUrl, '_blank');
-      }
+  const busy = phase.kind === 'downloading' || phase.kind === 'starting';
+  const installLabel = !updateInfo.canInstall
+    ? t('update.download_page')
+    : updateInfo.installKind === 'app_image'
+      ? t('update.install_restart')
+      : t('update.install');
+
+  const handleInstall = async () => {
+    if (!updateInfo.canInstall) {
+      openReleasePage().catch(() => setPhase({ kind: 'failed', reason: t('update.browser_failed') }));
       return;
     }
-
-    setIsUpdating(true);
-    setUpdateStatus('Downloading installer...');
-
+    setPhase({ kind: 'downloading', percent: 0 });
     try {
-      const tauri = (window as unknown as { __TAURI__?: { core?: { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-
-      if (tauri?.core?.invoke) {
-        setUpdateStatus('Downloading update package...');
-        await tauri.core.invoke('download_and_apply_update', {
-          downloadUrl: updateInfo.downloadUrl,
-          expectedSha256: updateInfo.expectedSha256,
-        });
-        setUpdateStatus('Launching installer...');
-      } else {
-        // Fallback for browser / non-Tauri mode
-        window.open(updateInfo.downloadUrl, '_blank');
-        setIsUpdating(false);
-      }
+      await installUpdate((downloaded, total) => {
+        if (total > 0 && downloaded >= total) setPhase({ kind: 'starting' });
+        else setPhase({ kind: 'downloading', percent: total > 0 ? Math.floor((downloaded / total) * 100) : 0 });
+      });
+      setPhase({ kind: 'starting' });
     } catch (err) {
-      console.error('Update installation error:', err);
-      setUpdateStatus('Automatic update could not start. Opening release page.');
-      setTimeout(() => {
-        if (updateInfo.releaseUrl) {
-          window.open(updateInfo.releaseUrl, '_blank');
-        }
-        setIsUpdating(false);
-      }, 1500);
+      setPhase({ kind: 'failed', reason: err instanceof Error ? err.message : String(err) });
     }
   };
 
   const handleDismiss = () => {
-    if (updateInfo.latestVersion) {
-      dismissUpdate(updateInfo.latestVersion);
-    }
-    if (onDismiss) {
-      onDismiss();
-    }
+    dismissUpdate(updateInfo.latestVersion as string);
+    onDismiss?.();
   };
 
-  return (
-    <div
-      role="region"
-      aria-label="Software update announcement"
-      style={{
-        backgroundColor: 'var(--bg-surface)',
-        border: '2px solid var(--border-color)',
-        borderRadius: 'var(--radius-md)',
-        padding: '16px 20px',
-        margin: '16px 0',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '12px',
-        }}
-      >
-        <div>
-          <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
-            OpenLargePrint {updateInfo.latestVersion} is available
-          </div>
-          <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Current installed version: {updateInfo.currentVersion}
-          </div>
-        </div>
+  const status =
+    phase.kind === 'downloading' ? t('update.downloading', { percent: String(phase.percent) })
+      : phase.kind === 'starting' ? t('update.starting')
+        : phase.kind === 'failed' ? t('update.failed', { reason: phase.reason })
+          : !updateInfo.canInstall ? t(updateInfo.installKind === 'manual' ? 'update.manual_hint' : 'update.page_hint')
+            : updateInfo.downloadSize ? t('update.size', { size: String(Math.round(updateInfo.downloadSize / 1048576)) })
+              : null;
 
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+  return (
+    <section className="update-banner" aria-labelledby="update-title">
+      <div className="update-banner-row">
+        <div>
+          <h2 id="update-title" className="update-title">
+            {t('update.title', { version: updateInfo.latestVersion })}
+          </h2>
+          <p className="field-help">{t('update.current', { version: updateInfo.currentVersion })}</p>
+        </div>
+        <div className="update-actions">
           {updateInfo.releaseNotes && (
-            <button
-              type="button"
-              onClick={() => setShowNotes(!showNotes)}
-              style={{
-                minHeight: '48px',
-                padding: '0 16px',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'transparent',
-                color: 'var(--text-primary)',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {showNotes ? 'Hide notes' : 'View changes'}
+            <button type="button" className="secondary-btn" aria-expanded={showNotes} onClick={() => setShowNotes(!showNotes)}>
+              {showNotes ? t('update.notes_hide') : t('update.notes_show')}
             </button>
           )}
-
-          <button
-            type="button"
-            disabled={isUpdating}
-            onClick={handleInstallUpdate}
-            style={{
-              minHeight: '48px',
-              padding: '0 20px',
-              borderRadius: 'var(--radius-sm)',
-              border: 'none',
-              backgroundColor: 'var(--accent-primary)',
-              color: 'var(--accent-text)',
-              fontWeight: 700,
-              cursor: isUpdating ? 'wait' : 'pointer',
-              opacity: isUpdating ? 0.7 : 1,
-            }}
-          >
-            {isUpdating ? (updateStatus ?? 'Updating...') : updateInfo.downloadUrl && updateInfo.expectedSha256 ? 'Download and install update' : 'View release downloads'}
+          <button type="button" className="primary-btn" disabled={busy} onClick={handleInstall}>
+            {phase.kind === 'failed' ? t('update.retry') : installLabel}
           </button>
-
-          <button
-            type="button"
-            onClick={handleDismiss}
-            style={{
-              minHeight: '48px',
-              padding: '0 16px',
-              borderRadius: 'var(--radius-sm)',
-              border: '1px solid var(--border-color)',
-              backgroundColor: 'transparent',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-            }}
-            aria-label="Dismiss update notification"
-          >
-            Dismiss
+          <button type="button" className="secondary-btn" disabled={busy} onClick={handleDismiss}>
+            {t('update.later')}
           </button>
         </div>
       </div>
-
-      {updateStatus && (
-        <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }} aria-live="polite">
-          {updateStatus}
-        </div>
+      {phase.kind === 'downloading' && (
+        <progress className="update-progress" max={100} value={phase.percent} aria-label={t('update.progress_aria')} />
       )}
-
-      {showNotes && updateInfo.releaseNotes && (
-        <div
-          style={{
-            padding: '12px 16px',
-            backgroundColor: 'var(--bg-primary)',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--border-color)',
-            maxHeight: '200px',
-            overflowY: 'auto',
-            fontSize: '0.9rem',
-            whiteSpace: 'pre-wrap',
-            color: 'var(--text-primary)',
-          }}
-        >
-          {updateInfo.releaseNotes}
-        </div>
+      {status && (
+        <p className={phase.kind === 'failed' ? 'update-status failed' : 'update-status'} role={phase.kind === 'failed' ? 'alert' : undefined} aria-live="polite">
+          {status}
+        </p>
       )}
-    </div>
+      {showNotes && updateInfo.releaseNotes && <div className="update-notes">{updateInfo.releaseNotes}</div>}
+    </section>
   );
 };

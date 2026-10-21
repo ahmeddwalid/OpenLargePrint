@@ -1,17 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppTheme } from '../types';
 import { Locale, useI18n } from '../i18n/i18n';
-import { CURRENT_VERSION, checkForUpdates, isAutoUpdateEnabled, setAutoUpdateEnabled } from '../api/update-checker';
+import { CURRENT_VERSION, UpdateInfo, checkForUpdates, isAutoUpdateEnabled, setAutoUpdateEnabled } from '../api/update-checker';
 
 interface SettingsMenuProps {
   theme: AppTheme;
   onThemeChange: (theme: AppTheme) => void;
+  onUpdateFound?: (info: UpdateInfo) => void;
 }
 
 const THEMES: AppTheme[] = ['sepia', 'light', 'dark', 'auto'];
 
 /** Appearance, language and updates: set once, so they live behind one button in the header. */
-export const SettingsMenu: React.FC<SettingsMenuProps> = ({ theme, onThemeChange }) => {
+export const SettingsMenu: React.FC<SettingsMenuProps> = ({ theme, onThemeChange, onUpdateFound }) => {
   const { t, locale, setLocale } = useI18n();
   const [open, setOpen] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState<boolean>(() => isAutoUpdateEnabled());
@@ -45,11 +46,16 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ theme, onThemeChange
     setStatus(t('settings.update_checking'));
     try {
       const result = await checkForUpdates(true);
-      setStatus(result.available && result.latestVersion
-        ? t('settings.update_available', { version: result.latestVersion })
-        : t('settings.update_current', { version: CURRENT_VERSION }));
-    } catch {
-      setStatus(t('settings.update_failed'));
+      if (!result) {
+        setStatus(t('settings.update_failed', { reason: t('settings.update_desktop_only') }));
+      } else if (result.available && result.latestVersion) {
+        setStatus(t('settings.update_available', { version: result.latestVersion }));
+        onUpdateFound?.(result);
+      } else {
+        setStatus(t('settings.update_current', { version: result.currentVersion }));
+      }
+    } catch (err) {
+      setStatus(t('settings.update_failed', { reason: err instanceof Error ? err.message : String(err) }));
     } finally {
       setChecking(false);
     }

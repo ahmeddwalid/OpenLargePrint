@@ -1,39 +1,49 @@
 /**
- * OpenLargePrint In-App Update Checker
+ * Looking for and installing new versions (SEC-009).
  *
- * SEC-009 compliant: This checker operates completely independently of the
- * document conversion pipeline. Zero network traffic is emitted during document
- * processing or conversion runs.
+ * The desktop app does the network work itself (src-tauri/src/updater.rs): it
+ * asks GitHub for the latest release, picks the file for this computer and
+ * checks its SHA-256 before installing. The web view only asks and shows the
+ * answer, so it never needs network access of its own. Converting documents
+ * never touches the network.
  */
+
+export type InstallKind = 'installer' | 'app_image' | 'manual';
 
 export interface UpdateInfo {
   available: boolean;
   currentVersion: string;
   latestVersion?: string;
-  releaseUrl?: string;
-  downloadUrl?: string;
   releaseNotes?: string;
   publishedAt?: string;
-  assetName?: string;
-  expectedSha256?: string;
+  installKind: InstallKind;
+  /** True when the app can download, verify and install the update itself. */
+  canInstall: boolean;
+  downloadSize?: number;
 }
 
 export const CURRENT_VERSION = '0.6.0';
-const REPO_OWNER = 'ahmeddwalid';
-const REPO_NAME = 'OpenLargePrint';
-const RELEASES_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
-
-const INSTALLER_ASSET = 'OpenLargePrint-Setup-x64.exe';
 
 const AUTO_UPDATE_KEY = 'openlargeprint_auto_update';
+const LAST_CHECK_KEY = 'openlargeprint_last_update_check';
 const DISMISSED_VERSION_KEY = 'openlargeprint_dismissed_update_version';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
+type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<any>;
+type Listen = (event: string, handler: (event: { payload: any }) => void) => Promise<() => void>;
+
+function desktop(): { invoke: Invoke; listen?: Listen } | null {
+  const tauri = (window as any)?.__TAURI__;
+  const invoke: Invoke | undefined = tauri?.core?.invoke || tauri?.invoke;
+  return invoke ? { invoke, listen: tauri?.event?.listen } : null;
+}
+
+/** Automatic checks are on unless the reader turned them off. */
 export function isAutoUpdateEnabled(): boolean {
   try {
-    const val = localStorage.getItem(AUTO_UPDATE_KEY);
-    return val === 'true';
+    return localStorage.getItem(AUTO_UPDATE_KEY) !== 'false';
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -41,13 +51,14 @@ export function setAutoUpdateEnabled(enabled: boolean): void {
   try {
     localStorage.setItem(AUTO_UPDATE_KEY, enabled ? 'true' : 'false');
   } catch {
-    // ignore storage errors
+    // Storage can be disabled; the choice then lasts for this session only.
   }
 }
 
+/** An update the reader dismissed is not offered again until a newer one appears. */
 export function isUpdateDismissed(version: string): boolean {
   try {
-    return sessionStorage.getItem(DISMISSED_VERSION_KEY) === version;
+    return localStorage.getItem(DISMISSED_VERSION_KEY) === version;
   } catch {
     return false;
   }
@@ -55,118 +66,96 @@ export function isUpdateDismissed(version: string): boolean {
 
 export function dismissUpdate(version: string): void {
   try {
-    sessionStorage.setItem(DISMISSED_VERSION_KEY, version);
+    localStorage.setItem(DISMISSED_VERSION_KEY, version);
   } catch {
     // ignore storage errors
   }
 }
 
-/**
- * Compares two semantic version strings (e.g. "0.1.0" and "v0.2.0").
- * Returns true if remote is strictly newer than current.
- */
+/** True when `remote` ("v0.7.0") is a later version than `current`. */
 export function isNewerVersion(current: string, remote: string): boolean {
-  const cleanCurrent = current.replace(/^v/i, '').trim();
-  const cleanRemote = remote.replace(/^v/i, '').trim();
-
-  const parseParts = (v: string) =>
-    v.split('.').map((p) => {
-      const num = parseInt(p, 10);
-      return isNaN(num) ? 0 : num;
-    });
-
-  const curParts = parseParts(cleanCurrent);
-  const remParts = parseParts(cleanRemote);
-
-  const maxLen = Math.max(curParts.length, remParts.length, 3);
-  while (curParts.length < maxLen) curParts.push(0);
-  while (remParts.length < maxLen) remParts.push(0);
-
-  for (let i = 0; i < maxLen; i++) {
-    if (remParts[i] > curParts[i]) return true;
-    if (remParts[i] < curParts[i]) return false;
+  const parse = (v: string) => {
+    const [core, pre] = v.replace(/^v/i, '').trim().split('-', 2);
+    const parts = core.split('.').map((p) => parseInt(p, 10));
+    if (!core || parts.some((n) => Number.isNaN(n))) return null;
+    while (parts.length < 3) parts.push(0);
+    return { parts, pre: pre ?? null };
+  };
+  const a = parse(current);
+  const b = parse(remote);
+  if (!a || !b) return false;
+  for (let i = 0; i < Math.max(a.parts.length, b.parts.length); i++) {
+    const x = a.parts[i] ?? 0;
+    const y = b.parts[i] ?? 0;
+    if (y !== x) return y > x;
   }
-
+  if (a.pre && !b.pre) return true;
+  if (a.pre && b.pre) return b.pre > a.pre;
   return false;
 }
 
+function fromDesktop(raw: any): UpdateInfo {
+  return {
+    available: Boolean(raw?.available),
+    currentVersion: String(raw?.current_version || CURRENT_VERSION),
+    latestVersion: raw?.latest_version || undefined,
+    releaseNotes: raw?.release_notes || undefined,
+    publishedAt: raw?.published_at || undefined,
+    installKind: raw?.install_kind === 'installer' || raw?.install_kind === 'app_image' ? raw.install_kind : 'manual',
+    canInstall: Boolean(raw?.can_install),
+    downloadSize: typeof raw?.download_size === 'number' ? raw.download_size : undefined,
+  };
+}
+
 /**
- * Checks GitHub Releases API for a newer version of OpenLargePrint.
+ * Ask whether a newer version exists. The automatic check at start-up runs at
+ * most once a day and not at all when turned off; `force` is the "Look now"
+ * button. Returns null when no check was made. Throws with a readable message
+ * when the check fails, so the reader is never told "up to date" by mistake.
  */
-export async function checkForUpdates(forceCheck: boolean = false): Promise<UpdateInfo> {
-  if (!forceCheck && !isAutoUpdateEnabled()) {
-    return { available: false, currentVersion: CURRENT_VERSION };
+export async function checkForUpdates(force = false): Promise<UpdateInfo | null> {
+  const app = desktop();
+  if (!app) return null;
+  if (!force) {
+    if (!isAutoUpdateEnabled()) return null;
+    try {
+      const last = Number(localStorage.getItem(LAST_CHECK_KEY));
+      if (Number.isFinite(last) && Date.now() - last < DAY_MS) return null;
+    } catch {
+      // no memory of the last check: check now
+    }
   }
-
+  const info = fromDesktop(await app.invoke('check_for_update'));
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const res = await fetch(RELEASES_API, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      return { available: false, currentVersion: CURRENT_VERSION };
-    }
-
-    const data = await res.json();
-    const tagName = typeof data?.tag_name === 'string' ? data.tag_name : '';
-    const releaseUrl = typeof data?.html_url === 'string' ? data.html_url : '';
-    const releaseNotes = typeof data?.body === 'string' ? data.body : '';
-    const publishedAt = typeof data?.published_at === 'string' ? data.published_at : '';
-
-    if (!tagName) {
-      return { available: false, currentVersion: CURRENT_VERSION };
-    }
-
-    const hasNewer = isNewerVersion(CURRENT_VERSION, tagName);
-    if (!hasNewer) {
-      return {
-        available: false,
-        currentVersion: CURRENT_VERSION,
-        latestVersion: tagName,
-      };
-    }
-
-    // Locate the Windows installer asset (.exe)
-    let downloadUrl: string | undefined;
-    let assetName: string | undefined;
-    let expectedSha256: string | undefined;
-
-    if (/Win/i.test(navigator.platform) && Array.isArray(data.assets)) {
-      type Asset = { name?: string; browser_download_url?: string; digest?: string };
-      const assets = data.assets as Asset[];
-      // The release carries one installer under a stable name; any other .exe is a fallback.
-      const exeAsset =
-        assets.find((a) => a.name === INSTALLER_ASSET) ||
-        assets.find((a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe'));
-      if (exeAsset) {
-        downloadUrl = exeAsset.browser_download_url;
-        assetName = exeAsset.name;
-        if (typeof exeAsset.digest === 'string' && /^sha256:[a-f0-9]{64}$/i.test(exeAsset.digest)) {
-          expectedSha256 = exeAsset.digest.slice(7);
-        }
-      }
-    }
-
-    return {
-      available: true,
-      currentVersion: CURRENT_VERSION,
-      latestVersion: tagName,
-      releaseUrl: releaseUrl || undefined,
-      downloadUrl: downloadUrl || releaseUrl || undefined,
-      releaseNotes: releaseNotes || undefined,
-      publishedAt: publishedAt || undefined,
-      assetName: assetName || undefined,
-      expectedSha256,
-    };
+    localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
   } catch {
-    return { available: false, currentVersion: CURRENT_VERSION };
+    // ignore storage errors
   }
+  return info;
+}
+
+/**
+ * Download, verify and start the update found by the last check; for a portable
+ * copy or a Linux package this opens the release page instead. Progress arrives
+ * as (downloaded, total) bytes.
+ */
+export async function installUpdate(onProgress?: (downloaded: number, total: number) => void): Promise<void> {
+  const app = desktop();
+  if (!app) throw new Error('Updates are installed from the desktop app.');
+  let stop: (() => void) | undefined;
+  if (onProgress && app.listen) {
+    stop = await app.listen('update-progress', (event) => {
+      onProgress(Number(event.payload?.downloaded) || 0, Number(event.payload?.total) || 0);
+    });
+  }
+  try {
+    await app.invoke('install_update');
+  } finally {
+    stop?.();
+  }
+}
+
+export async function openReleasePage(): Promise<void> {
+  const app = desktop();
+  if (app) await app.invoke('open_release_page');
 }
