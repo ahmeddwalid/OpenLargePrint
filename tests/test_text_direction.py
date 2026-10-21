@@ -136,3 +136,9 @@ def test_ocr_lines_fold_presentation_forms():
     from openlargeprint.ocr.paddle_engine import arabic_visual_to_logical
     from openlargeprint.text.normalize import fold_presentation_forms
     assert fold_presentation_forms(arabic_visual_to_logical("ﻻ")) == "لا"
+
+
+def test_arabic_indic_numbers_keep_their_digit_order():
+    from openlargeprint.text.bidi import reorder_bidi_line
+    shown = reorder_bidi_line("المادة ١٢٣ والبند 45")
+    assert "١٢٣" in shown and "45" in shown

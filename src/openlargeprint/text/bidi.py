@@ -15,12 +15,14 @@ def _get_char_direction(char: str) -> str:
     """Classify character into RTL, LTR, WS (whitespace), or NEUTRAL."""
     if char in (" ", "\t"):
         return "WS"
+    bidi_type = unicodedata.bidirectional(char)
+    if bidi_type in ("EN", "AN"):
+        return "LTR"  # numbers, Arabic-Indic digits included, read left to right
     if is_arabic_char(char):
         return "RTL"
-    bidi_type = unicodedata.bidirectional(char)
     if bidi_type in ("R", "AL"):
         return "RTL"
-    if bidi_type in ("L", "EN"):
+    if bidi_type == "L":
         return "LTR"
     return "NEUTRAL"
 
