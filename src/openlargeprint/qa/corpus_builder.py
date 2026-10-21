@@ -160,12 +160,10 @@ class BenchmarkCorpusBuilder:
         it produces replacement boxes, which turns the Arabic fixture into a page of
         noise and makes every Arabic measurement meaningless.
         """
-        relative = Path("ui") / "public" / "fonts" / "NotoSansArabic.ttf"
-        here = Path(__file__).resolve()
-        for parent in (here, *here.parents):
-            candidate = parent / relative
-            if candidate.exists():
-                return ImageFont.truetype(str(candidate), size)
+        from openlargeprint.exporters.fonts import arabic_choice, font_path
+        candidate = font_path(arabic_choice(None))
+        if candidate.exists():
+            return ImageFont.truetype(str(candidate), size)
         raise FileNotFoundError(
             "The bundled Arabic font is missing, so the Arabic benchmark page cannot be "
             "rendered with real Arabic text."

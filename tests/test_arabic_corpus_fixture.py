@@ -22,7 +22,7 @@ def test_arabic_fixture_renders_with_the_bundled_arabic_font() -> None:
     font = builder.arabic_font(28)
 
     assert isinstance(font, ImageFont.FreeTypeFont)
-    assert str(font.path).endswith("NotoSansArabic.ttf"), str(font.path)
+    assert str(font.path).endswith("NotoSansArabic-Regular.ttf"), str(font.path)
 
 
 def test_arabic_fixture_writes_ground_truth_for_both_lines(tmp_path: Path) -> None:

@@ -30,7 +30,7 @@ from .common import (
     styled_segments,
     table_as_entries,
 )
-from .fonts import bundled_font_dir
+from .fonts import FontChoice, arabic_choice, font_path, latin_choice
 
 
 def _data_url(path: str, mime: str) -> Optional[str]:
@@ -40,20 +40,19 @@ def _data_url(path: str, mime: str) -> Optional[str]:
     return f"data:{mime};base64,{base64.b64encode(file.read_bytes()).decode('ascii')}"
 
 
-def _font_faces(arabic: bool = False) -> str:
+def _font_faces(latin: FontChoice, arabic: Optional[FontChoice] = None) -> str:
+    """@font-face rules with the chosen fonts inside the page."""
     faces = []
-    if arabic:
-        # Only books with Arabic text carry the Arabic font, so others stay small.
-        url = _data_url(str(bundled_font_dir() / "NotoSansArabic.ttf"), "font/ttf")
-        if url:
-            faces.append(f'@font-face {{ font-family: "Noto Sans Arabic"; font-weight: 100 900; '
-                         f'src: url("{url}") format("truetype"); }}')
-    for weight, style, name in (("400", "normal", "Regular"), ("700", "normal", "Bold"),
-                                ("400", "italic", "Italic"), ("700", "italic", "BoldItalic")):
-        url = _data_url(str(bundled_font_dir() / f"AtkinsonHyperlegible-{name}.ttf"), "font/ttf")
-        if url:
-            faces.append(f'@font-face {{ font-family: "Atkinson Hyperlegible"; font-weight: {weight}; '
-                         f'font-style: {style}; src: url("{url}") format("truetype"); }}')
+    # Only books with Arabic text carry the Arabic font, so others stay small.
+    for choice in (latin, arabic) if arabic else (latin,):
+        for weight, style, name in (("400", "normal", "Regular"), ("700", "normal", "Bold"),
+                                    ("400", "italic", "Italic"), ("700", "italic", "BoldItalic")):
+            if name not in choice.styles:
+                continue
+            url = _data_url(str(font_path(choice, name)), "font/ttf")
+            if url:
+                faces.append(f'@font-face {{ font-family: "{choice.family}"; font-weight: {weight}; '
+                             f'font-style: {style}; src: url("{url}") format("truetype"); }}')
     return "\n".join(faces)
 
 
@@ -64,9 +63,9 @@ STYLE = """
 :root[data-theme="dark"] { --paper: #121210; --ink: #f2f0e8; --muted: #b9b4a6; --line: #55524a; --shade: #262521; --focus: #b8cf9a; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); color: var(--ink);
-  font-family: "Atkinson Hyperlegible", "DejaVu Sans", "Segoe UI", Arial, sans-serif;
+  font-family: "%(latin)s", "%(arabic)s", "DejaVu Sans", "Segoe UI", Arial, sans-serif;
   font-size: var(--size); line-height: var(--spacing); }
-[dir="rtl"] { font-family: "Noto Sans Arabic", "Segoe UI", "Arial", sans-serif; }
+[dir="rtl"] { font-family: "%(arabic)s", "%(latin)s", "Segoe UI", Arial, sans-serif; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .bar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
   padding: 10px 16px; background: var(--shade); border-bottom: 1px solid var(--line); font-size: 17px; line-height: 1.3; }
@@ -144,6 +143,7 @@ class ReaderExporter(BaseExporter):
         languages = Counter(b.language for b in doc.blocks if b.text and b.language)
         lang = languages.most_common(1)[0][0] if languages else "en"
         arabic = any(b.text_direction == TextDirection.RTL for b in doc.blocks)
+        latin_font, arabic_font = latin_choice(options.latin_font), arabic_choice(options.arabic_font)
         body: List[str] = [f"<h1>{title}</h1>", f'<p class="note">{html.escape(PRINT_REMINDER)}</p>']
         for block in doc.blocks:
             body.append(self._block(block))
@@ -158,8 +158,9 @@ class ReaderExporter(BaseExporter):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <style>
-{_font_faces(arabic)}
-{STYLE % {"size": f"{options.body_pt:g}", "spacing": options.line_spacing}}
+{_font_faces(latin_font, arabic_font if arabic else None)}
+{STYLE % {"size": f"{options.body_pt:g}", "spacing": options.line_spacing,
+          "latin": latin_font.family, "arabic": arabic_font.family}}
 </style>
 </head>
 <body>

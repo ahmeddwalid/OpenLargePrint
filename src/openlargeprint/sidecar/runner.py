@@ -41,6 +41,17 @@ from openlargeprint.sidecar.protocol import (
 )
 
 
+
+def _font_options(data: dict) -> dict:
+    """The reader's font choices; unknown names fall back to the defaults."""
+    from openlargeprint.exporters.fonts import ARABIC_FONTS, LATIN_FONTS
+    options = {}
+    if data.get("latin_font") in LATIN_FONTS:
+        options["latin_font"] = data["latin_font"]
+    if data.get("arabic_font") in ARABIC_FONTS:
+        options["arabic_font"] = data["arabic_font"]
+    return options
+
 class SidecarRunner:
     """Manages the lifecycle of the desktop sidecar engine over JSON-Lines IPC."""
 
@@ -251,6 +262,7 @@ class SidecarRunner:
             custom_body_pt=custom_body_pt,
             custom_line_spacing=custom_line_spacing,
             page_break_on_source_page=bool(data.get("page_break_on_source_page", False)),
+            **_font_options(data),
         )
 
         # "Automatic" genuinely means native-first with escalation, not Maximum accuracy.
@@ -436,6 +448,7 @@ class SidecarRunner:
             custom_body_pt=data.get("custom_body_pt"),
             custom_line_spacing=data.get("custom_line_spacing"),
             page_break_on_source_page=bool(data.get("page_break_on_source_page", False)),
+            **_font_options(data),
         )
 
         # Apply an optional source-page selection against the retained IR (OUT-010).

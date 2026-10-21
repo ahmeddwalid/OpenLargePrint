@@ -61,6 +61,8 @@ class ConvertCommand(BaseModel):
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
     page_break_on_source_page: bool = False
+    latin_font: Optional[str] = None
+    arabic_font: Optional[str] = None
 
 
 class ExportCommand(BaseModel):
@@ -79,6 +81,8 @@ class ExportCommand(BaseModel):
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
     page_break_on_source_page: bool = False
+    latin_font: Optional[str] = None
+    arabic_font: Optional[str] = None
 
 
 class CancelCommand(BaseModel):

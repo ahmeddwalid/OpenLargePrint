@@ -11,6 +11,7 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
 
 from openlargeprint.exporters import ExportOptions, PaperSize, PresetName
+from openlargeprint.exporters.fonts import ARABIC_FONTS, DEFAULT_ARABIC, DEFAULT_LATIN, LATIN_FONTS
 from openlargeprint.ir.serialization import document_to_json
 from openlargeprint.ocr.router import RoutingMode
 from openlargeprint.pipeline import PipelineOrchestrator
@@ -75,6 +76,18 @@ def main() -> int:
         choices=[p.value for p in PaperSize],
         default=PaperSize.A4.value,
         help="Paper size target: A4 (default) or A3",
+    )
+    convert_parser.add_argument(
+        "--latin-font",
+        choices=list(LATIN_FONTS),
+        default=DEFAULT_LATIN,
+        help="Reading font for Latin script (default: atkinson)",
+    )
+    convert_parser.add_argument(
+        "--arabic-font",
+        choices=list(ARABIC_FONTS),
+        default=DEFAULT_ARABIC,
+        help="Reading font for Arabic script (default: noto-sans-arabic)",
     )
     convert_parser.add_argument(
         "--page-range",
@@ -148,6 +161,8 @@ def main() -> int:
                 custom_body_pt=args.body_pt,
                 custom_line_spacing=args.line_spacing,
                 page_break_on_source_page=bool(getattr(args, "page_break_on_source_page", False)),
+                latin_font=args.latin_font,
+                arabic_font=args.arabic_font,
             )
 
             page_range = tuple(args.page_range) if args.page_range else None

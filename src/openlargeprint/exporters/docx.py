@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import docx
 from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -41,7 +41,7 @@ from .common import (
     styled_segments,
     table_as_entries,
 )
-from .fonts import FONT_FAMILY, bundled_font_dir
+from .fonts import FontChoice, arabic_choice, font_path, latin_choice
 
 _ILLEGAL_XML_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]")
 INK = RGBColor(0x1A, 0x1A, 0x1A)
@@ -109,6 +109,8 @@ class DocxExporter(BaseExporter):
         output_path = Path(output_path)
         log_safe_info(f"Writing large-print Word document at {options.body_pt}pt on {options.paper_size.value}")
         self._options = options
+        self._latin = latin_choice(options.latin_font)
+        self._arabic = arabic_choice(options.arabic_font)
         self._pages = pages_by_number(doc)
         document = docx.Document()
         self._document = document
@@ -123,7 +125,8 @@ class DocxExporter(BaseExporter):
             view = OxmlElement("w:view")
             settings.insert(0, view)
         view.set(qn("w:val"), "print")
-        self._embed_fonts(document)
+        has_rtl = any(block.text_direction == TextDirection.RTL for block in doc.blocks)
+        self._embed_fonts(document, [self._latin] + ([self._arabic] if has_rtl else []))
         props = document.core_properties
         props.title = clean_xml_string(doc.metadata.title) or "Large print"
         props.author = "OpenLargePrint"
@@ -158,7 +161,7 @@ class DocxExporter(BaseExporter):
 
         def base(style, size, bold=False, italic=False, color=INK, before=0.0, after=0.0, keep=False, spacing=None):
             font = style.font
-            font.name = FONT_FAMILY
+            font.name = self._latin.family
             font.size = Pt(size)
             font.bold = bold
             font.italic = italic
@@ -169,7 +172,7 @@ class DocxExporter(BaseExporter):
                 fonts = OxmlElement("w:rFonts")
                 rpr.insert(0, fonts)
             for attr in ("w:ascii", "w:hAnsi", "w:eastAsia"):
-                fonts.set(qn(attr), FONT_FAMILY)
+                fonts.set(qn(attr), self._latin.family)
             # Theme font references win over named fonts; the built-in headings carry them.
             for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme"):
                 fonts.attrib.pop(qn(attr), None)
@@ -180,7 +183,7 @@ class DocxExporter(BaseExporter):
                 if value is not None:
                     element.set(qn("w:val"), value)
                 _place(rpr, element, _RPR_ORDER)
-            fonts.set(qn("w:cs"), "Noto Sans Arabic")
+            fonts.set(qn("w:cs"), self._arabic.family)
             fmt = style.paragraph_format
             fmt.space_before = Pt(before)
             fmt.space_after = Pt(after)
@@ -272,8 +275,8 @@ class DocxExporter(BaseExporter):
         text(" of ")
         field("NUMPAGES")
 
-    def _embed_fonts(self, document) -> None:
-        """Embed the reading font so Word shows it on any computer."""
+    def _embed_fonts(self, document, choices: List[FontChoice]) -> None:
+        """Embed the reading fonts so Word shows them on any computer."""
         try:
             font_part = document.part.part_related_by(RT.FONT_TABLE)
         except KeyError:
@@ -282,22 +285,26 @@ class DocxExporter(BaseExporter):
         if table is None:
             from docx.oxml.parser import parse_xml
             table = parse_xml(font_part.blob)
-        entry = OxmlElement("w:font")
-        entry.set(qn("w:name"), FONT_FAMILY)
-        for tag, filename in (("embedRegular", "Regular"), ("embedBold", "Bold"),
-                              ("embedItalic", "Italic"), ("embedBoldItalic", "BoldItalic")):
-            source = bundled_font_dir() / f"AtkinsonHyperlegible-{filename}.ttf"
-            if not source.is_file():
-                return
-            key = "{" + str(uuid.uuid4()).upper() + "}"
-            part = Part(PackURI(f"/word/fonts/font{filename}.odttf"), FONT_CONTENT_TYPE,
-                        _obfuscate(source.read_bytes(), key), document.part.package)
-            rid = font_part.relate_to(part, FONT_REL)
-            embed = OxmlElement(f"w:{tag}")
-            embed.set(qn("r:id"), rid)
-            embed.set(qn("w:fontKey"), key)
-            entry.append(embed)
-        table.append(entry)
+        for choice in choices:
+            entry = OxmlElement("w:font")
+            entry.set(qn("w:name"), choice.family)
+            for tag, style in (("embedRegular", "Regular"), ("embedBold", "Bold"),
+                               ("embedItalic", "Italic"), ("embedBoldItalic", "BoldItalic")):
+                if style not in choice.styles:
+                    continue
+                source = font_path(choice, style)
+                if not source.is_file():
+                    continue
+                key = "{" + str(uuid.uuid4()).upper() + "}"
+                part = Part(PackURI(f"/word/fonts/{choice.file_prefix}-{style}.odttf"), FONT_CONTENT_TYPE,
+                            _obfuscate(source.read_bytes(), key), document.part.package)
+                rid = font_part.relate_to(part, FONT_REL)
+                embed = OxmlElement(f"w:{tag}")
+                embed.set(qn("r:id"), rid)
+                embed.set(qn("w:fontKey"), key)
+                entry.append(embed)
+            if len(entry):
+                table.append(entry)
         if not hasattr(font_part, "element"):
             from lxml import etree
             font_part._blob = etree.tostring(table, xml_declaration=True, encoding="UTF-8", standalone=True)

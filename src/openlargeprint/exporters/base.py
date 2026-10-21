@@ -52,14 +52,21 @@ class ExportOptions:
     preset: PresetName = PresetName.LARGE
     paper_size: PaperSize = PaperSize.A4
     include_page_markers: bool = True
-    font_family: str = "Atkinson Hyperlegible"
-    fallback_font: str = "Arial"
+    latin_font: str = "atkinson"
+    arabic_font: str = "noto-sans-arabic"
     custom_body_pt: Optional[float] = None
     custom_line_spacing: Optional[float] = None
     monochrome: bool = False
     page_break_on_source_page: bool = False
 
     def __post_init__(self) -> None:
+        from .fonts import ARABIC_FONTS, DEFAULT_ARABIC, DEFAULT_LATIN, LATIN_FONTS
+        self.latin_font = self.latin_font or DEFAULT_LATIN
+        self.arabic_font = self.arabic_font or DEFAULT_ARABIC
+        if self.latin_font not in LATIN_FONTS:
+            raise ValueError(f"Unknown reading font: {self.latin_font}")
+        if self.arabic_font not in ARABIC_FONTS:
+            raise ValueError(f"Unknown Arabic reading font: {self.arabic_font}")
         self.preset = PresetName(self.preset)
         self.paper_size = PaperSize(self.paper_size)
         if self.preset == PresetName.CUSTOM:

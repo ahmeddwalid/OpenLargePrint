@@ -1,6 +1,6 @@
 """Large-print PDF built from DocumentIR with ReportLab (OUT-003, OUT-005..009).
 
-Text is set ragged-right in Atkinson Hyperlegible at the chosen size, with
+Text is set ragged-right in the reader's chosen fonts at the chosen size, with
 headings, hanging-indent lists, answer lines, boxed notes, real tables and
 pictures enlarged with the text. A thin rule and a label mark where each
 original page begins, and the footer says which original pages a sheet holds.
@@ -102,7 +102,8 @@ class RtlParagraph(Flowable):
         return lines
 
     def _build(self, width: float) -> Paragraph:
-        visual = [self._render(reorder_bidi_line(line, TextDirection.RTL)) for line in self._lines(width)]
+        visual = [self._render(reorder_bidi_line(line, TextDirection.RTL), self.style.fontName)
+                  for line in self._lines(width)]
         return Paragraph("<br/>".join(visual), self.style)
 
     def wrap(self, availWidth, availHeight):
@@ -187,7 +188,7 @@ class PdfExporter(BaseExporter):
         else:
             page_size, margin = A4, 18 * mm
         bottom = margin + 8 * mm  # room for the footer
-        fonts = output_fonts()
+        fonts = output_fonts(options.latin_font, options.arabic_font)
         template = _Doc(
             str(output_path), pagesize=page_size, leftMargin=margin, rightMargin=margin,
             topMargin=margin, bottomMargin=bottom,
@@ -223,7 +224,7 @@ class PdfExporter(BaseExporter):
     def _prepare(self, options: ExportOptions, width: float, height: float,
                  pages: Optional[Dict[int, PageMetadata]] = None) -> None:
         """Fonts, styles and frame size used while building flowables."""
-        self._fonts = output_fonts()
+        self._fonts = output_fonts(options.latin_font, options.arabic_font)
         self._styles = self._make_styles(options, self._fonts)
         self._options = options
         self._width = width
@@ -268,8 +269,9 @@ class PdfExporter(BaseExporter):
                                leading=max(small, b * 0.88) * 1.3),
         }
         for key in list(styles):
+            bold = styles[key].fontName in (fonts.bold, fonts.bold_italic)
             rtl = ParagraphStyle(f"{styles[key].name}Rtl", parent=styles[key], alignment=TA_RIGHT,
-                                 fontName=fonts.arabic)
+                                 fontName=fonts.arabic_bold if bold else fonts.arabic)
             styles[f"{key}_rtl"] = rtl
         return styles
 
@@ -283,8 +285,8 @@ class PdfExporter(BaseExporter):
                 for segment, tags in styled_segments(text, block.styles if block else [], offset))
         return result.replace(BLANK_TOKEN, "<u>" + "&nbsp;" * 12 + "</u>").replace("\n", "<br/>")
 
-    def _render_line(self, visual: str) -> str:
-        return markup(visual, self._fonts).replace(BLANK_TOKEN, "<u>" + "&nbsp;" * 12 + "</u>")
+    def _render_line(self, visual: str, base: Optional[str] = None) -> str:
+        return markup(visual, self._fonts, base).replace(BLANK_TOKEN, "<u>" + "&nbsp;" * 12 + "</u>")
 
     def _paragraph(self, text: str, style: ParagraphStyle, **kwargs):
         if isinstance(text, RtlText):

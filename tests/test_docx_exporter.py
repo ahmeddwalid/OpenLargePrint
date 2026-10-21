@@ -247,7 +247,7 @@ def test_docx_package_is_well_formed_for_word(tmp_path: Path):
         assert embed is not None
         key = embed.get(f"{w}fontKey")
         guid = bytes.fromhex(key.strip("{}").replace("-", ""))[::-1]
-        data = package.read("word/fonts/fontRegular.odttf")
+        data = package.read("word/fonts/AtkinsonHyperlegible-Regular.odttf")
         restored = bytes(data[i] ^ guid[i % 16] for i in range(32)) + data[32:]
         assert restored[:4] == b"\x00\x01\x00\x00"
 
