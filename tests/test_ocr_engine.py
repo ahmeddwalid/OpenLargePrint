@@ -123,3 +123,27 @@ def test_arabic_recognition_reads_words_in_reading_order():
     text = " ".join(line.text for line in result.lines)
     assert "العقد شريعة المتعاقدين" in text, text
 
+
+def test_upright_lines_are_not_turned_upside_down():
+    """The per-line orientation classifier flipped upright lines into letter salad."""
+    from PIL import ImageFilter
+    from openlargeprint.exporters.fonts import font_path, latin_choice
+    lines = ["Agreement clause within clause court payment clause obligation liability written payment shall",
+             "Days clause law payment notice obligation days evidence contract shall consent law",
+             "Payment agreement agreement agreement within party remedy liability payment clause notice",
+             "Within obligation shall notice days agreement within evidence court obligation agreement"]
+    font = ImageFont.truetype(str(font_path(latin_choice("noto-serif"))), 30)
+    image = Image.new("L", (1400, 60 + 110 * len(lines)), 255)
+    draw = ImageDraw.Draw(image)
+    for index, line in enumerate(lines):
+        draw.text((20, 20 + index * 110), line, fill=0, font=font)
+    # Small print, slightly soft and enlarged, as on a 200 dpi scan read at 300 dpi.
+    image = image.filter(ImageFilter.GaussianBlur(0.5)).resize((2100, int(image.height * 1.5)), Image.BILINEAR)
+    engine = PaddleRapidOcrEngine()
+    try:
+        result = engine.analyze_page(image.convert("RGB"), page_num=1)
+    finally:
+        engine.close()
+    text = " ".join(line.text for line in result.lines)
+    for line in lines:
+        assert line[:40] in text, text

@@ -64,6 +64,8 @@ SHOW_ORIGINAL_CONFIDENCE = 0.7
 MIN_NATIVE_CHARS = 40
 # Clean print reads above 0.9; below this the other script's recogniser is tried too.
 SECOND_SCRIPT_BELOW = 0.8
+UPSIDE_DOWN_BELOW = 0.8  # a page read this poorly is also tried upside down
+THIN_PAGE_LETTERS = 150  # a page read this thinly is also read with the other script
 
 
 def _save_image(image: Image.Image, path_stem: Path, alt: str) -> ImageAsset:
@@ -261,7 +263,15 @@ class NativePdfImporter(BaseImporter):
                 meta.classification = PageClassification.MIXED
         elif recognise:
             method = ExtractionMethod.OCR_MAXIMUM if self.routing_mode == RoutingMode.MAXIMUM_ACCURACY else ExtractionMethod.OCR_FAST
-            words, page_confidence = self._recognise(image, hi_scale, page_num, language, cancel_check)
+            words, page_confidence, turned = self._recognise(image, hi_scale, page_num, language, cancel_check)
+            if turned:
+                # Everything after this works on the page the right way up.
+                image = image.rotate(180)
+                layout_image = layout_image.rotate(180)
+                page_layout = layout.detect(layout_image, width, height)
+                regions = page_layout.regions
+                frame = PageFrame(page, (frame.quarter + 2) % 4)
+                meta.details["reading_rotation"] = frame.degrees
         else:
             words = []
 
@@ -362,21 +372,32 @@ class NativePdfImporter(BaseImporter):
 
     # ------------------------------------------------------------------
     def _recognise(self, image: Image.Image, scale: float, page_num: int, language: str,
-                   cancel_check: Optional[CancelCheck]) -> Tuple[List[Word], float]:
+                   cancel_check: Optional[CancelCheck]) -> Tuple[List[Word], float, bool]:
         """Recognise a page; when one script reads poorly, try the other and keep the better.
+
+        The third value is True when the page was scanned upside down; the words
+        are then placed on the page turned the right way up.
 
         The first guess (file name, earlier pages) is only a guess: an Arabic file
         name often holds an English book and the reverse, so a weak result in one
         script is always compared with the other.
         """
-        def run(script: str):
+        def run_image(picture: Image.Image, script: str):
             engine = self._engine_for(script)
-            result = engine.analyze_page(image, page_num=page_num, language_hints=(script,),
+            result = engine.analyze_page(picture, page_num=page_num, language_hints=(script,),
                                          cancellation=CancellationToken(cancel_check))
             if result.cancelled or (cancel_check and cancel_check()):
                 raise InterruptedError("Conversion cancelled.")
             confidences = [line.confidence for line in result.lines]
             return result, (statistics.mean(confidences) if confidences else 0.0)
+
+        def run(script: str):
+            return run_image(image, script)
+
+        def amount(result) -> float:
+            # Confidently read letters: one sure "100000" on a page of Arabic read
+            # with the Latin recogniser is much less than the page really holds.
+            return sum(line.confidence * sum(ch.isalnum() for ch in line.text) for line in result.lines)
 
         try:
             result, mean = run(language)
@@ -389,17 +410,29 @@ class NativePdfImporter(BaseImporter):
             log_safe_info(f"Arabic recognition unavailable on page {page_num} ({type(exc).__name__})")
             language = "en"
             result, mean = run(language)
-        if self._injected_engine is None and mean < SECOND_SCRIPT_BELOW:
+        if self._injected_engine is None and (mean < SECOND_SCRIPT_BELOW or amount(result) < THIN_PAGE_LETTERS):
             other = "en" if language == "ar" else "ar"
             try:
                 alternative, alt_mean = run(other)
-                if alt_mean > mean + 0.1:
+                if alt_mean > mean + 0.1 or (alt_mean >= 0.6 and amount(alternative) > 1.5 * amount(result) + 20):
                     result, mean = alternative, alt_mean
             except InterruptedError:
                 raise
             except Exception as exc:
                 log_safe_info(f"Second recognition pass skipped on page {page_num} ({type(exc).__name__})")
-        return ocr_words(result, scale), mean
+        if self._injected_engine is None and mean < UPSIDE_DOWN_BELOW:
+            # A page scanned upside down reads as noise; try it turned round.
+            try:
+                turned = image.rotate(180)
+                flipped, flipped_mean = run_image(turned, language)
+                if flipped_mean > mean + 0.15 and amount(flipped) > amount(result):
+                    log_safe_info(f"Page {page_num} was scanned upside down")
+                    return ocr_words(flipped, scale), flipped_mean, True
+            except InterruptedError:
+                raise
+            except Exception as exc:
+                log_safe_info(f"Upside-down check skipped on page {page_num} ({type(exc).__name__})")
+        return ocr_words(result, scale), mean, False
 
     def _recognise_empty_regions(self, page, frame: PageFrame, regions: List[LayoutRegion], words: List[Word],
                                  meta: PageMetadata, language: str, cancel_check) -> List[Word]:

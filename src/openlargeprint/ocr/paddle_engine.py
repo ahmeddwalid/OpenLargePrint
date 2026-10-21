@@ -68,7 +68,10 @@ class PaddleRapidOcrEngine:
         threads = min(MAX_CPU_THREADS, max(1, (os.cpu_count() or 4) - 1))
         params = {
             "Global.log_level": "error",
-            "Global.use_cls": True,
+            # The per-line orientation classifier turns many upright lines upside
+            # down (and they come out as letter salad); a page that reads badly is
+            # tried upside down as a whole instead (importers/pdf/native.py).
+            "Global.use_cls": False,
             "Det.model_path": str(det),
             "Det.ocr_version": OCRVersion.PPOCRV6, "Det.model_type": ModelType.SMALL,
             "Cls.model_path": str(cls),

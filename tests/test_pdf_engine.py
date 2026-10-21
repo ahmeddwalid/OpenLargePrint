@@ -515,3 +515,53 @@ def test_heading_drawn_as_outlines_is_recognised_on_a_text_page(tmp_path: Path):
     texts = _texts(doc)
     assert ocr.calls == 1  # only the empty heading region, never the native text
     assert texts.index("Chapter One") < texts.index("Body text that the page does contain as characters.")
+
+
+def test_confident_but_thin_latin_reading_is_compared_with_arabic(tmp_path: Path, monkeypatch):
+    """An Arabic page read with the Latin recogniser can yield one confident number and
+    nothing else; the Arabic reading holds far more text and must win."""
+    latin = RecordingOcr([("100000", (300, 300, 600, 360), 0.99)])
+    arabic = RecordingOcr([("لا يجوز نقضه إلا باتفاق الطرفين", (300, 300, 1200, 360), 0.9),
+                           ("العقد شريعة المتعاقدين", (300, 400, 1200, 460), 0.9)])
+    _route(monkeypatch, {"ar": arabic, "en": latin})
+    importer = NativePdfImporter(layout_detector=HeuristicLayoutDetector())
+    with JobWorkspace() as workspace:
+        doc = importer.import_document(_scan_pdf(tmp_path / "scan.pdf"), workspace)
+    text = " ".join(_texts(doc))
+    assert "لا يجوز نقضه إلا باتفاق الطرفين" in text
+
+
+class OrientationOcr(RecordingOcr):
+    """Reads well only when the dark mark printed at the top-left is at the top-left."""
+
+    def analyze_page(self, image, **kwargs):
+        self.calls += 1
+        upright = image.convert("L").getpixel((int(image.width * 0.05), int(image.height * 0.05))) < 128
+        text, conf = ("Judicial review of the decision", 0.97) if upright else ("ssj uo nnn", 0.62)
+        return EnginePageResult(lines=[OcrDetectedLine(
+            text=text, polygon=[(300, 300), (1500, 300), (1500, 360), (300, 360)], confidence=conf)])
+
+
+def test_page_scanned_upside_down_is_read_turned_round(tmp_path: Path, monkeypatch):
+    picture = Image.new("RGB", (600, 840), "white")
+    picture.paste((0, 0, 0), (480, 680, 600, 840))  # the top-left mark, upside down
+    source = tmp_path / "page.png"
+    picture.save(source)
+    pdf = tmp_path / "upside.pdf"
+    c = canvas.Canvas(str(pdf), pagesize=A4)
+    c.drawImage(str(source), 0, 0, *A4)
+    c.save()
+    engine = OrientationOcr()
+    _route(monkeypatch, {"ar": engine, "en": engine})
+    importer = NativePdfImporter(layout_detector=HeuristicLayoutDetector())
+    with JobWorkspace() as workspace:
+        doc = importer.import_document(pdf, workspace)
+    assert "Judicial review of the decision" in " ".join(_texts(doc))
+    assert doc.pages[0].details.get("reading_rotation") == 180
+
+
+def test_arabic_line_without_word_boxes_places_its_first_word_at_the_right():
+    from openlargeprint.importers.pdf.scanned import ocr_words
+    line = OcrDetectedLine(text="نقضه العقد طبقا", polygon=[(0, 0), (300, 0), (300, 30), (0, 30)], confidence=0.9)
+    words = ocr_words(EnginePageResult(lines=[line]), 1.0)
+    assert [w.text for w in sorted(words, key=lambda w: -w.x0)] == ["نقضه", "العقد", "طبقا"]
