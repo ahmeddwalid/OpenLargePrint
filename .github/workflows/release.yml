@@ -1,6 +1,6 @@
 name: Release
 
-# A version tag (v0.6.0) builds Windows and Linux packages on their own runners,
+# A version tag (v0.7.0) builds Windows and Linux packages on their own runners,
 # tests each package by converting real documents with the packaged engine, and
 # only then publishes one GitHub Release with every file and SHA256SUMS.txt.
 # Release branches and manual runs build and test the packages without publishing.

@@ -22,7 +22,7 @@ export interface UpdateInfo {
   downloadSize?: number;
 }
 
-export const CURRENT_VERSION = '0.6.0';
+export const CURRENT_VERSION = '0.7.0';
 
 const AUTO_UPDATE_KEY = 'openlargeprint_auto_update';
 const LAST_CHECK_KEY = 'openlargeprint_last_update_check';

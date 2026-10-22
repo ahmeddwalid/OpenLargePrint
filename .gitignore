@@ -90,3 +90,5 @@ src/openlargeprint/models/weights/
 
 # Reading fonts copied in from the engine at build time
 ui/public/fonts/reading/
+coverage.xml
+pytest-results.xml
