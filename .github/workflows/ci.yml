@@ -46,7 +46,10 @@ jobs:
       - name: Fetch pinned models (verified by SHA-256)
         run: uv run python scripts/fetch_models.py
       - name: Run pytest with coverage
-        run: uv run pytest tests/ --cov=openlargeprint --cov-report=xml -v
+        run: uv run pytest tests/ --cov=openlargeprint --cov-report=xml -v --junitxml=pytest-results.xml
+      - name: Show failing tests on the run summary
+        if: failure()
+        run: uv run python packaging/annotate_failures.py pytest-results.xml
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
