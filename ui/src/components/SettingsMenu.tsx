@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppTheme } from '../types';
 import { Locale, useI18n } from '../i18n/i18n';
+import { isGpuAllowed, isWindows, setGpuAllowed } from '../api/settings';
 import { CURRENT_VERSION, UpdateInfo, checkForUpdates, isAutoUpdateEnabled, setAutoUpdateEnabled } from '../api/update-checker';
 
 interface SettingsMenuProps {
@@ -16,6 +17,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ theme, onThemeChange
   const { t, locale, setLocale } = useI18n();
   const [open, setOpen] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState<boolean>(() => isAutoUpdateEnabled());
+  const [gpu, setGpu] = useState<boolean>(() => isGpuAllowed());
   const [status, setStatus] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -100,6 +102,24 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ theme, onThemeChange
               <option value="ar">{t('lang.ar')}</option>
             </select>
           </div>
+          {isWindows() && (
+            <div className="field">
+              <span className="field-label">{t('settings.speed')}</span>
+              <label className="check-row" htmlFor="use-gpu">
+                <input
+                  id="use-gpu"
+                  type="checkbox"
+                  checked={gpu}
+                  onChange={(e) => {
+                    setGpu(e.target.checked);
+                    setGpuAllowed(e.target.checked);
+                  }}
+                />
+                <span className="check-title">{t('settings.gpu')}</span>
+              </label>
+              <span className="field-help">{t('settings.gpu_help')}</span>
+            </div>
+          )}
           <div className="field">
             <span className="field-label">{t('settings.updates')}</span>
             <label className="check-row" htmlFor="auto-update">

@@ -43,8 +43,9 @@ class PPDocLayoutDetector:
 
         from openlargeprint import runtime
 
+        self.providers = runtime.providers()
         self._session = ort.InferenceSession(model_path, sess_options=runtime.session_options(ort),
-                                             providers=runtime.providers())
+                                             providers=self.providers)
         labels = self._session.get_modelmeta().custom_metadata_map.get("character", "").splitlines()
         if not labels:
             raise RuntimeError("The layout model has no label table.")
@@ -94,7 +95,11 @@ _detector: Optional[object] = None
 def get_layout_detector():
     """Process-wide detector; falls back to the heuristic detector if the model is unavailable."""
     global _detector
+    from openlargeprint import runtime
+
     with _detector_lock:
+        if _detector is not None and getattr(_detector, "providers", None) not in (None, runtime.providers()):
+            _detector = None  # the graphics card was turned on or off since it was loaded
         if _detector is None:
             try:
                 path = model_manager.get_model_path(LAYOUT_MODEL_KEY, verify=True)

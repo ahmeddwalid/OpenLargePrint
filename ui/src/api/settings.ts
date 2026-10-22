@@ -118,3 +118,26 @@ export function describePath(path: string): { folder: string; name: string } {
   const { folder, name } = splitPath(path);
   return { folder, name };
 }
+
+const GPU_KEY = 'openlargeprint_use_gpu';
+
+/** Windows only: whether conversions may use the graphics card (on unless turned off). */
+export function isGpuAllowed(): boolean {
+  try {
+    return localStorage.getItem(GPU_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function setGpuAllowed(allowed: boolean): void {
+  try {
+    localStorage.setItem(GPU_KEY, allowed ? 'true' : 'false');
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function isWindows(): boolean {
+  return typeof navigator !== 'undefined' && /Win/i.test(navigator.userAgent || navigator.platform || '');
+}

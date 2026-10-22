@@ -14,7 +14,7 @@ import { TextSizeSelector } from './components/TextSizeSelector';
 import { UpdateNotification } from './components/UpdateNotification';
 import { sidecar } from './api/sidecarClient';
 import { UpdateInfo, checkForUpdates, isUpdateDismissed } from './api/update-checker';
-import { loadSettings, proposedOutputPath, saveSettings, SavedSettings } from './api/settings';
+import { isGpuAllowed, loadSettings, proposedOutputPath, saveSettings, SavedSettings } from './api/settings';
 import { useI18n } from './i18n/i18n';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import {
@@ -187,6 +187,7 @@ export const App: React.FC = () => {
       pageBreakOnSourcePage,
       latinFont,
       arabicFont,
+      useGpu: isGpuAllowed(),
       outputPath: targetOutputPath,
     };
 

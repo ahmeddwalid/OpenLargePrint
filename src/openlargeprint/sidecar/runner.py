@@ -42,6 +42,12 @@ from openlargeprint.sidecar.protocol import (
 
 
 
+def _apply_gpu_choice(data: dict) -> None:
+    """The reader can keep conversions off the graphics card (Settings)."""
+    import os
+    os.environ["OLP_GPU"] = "auto" if data.get("use_gpu", True) is not False else "off"
+
+
 def _font_options(data: dict) -> dict:
     """The reader's font choices; unknown names fall back to the defaults."""
     from openlargeprint.exporters.fonts import ARABIC_FONTS, LATIN_FONTS
@@ -225,6 +231,7 @@ class SidecarRunner:
 
     def _handle_convert(self, data: dict, job_id: str) -> None:
         """Run document conversion with per-page progress and checkpointing (UI-002, UI-003)."""
+        _apply_gpu_choice(data)
         input_path = Path(data.get("file_path", "")).resolve()
         output_path = Path(data.get("output_path", "")).resolve()
         preset_str = data.get("preset", "Large")

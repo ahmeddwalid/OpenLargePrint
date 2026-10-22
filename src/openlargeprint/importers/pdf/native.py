@@ -146,6 +146,8 @@ class NativePdfImporter(BaseImporter):
         selected_pages: Optional[Set[int]] = None,
     ) -> DocumentIR:
         log_safe_info(f"Opening PDF document: {file_path.name}")
+        if self._injected_engine is None:
+            runtime.settle_gpu()  # once per conversion; recognition processes inherit it
         with pdfium.PdfDocument(file_path) as probe:
             page_count = len(probe)
         indices = [i for i in range(page_count) if selected_pages is None or i + 1 in selected_pages]

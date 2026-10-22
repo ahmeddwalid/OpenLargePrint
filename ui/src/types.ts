@@ -92,6 +92,7 @@ export interface ConversionSettings {
   pageBreakOnSourcePage?: boolean;
   latinFont?: string;
   arabicFont?: string;
+  useGpu?: boolean;
 }
 
 export interface ProgressInfo {

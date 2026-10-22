@@ -832,6 +832,7 @@ async fn start_conversion(
         "export_format": out_fmt,
         // One recognition pipeline: the engine decides per page (never OCRs native text).
         "routing_mode": "automatic",
+        "use_gpu": settings.get("useGpu").and_then(|v| v.as_bool()).unwrap_or(true),
         "include_page_markers": true,
         "monochrome": monochrome,
         "page_break_on_source_page": page_break_on_source_page,

@@ -63,6 +63,7 @@ class ConvertCommand(BaseModel):
     page_break_on_source_page: bool = False
     latin_font: Optional[str] = None
     arabic_font: Optional[str] = None
+    use_gpu: bool = True
 
 
 class ExportCommand(BaseModel):
