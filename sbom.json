@@ -69,7 +69,18 @@
       "native_code": true,
       "network_behavior": "none",
       "parses_untrusted_content": true,
-      "purpose": "High-performance on-device CPU inference runtime for ONNX models"
+      "purpose": "On-device inference runtime for the ONNX models (Linux builds; CPU)"
+    },
+    {
+      "component": "onnxruntime-directml",
+      "version": "1.24.4",
+      "code_license": "MIT",
+      "model_weight_license": null,
+      "download_source": "PyPI",
+      "native_code": true,
+      "network_behavior": "none",
+      "parses_untrusted_content": true,
+      "purpose": "On-device inference runtime for the ONNX models (Windows builds): runs on the CPU, or on the graphics card through DirectML after a check that it matches the CPU. Includes Microsoft's DirectML.dll redistributable."
     },
     {
       "component": "reportlab",

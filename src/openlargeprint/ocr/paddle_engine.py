@@ -10,7 +10,6 @@ cannot open network connections (SEC-008, SEC-009).
 from __future__ import annotations
 
 import math
-import os
 import time
 import unicodedata
 from typing import List, Optional, Tuple
@@ -34,7 +33,8 @@ class PaddleRapidOcrEngine:
     """CPU recogniser adapter; the heavy work happens in the isolated worker."""
 
     def __init__(self, use_gpu: bool = False, language: str = "en",
-                 rec_model_path: Optional[str] = None, rec_keys_path: Optional[str] = None):
+                 rec_model_path: Optional[str] = None, rec_keys_path: Optional[str] = None,
+                 in_process: bool = False):
         if language not in ("en", "ar"):
             raise ValueError("Unsupported recognition language.")
         self.use_gpu = False  # CPU only: the default path never depends on a GPU (PERF-001)
@@ -42,10 +42,12 @@ class PaddleRapidOcrEngine:
         self.rec_model_path = rec_model_path
         self.rec_keys_path = rec_keys_path
         self._engine = None
-        self._worker = OcrWorker(use_gpu=False, language=language)
+        # Page workers are already isolated, offline processes and recognise in place.
+        self._worker = None if in_process else OcrWorker(use_gpu=False, language=language)
 
     def close(self) -> None:
-        self._worker.close()
+        if self._worker is not None:
+            self._worker.close()
 
     def capabilities(self) -> EngineCapabilities:
         return EngineCapabilities(
@@ -65,7 +67,8 @@ class PaddleRapidOcrEngine:
 
         det = model_manager.get_model_path("PP-OCRv6_det_small", verify=True)
         cls = model_manager.get_model_path("ch_ppocr_mobile_v2.0_cls", verify=True)
-        threads = min(MAX_CPU_THREADS, max(1, (os.cpu_count() or 4) - 1))
+        from openlargeprint import runtime
+        threads = min(MAX_CPU_THREADS, runtime.onnx_threads())
         params = {
             "Global.log_level": "error",
             # The per-line orientation classifier turns many upright lines upside
@@ -79,6 +82,7 @@ class PaddleRapidOcrEngine:
             "Cls.lang_type": LangCls.CH,
             "EngineConfig.onnxruntime.intra_op_num_threads": threads,
             "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+            "EngineConfig.onnxruntime.use_dml": runtime.use_gpu(),
         }
         if self.language == "ar":
             rec = model_manager.get_model_path("arabic_PP-OCRv5_rec_mobile", verify=True)
@@ -88,13 +92,17 @@ class PaddleRapidOcrEngine:
             rec = model_manager.get_model_path("PP-OCRv6_rec_small", verify=True)
             params.update({"Rec.model_path": str(rec), "Rec.ocr_version": OCRVersion.PPOCRV6,
                            "Rec.model_type": ModelType.SMALL})
-        log_safe_info(f"Initializing CPU recognizer ({threads} threads)")
+        log_safe_info(f"Initializing recognizer ({'graphics card' if runtime.use_gpu() else f'{threads} CPU threads'})")
         self._engine = RapidOCR(params=params)
         return self._engine
 
     def analyze_page(self, image: Image.Image, *, page_num: int,
                      language_hints: Tuple[str, ...] = ("en",),
                      cancellation: Optional[CancellationToken] = None) -> EnginePageResult:
+        if self._worker is None:
+            if cancellation is not None and cancellation.is_cancelled():
+                return EnginePageResult(lines=[], cancelled=True)
+            return self._analyze_page(image, page_num=page_num, language_hints=language_hints)
         return self._worker.analyze_page(image, page_num=page_num,
                                          language_hints=language_hints, cancellation=cancellation)
 

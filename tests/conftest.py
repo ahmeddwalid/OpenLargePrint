@@ -66,3 +66,10 @@ requires_layout_model = pytest.mark.skipif(
     not layout_model_available(),
     reason="layout model not installed (run: python scripts/fetch_models.py)",
 )
+
+
+@pytest.fixture(autouse=True)
+def _pages_in_this_process(monkeypatch):
+    """Tests patch engines in this process, which page workers would not see;
+    tests of parallel pages set their own worker count."""
+    monkeypatch.setenv("OLP_PAGE_WORKERS", "1")

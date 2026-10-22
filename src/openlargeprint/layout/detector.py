@@ -1,7 +1,7 @@
 """Layout detectors (PDF-001, PDF-003).
 
-``PPDocLayoutDetector`` runs PP-DocLayoutV2 (PaddlePaddle, Apache-2.0) on the
-CPU through ONNX Runtime. It predicts region classes *and* reading order, which
+``PPDocLayoutDetector`` runs PP-DocLayoutV2 (PaddlePaddle, Apache-2.0) through
+ONNX Runtime, on the CPU or (Windows) the graphics card. It predicts region classes *and* reading order, which
 is what turns a two-column textbook page into a correctly ordered single column.
 
 ``HeuristicLayoutDetector`` is the fallback when the model file is missing: it
@@ -11,7 +11,6 @@ Neither detector ever touches text content.
 
 from __future__ import annotations
 
-import os
 import threading
 from typing import List, Optional
 
@@ -42,12 +41,10 @@ class PPDocLayoutDetector:
         from rapid_layout.model_handler.pp_doc_layout.post_process import PPDocLayoutPostProcess
         from rapid_layout.model_handler.pp_doc_layout.pre_process import PPDocLayoutPreProcess
 
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = min(8, max(1, (os.cpu_count() or 4) - 1))
-        options.inter_op_num_threads = 1
-        options.log_severity_level = 3
-        self._session = ort.InferenceSession(model_path, sess_options=options,
-                                             providers=["CPUExecutionProvider"])
+        from openlargeprint import runtime
+
+        self._session = ort.InferenceSession(model_path, sess_options=runtime.session_options(ort),
+                                             providers=runtime.providers())
         labels = self._session.get_modelmeta().custom_metadata_map.get("character", "").splitlines()
         if not labels:
             raise RuntimeError("The layout model has no label table.")

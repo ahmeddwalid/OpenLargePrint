@@ -28,8 +28,9 @@ SUPPORTED_SCRIPTS = ("en", "ar")
 class OcrRouter:
     """Creates one recogniser per script on demand and closes them together."""
 
-    def __init__(self):
+    def __init__(self, in_process: bool = False):
         self._engines: Dict[str, DocumentOcrEngine] = {}
+        self._in_process = in_process
 
     def close(self) -> None:
         for engine in self._engines.values():
@@ -41,5 +42,5 @@ class OcrRouter:
     def get_engine(self, mode: RoutingMode = RoutingMode.AUTOMATIC, language: str = "en") -> DocumentOcrEngine:
         script = "ar" if language == "ar" else "en"
         if script not in self._engines:
-            self._engines[script] = PaddleRapidOcrEngine(language=script)
+            self._engines[script] = PaddleRapidOcrEngine(language=script, in_process=self._in_process)
         return self._engines[script]

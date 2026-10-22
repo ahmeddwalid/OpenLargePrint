@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import statistics
+from dataclasses import dataclass
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -29,6 +30,7 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 from PIL import Image
 
+from openlargeprint import runtime
 from openlargeprint.importers.base import BaseImporter, CancelCheck, CheckpointCallback, ProgressCallback
 from openlargeprint.ir.models import (
     SCHEMA_VERSION,
@@ -64,6 +66,7 @@ SHOW_ORIGINAL_CONFIDENCE = 0.7
 MIN_NATIVE_CHARS = 40
 # Clean print reads above 0.9; below this the other script's recogniser is tried too.
 SECOND_SCRIPT_BELOW = 0.8
+MIN_PARALLEL_PAGES = 3  # fewer pages than this are not worth starting workers for
 UPSIDE_DOWN_BELOW = 0.8  # a page read this poorly is also tried upside down
 THIN_PAGE_LETTERS = 150  # a page read this thinly is also read with the other script
 
@@ -89,6 +92,22 @@ def _save_image(image: Image.Image, path_stem: Path, alt: str) -> ImageAsset:
 def _language_hint(file_path: Path, sample: str) -> str:
     text = f"{file_path.stem} {sample}"
     return "ar" if sum(1 for c in text if "؀" <= c <= "ۿ") >= 3 or "arabic" in file_path.name.lower() else "en"
+
+
+@dataclass
+class PageOutcome:
+    meta: PageMetadata
+    blocks: List[Block]
+    heading_sizes: Dict[str, float]
+    body_sizes: List[float]
+
+
+def next_language(language: str, blocks: List[Block]) -> str:
+    """The first guess for the next page: Arabic once a page turns out to be Arabic."""
+    sample = " ".join(b.text or "" for b in blocks[:7])
+    if language == "en" and sum(1 for c in sample if "\u0600" <= c <= "\u06ff") > 20:
+        return "ar"
+    return language
 
 
 class NativePdfImporter(BaseImporter):
@@ -127,67 +146,29 @@ class NativePdfImporter(BaseImporter):
         selected_pages: Optional[Set[int]] = None,
     ) -> DocumentIR:
         log_safe_info(f"Opening PDF document: {file_path.name}")
-        pdf = pdfium.PdfDocument(file_path)
-        page_count = len(pdf)
-        layout = self._layout or get_layout_detector()
+        with pdfium.PdfDocument(file_path) as probe:
+            page_count = len(probe)
+        indices = [i for i in range(page_count) if selected_pages is None or i + 1 in selected_pages]
         pages_meta: List[PageMetadata] = []
         all_blocks: List[Block] = []
         heading_sizes: Dict[str, float] = {}
         body_sizes: List[float] = []
-        total = len(selected_pages) if selected_pages is not None else page_count
-        done = 0
         language = _language_hint(file_path, "")
-        try:
-            for index in range(page_count):
-                page_num = index + 1
-                if selected_pages is not None and page_num not in selected_pages:
-                    continue
-                if cancel_check and cancel_check():
-                    raise InterruptedError("Operation cancelled by user.")
-                done += 1
-                page = pdf[index]
-                try:
-                    meta = classify_pdf_page(page, page_num)
-                    pages_meta.append(meta)
-                    marker = Block(id=f"p{page_num}_marker", type=BlockType.PAGE_MARKER,
-                                   source_page=page_num, page_marker=page_num)
-                    all_blocks.append(marker)
-                    if meta.details.get("is_blank"):
-                        if progress_callback:
-                            progress_callback(done, total, "extracting", f"Reading page {page_num} of {page_count}")
-                        if checkpoint_callback:
-                            checkpoint_callback(page_num, meta.classification, False, None)
-                        continue
-                    try:
-                        blocks, page_headings, sizes = self._process_page(
-                            page, meta, workspace, layout, language, cancel_check,
-                            lambda stage, message: progress_callback(done, total, stage, message) if progress_callback else None,
-                            page_count,
-                        )
-                    except InterruptedError:
-                        raise
-                    except Exception as exc:
-                        log_safe_info(f"Page {page_num} could not be converted ({type(exc).__name__})")
-                        blocks = [self._preserve_page(page, page_num, workspace,
-                                                      f"Page {page_num} could not be converted. The original page is shown instead.")]
-                        page_headings, sizes = {}, []
-                    heading_sizes.update(page_headings)
-                    body_sizes.extend(sizes)
-                    sample = " ".join(b.text or "" for b in blocks[:6])
-                    if language == "en" and sum(1 for c in sample if "؀" <= c <= "ۿ") > 20:
-                        language = "ar"
-                    all_blocks.extend(blocks)
-                    if checkpoint_callback:
-                        warned = next((w for b in blocks for w in b.warnings), None)
-                        checkpoint_callback(page_num, meta.classification, warned is not None, warned)
-                finally:
-                    page.close()
-        finally:
-            pdf.close()
-            self._router.close()
-            close = getattr(self._injected_engine, "close", None)
-            if callable(close):
-                close()
+        workers = self._page_workers(file_path, indices)
+        if workers > 1:
+            outcomes = self._pages_in_parallel(file_path, indices, page_count, workspace, language, workers,
+                                               progress_callback, cancel_check)
+        else:
+            outcomes = self._pages_in_order(file_path, indices, page_count, workspace, language,
+                                            progress_callback, cancel_check)
+        for outcome in outcomes:
+            pages_meta.append(outcome.meta)
+            all_blocks.extend(outcome.blocks)
+            heading_sizes.update(outcome.heading_sizes)
+            body_sizes.extend(outcome.body_sizes)
+            if checkpoint_callback:
+                warned = next((w for b in outcome.blocks for w in b.warnings), None)
+                checkpoint_callback(outcome.meta.page_number, outcome.meta.classification, warned is not None, warned)
 
         body = statistics.median(body_sizes) if body_sizes else 11.0
         assign_heading_levels(all_blocks, heading_sizes, body)
@@ -198,6 +179,98 @@ class NativePdfImporter(BaseImporter):
             page_count=len(pages_meta) if selected_pages is not None else page_count,
         )
         return DocumentIR(schema_version=SCHEMA_VERSION, metadata=metadata, pages=pages_meta, blocks=all_blocks)
+
+    # ------------------------------------------------------------------
+    def _page_workers(self, file_path: Path, indices: List[int]) -> int:
+        """Pages converted at once; tests that inject engines stay in this process."""
+        if self._injected_engine is not None or self._layout is not None or len(indices) < MIN_PARALLEL_PAGES:
+            return 1
+        # A quick look at the text layer says roughly how much needs recognition.
+        sample = indices[:: max(1, len(indices) // 20)]
+        scanned = 0
+        try:
+            with pdfium.PdfDocument(file_path) as pdf:
+                for index in sample:
+                    page = pdf[index]
+                    textpage = page.get_textpage()
+                    scanned += textpage.count_chars() < MIN_NATIVE_CHARS
+                    textpage.close()
+                    page.close()
+        except Exception:
+            return 1
+        self._scanned_share = scanned / max(1, len(sample))
+        return runtime.page_workers(len(indices), self._scanned_share)
+
+    def convert_page(self, pdf: pdfium.PdfDocument, index: int, page_count: int, workspace, layout,
+                     language: str, cancel_check: Optional[CancelCheck], report) -> PageOutcome:
+        """One page: its marker, its blocks, and what it says about heading sizes."""
+        page_num = index + 1
+        page = pdf[index]
+        try:
+            meta = classify_pdf_page(page, page_num)
+            marker = Block(id=f"p{page_num}_marker", type=BlockType.PAGE_MARKER,
+                           source_page=page_num, page_marker=page_num)
+            if meta.details.get("is_blank"):
+                return PageOutcome(meta, [marker], {}, [])
+            try:
+                blocks, page_headings, sizes = self._process_page(
+                    page, meta, workspace, layout, language, cancel_check, report, page_count)
+            except InterruptedError:
+                raise
+            except Exception as exc:
+                log_safe_info(f"Page {page_num} could not be converted ({type(exc).__name__})")
+                blocks = [self._preserve_page(page, page_num, workspace,
+                                              f"Page {page_num} could not be converted. The original page is shown instead.")]
+                page_headings, sizes = {}, []
+            return PageOutcome(meta, [marker] + blocks, page_headings, sizes)
+        finally:
+            page.close()
+
+    def _pages_in_order(self, file_path: Path, indices: List[int], page_count: int, workspace, language: str,
+                        progress_callback: Optional[ProgressCallback], cancel_check: Optional[CancelCheck]):
+        pdf = pdfium.PdfDocument(file_path)
+        layout = self._layout or get_layout_detector()
+        try:
+            for done, index in enumerate(indices, 1):
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Operation cancelled by user.")
+                report = (lambda stage, message, done=done:
+                          progress_callback(done, len(indices), stage, message)) if progress_callback else None
+                if report:
+                    report("extracting", f"Reading page {index + 1} of {page_count}")
+                outcome = self.convert_page(pdf, index, page_count, workspace, layout, language, cancel_check, report)
+                language = next_language(language, outcome.blocks)
+                yield outcome
+        finally:
+            pdf.close()
+            self._router.close()
+            close = getattr(self._injected_engine, "close", None)
+            if callable(close):
+                close()
+
+    def _pages_in_parallel(self, file_path: Path, indices: List[int], page_count: int, workspace,
+                           language: str, workers: int, progress_callback: Optional[ProgressCallback],
+                           cancel_check: Optional[CancelCheck]):
+        from .parallel import PagePool
+
+        log_safe_info(f"Converting {len(indices)} pages with {workers} workers")
+        threads = runtime.threads_for_workers(workers, getattr(self, "_scanned_share", 0.0))
+        pool = PagePool(file_path, page_count, workspace, self.routing_mode, self.ocr_dpi, workers, threads, language)
+        try:
+            for done, (index, outcome) in enumerate(pool.run(indices, cancel_check), 1):
+                if outcome is None:
+                    # The worker died (out of memory, for example): convert the page here.
+                    log_safe_info(f"Page {index + 1} is converted again in the main process")
+                    with pdfium.PdfDocument(file_path) as pdf:
+                        outcome = self.convert_page(pdf, index, page_count, workspace,
+                                                    self._layout or get_layout_detector(),
+                                                    language, cancel_check, None)
+                if progress_callback:
+                    progress_callback(done, len(indices), "extracting", f"Read page {index + 1} of {page_count}")
+                yield outcome
+        finally:
+            pool.close()
+            self._router.close()
 
     # ------------------------------------------------------------------
     def _process_page(self, page: pdfium.PdfPage, meta: PageMetadata, workspace: JobWorkspace,

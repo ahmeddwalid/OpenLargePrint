@@ -16,7 +16,9 @@ dependencies = [
     "pillow>=10.0.0",
     "rapidocr==3.9.2",
     "rapid-layout==1.2.1",
-    "onnxruntime>=1.18.0",
+    "onnxruntime>=1.18.0; sys_platform != 'win32'",
+    # The DirectML build also runs on the CPU; the graphics card is used only after a check.
+    "onnxruntime-directml>=1.18.0; sys_platform == 'win32'",
     "reportlab>=4.0.0",
     "arabic-reshaper>=3.0.1",
     "python-bidi>=0.6.0",
