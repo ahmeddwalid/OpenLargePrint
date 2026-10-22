@@ -89,3 +89,39 @@ def test_rtl_multi_column_reading_order(tmp_path: Path):
     assert all(pos != -1 for pos in article)
     assert article == sorted(article), "Right column (articles 1-3) must precede the left column (articles 4-6)"
     assert full_text.find("مجلة الأحكام") < article[0], "The title comes first"
+
+
+# --- punctuation, numbers and brackets in Arabic lines -------------------------
+
+def _w(text, x0, x1, y=100.0, size=12.0):
+    from openlargeprint.importers.pdf.textlayer import Word
+    return Word(text, x0, y, x1, y + size, size=size)
+
+
+def test_arabic_comma_touching_a_word_is_not_spaced():
+    from openlargeprint.importers.pdf.assemble import group_lines
+    # Right to left: "العقد،" then "فلا"; the comma is its own glyph, left of the word.
+    words = [_w("فلا", 100, 120), _w("،", 127, 130), _w("العقد", 130, 160)]
+    assert group_lines(words)[0].text == "العقد، فلا"
+
+
+def test_punctuation_around_a_number_reads_after_it_in_arabic():
+    from openlargeprint.importers.pdf.assemble import group_lines
+    words = [_w(":١٤٧", 100, 125), _w("المادة", 129, 160)]
+    assert group_lines(words)[0].text == "المادة ١٤٧:"
+    carried = [_w(".)148", 60, 80, y=120), _w("انظر", 100, 130), _w("المادة", 134, 165)]
+    lines = group_lines(carried)
+    assert lines[-1].text == "148)."  # a line with no letters follows the page's direction
+
+
+def test_brackets_stored_as_drawn_are_turned_back():
+    from openlargeprint.importers.pdf.assemble import unmirror_brackets
+    assert unmirror_brackets("القانون )انظر المادة 148).") == "القانون (انظر المادة 148)."
+    assert unmirror_brackets(")انظر المادة(") == "(انظر المادة)"
+    assert unmirror_brackets("(انظر المادة)") == "(انظر المادة)"
+
+
+def test_bullets_keep_their_space():
+    from openlargeprint.importers.pdf.assemble import group_lines
+    words = [_w("البند", 100, 130), _w("•", 133, 137)]
+    assert group_lines(words)[0].text == "• البند"

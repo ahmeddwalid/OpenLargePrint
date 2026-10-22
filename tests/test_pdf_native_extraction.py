@@ -178,3 +178,32 @@ def test_libreoffice_arabic_ligatures_round_trip(tmp_path):
     page = pdfium.PdfDocument(str(tmp_path / "ar.pdf"))[0]
     words = extract_native_text(page, page.get_textpage(), PageFrame(page)).words
     assert set(sentence.split()) == {w.text for w in words}
+
+
+@pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice is not installed")
+def test_libreoffice_arabic_page_reads_exactly(tmp_path):
+    """Vowel marks, punctuation, numbers, brackets and a list, as LibreOffice writes them."""
+    import subprocess
+    from openlargeprint.security.isolation import JobWorkspace as Workspace
+    paragraphs = [
+        "المادة ١٤٧: العقد شريعة المتعاقدين، فلا يجوز نقضه ولا تعديله إلا باتفاق الطرفين، "
+        "أو للأسباب التي يقررها القانون (انظر المادة 148).",
+        "لا يقتصر العقد على إلزام المتعاقد بما ورد فيه، ولكن يتناول أيضًا ما هو من مستلزماته "
+        "وفقًا للقانون والعرف والعدالة.",
+    ]
+    html = tmp_path / "ar.html"
+    html.write_text('<html><body dir="rtl"><h1>الباب الأول: أحكام عامة</h1>'
+                    + "".join(f"<p>{p}</p>" for p in paragraphs)
+                    + "<ul><li>البند الأول: الالتزام بالتسليم</li><li>البند الثاني: الالتزام بالضمان</li></ul>"
+                    "</body></html>", encoding="utf-8")
+    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(tmp_path), str(html)],
+                   check=True, capture_output=True, timeout=180)
+    with Workspace() as workspace:
+        doc = NativePdfImporter().import_document(tmp_path / "ar.pdf", workspace)
+    import unicodedata
+    # A vowel mark may be stored after the alef rather than before it; both read the same.
+    canon = lambda t: unicodedata.normalize("NFC", t).replace("ًا", "اً")
+    texts = [canon(b.text) for b in doc.blocks if b.text]
+    for expected in ["الباب الأول: أحكام عامة", *paragraphs]:
+        assert canon(expected) in texts, texts
+    assert not any(b.type == BlockType.IMAGE for b in doc.blocks)

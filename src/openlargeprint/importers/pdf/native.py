@@ -326,6 +326,7 @@ class NativePdfImporter(BaseImporter):
             if page_layout.source != "model":
                 # Without the layout model, pictures are still found from the file itself.
                 regions = regions + self._image_objects(page, native.words, frame)
+            regions = self._text_taken_for_pictures(page, regions, native.words, frame)
             regions = regions + self._vector_artwork(page, regions, native.words, frame)
         meta.details["layout"] = page_layout.source
 
@@ -568,6 +569,37 @@ class NativePdfImporter(BaseImporter):
         if empty and found:
             meta.details["recognised_regions"] = len(empty)
         return found
+
+    @staticmethod
+    def _text_taken_for_pictures(page, regions: List[LayoutRegion], words: List[Word],
+                                 frame: PageFrame) -> List[LayoutRegion]:
+        """Drop "pictures" on a digital page that are really blocks of its own text.
+
+        The layout model sometimes marks a run of paragraphs as one picture,
+        mostly on Arabic pages. On a page with a text layer a real picture is an
+        embedded image or drawing; a region with no image in it whose area is
+        well covered by the page's words, over several lines, is text.
+        """
+        figures = [r for r in regions if r.kind == RegionKind.FIGURE]
+        if not figures:
+            return regions
+        try:
+            pictures = [frame.rect(*obj.get_bounds())
+                        for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=8)]
+        except Exception:
+            return regions
+        kept: List[LayoutRegion] = []
+        for region in regions:
+            if region.kind == RegionKind.FIGURE and region.area > 0 and not any(
+                    coverage(region.box, picture) > 0.2 or coverage(picture, region.box) > 0.5
+                    for picture in pictures):
+                inside = [w for w in words if coverage(w.box, region.box) > 0.6]
+                ink = sum((w.x1 - w.x0) * (w.y1 - w.y0) for w in inside)
+                lines = {round(w.cy / max(1.0, w.size)) for w in inside}
+                if len(lines) >= 2 and ink >= 0.15 * region.area:
+                    continue
+            kept.append(region)
+        return kept
 
     @staticmethod
     def _image_objects(page, words: List[Word], frame: PageFrame) -> List[LayoutRegion]:

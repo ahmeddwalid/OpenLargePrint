@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 import re
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from openlargeprint.ir.models import (
@@ -25,6 +25,7 @@ from openlargeprint.ir.models import (
     ImageAsset,
     InlineStyle,
     TableStructure,
+    TextDirection,
 )
 from openlargeprint.layout.regions import (
     LayoutRegion,
@@ -89,7 +90,12 @@ class TextLine:
 
     @property
     def text(self) -> str:
-        return " ".join(w.text for w in self.words)
+        out = ""
+        for i, word in enumerate(self.words):
+            if i and not touching(self.words[i - 1], word):
+                out += " "
+            out += word.text
+        return out
 
     @property
     def confidence(self) -> float:
@@ -114,19 +120,117 @@ def _is_rtl_line(words: Sequence[Word]) -> bool:
     return rtl > ltr
 
 
+def is_punctuation(text: str) -> bool:
+    return bool(text) and not any(ch.isalnum() for ch in text)
+
+
+LIST_SYMBOLS = set("•◦▪▫■□●○◆◇►▸‣⁃–—-*·")
+
+
+def touching(before: Word, after: Word) -> bool:
+    """Punctuation set against a word, with no space between (in either direction).
+
+    Bullets and dashes keep their space: they start list items.
+    """
+    if before.blank or after.blank or not (is_punctuation(before.text) or is_punctuation(after.text)):
+        return False
+    if set(before.text) & LIST_SYMBOLS or set(after.text) & LIST_SYMBOLS:
+        return False
+    gap = max(after.x0 - before.x1, before.x0 - after.x1)
+    return gap < 0.12 * max(before.size, after.size)
+
+
+def _number_in_rtl_line(word: Word) -> Word:
+    """Put the punctuation around a number in an Arabic line into reading order.
+
+    Numbers are stored left to right, so a number with punctuation attached comes
+    out as it looks: ":١٤٧" or ".)148". In a right-to-left line what is on the
+    left of a number is read after it: "١٤٧:" and "148).".
+    """
+    text = word.text
+    core = text.strip("".join(ch for ch in text if not ch.isalnum()))
+    if not core or not all(ch.isdigit() or ch in ".,٫٬/" for ch in core):
+        return word
+    start = text.index(core)
+    left, right = text[:start], text[start + len(core):]
+    if not left and not right:
+        return word
+    return replace(word, text=right[::-1] + core + left[::-1])
+
+
 def _rtl_reading_order(words: List[Word]) -> List[Word]:
-    """Words of a right-to-left line in reading order; Latin or number runs keep their own order."""
-    runs: List[List[Word]] = []
+    """Words of a right-to-left line in reading order; Latin or number runs keep their own order.
+
+    Punctuation on its own takes the direction of the words around it (and of
+    the line when they differ), as in the Unicode bidi algorithm.
+    """
+    kinds = []
     for word in words:  # left to right on the page
-        rtl = any(is_rtl_char(c) for c in word.text)
-        if runs and (any(is_rtl_char(c) for w in runs[-1] for c in w.text)) == rtl:
-            runs[-1].append(word)
+        if is_punctuation(word.text):
+            kinds.append("N")
         else:
-            runs.append([word])
+            kinds.append("R" if any(is_rtl_char(c) for c in word.text) else "L")
+    for i, kind in enumerate(kinds):
+        if kind == "N":
+            left = next((k for k in reversed(kinds[:i]) if k != "N"), "R")
+            right = next((k for k in kinds[i + 1:] if k != "N"), "R")
+            kinds[i] = "L" if left == right == "L" else "R"
+    runs: List[Tuple[str, List[Word]]] = []
+    for word, kind in zip(words, kinds):
+        if kind == "L" or any(ch.isdigit() for ch in word.text):
+            word = _number_in_rtl_line(word)
+        if runs and runs[-1][0] == kind:
+            runs[-1][1].append(word)
+        else:
+            runs.append((kind, [word]))
     ordered: List[Word] = []
-    for run in reversed(runs):
-        ordered.extend(reversed(run) if any(is_rtl_char(c) for w in run for c in w.text) else run)
+    for kind, run in reversed(runs):
+        ordered.extend(reversed(run) if kind == "R" else run)
     return ordered
+
+
+_BRACKETS = {"(": ")", ")": "(", "[": "]", "]": "[", "{": "}", "}": "{", "<": ">", ">": "<",
+             "«": "»", "»": "«"}
+_OPENING = "([{<«"
+
+
+def _balanced(text: str) -> bool:
+    depth = 0
+    for ch in text:
+        if ch in _BRACKETS:
+            depth += 1 if ch in _OPENING else -1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def unmirror_brackets(text: str) -> str:
+    """Brackets in Arabic text, stored as the glyph that is drawn.
+
+    In right-to-left text an opening bracket is drawn with the ")" glyph. Some
+    files record the glyph rather than the character, so "(انظر)" comes out as
+    ")انظر(". When the brackets of a block only balance the other way round,
+    they are turned back.
+    """
+    if not any(ch in _BRACKETS for ch in text) or _balanced(text):
+        return text
+
+    def beside_arabic(i: int) -> bool:
+        for step in (-1, 1):
+            j = i + step
+            while 0 <= j < len(text) and text[j] in _BRACKETS:
+                j += step
+            if 0 <= j < len(text) and is_rtl_char(text[j]) and text[j].isalpha():
+                return True
+        return False
+
+    # Brackets drawn inside Arabic words are the ones stored as glyphs; those next to
+    # numbers or Latin text usually are not. Failing that, all of them.
+    for flip in (beside_arabic, lambda i: True):
+        candidate = "".join(_BRACKETS[ch] if ch in _BRACKETS and flip(i) else ch for i, ch in enumerate(text))
+        if _balanced(candidate):
+            return candidate
+    return text
 
 
 def group_lines(words: Sequence[Word], split_gap: float = 2.5) -> List[TextLine]:
@@ -146,9 +250,13 @@ def group_lines(words: Sequence[Word], split_gap: float = 2.5) -> List[TextLine]
         if not placed:
             lines.append([word])
     result: List[TextLine] = []
+    # A line with no letters (a number or bracket carried over) reads like the text around it.
+    page_rtl = _is_rtl_line(list(words))
     for line in lines:
         line.sort(key=lambda w: w.x0)
-        if _is_rtl_line(line) and not any(w.visual_order for w in line):
+        lettered = any(ch.isalpha() and not ch.isdigit() for w in line for ch in w.text)
+        rtl = _is_rtl_line(line) if lettered else page_rtl
+        if rtl and not any(w.visual_order for w in line):
             line = _rtl_reading_order(line)
         run: List[Word] = [line[0]]
         for word in line[1:]:
@@ -306,6 +414,8 @@ def compose(lines: Sequence[TextLine]) -> Tuple[str, List[InlineStyle]]:
                 elif (previous is not None and not word.blank and not previous.blank
                       and word.x0 - previous.x1 > 2.2 * max(word.size, previous.size)):
                     out += "\n"  # separate entries set apart on one line (a box of expressions)
+                elif previous is not None and touching(previous, word):
+                    pass
                 else:
                     out += " "
             previous = word
@@ -589,6 +699,8 @@ class PageAssembler:
                **extra) -> Block:
         language = detect_language(text) if text else "en"
         direction = detect_text_direction(text) if text else detect_text_direction("")
+        if text and direction == TextDirection.RTL:
+            text = unmirror_brackets(text)
         method = self.method
         if method == ExtractionMethod.NATIVE and text and confidence < 1.0:
             method = ExtractionMethod.OCR_FAST  # recognised words on a mixed page (native text is exact)
