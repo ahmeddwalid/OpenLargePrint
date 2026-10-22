@@ -18,7 +18,7 @@ import ctypes
 import statistics
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
@@ -87,6 +87,7 @@ class _Char:
     italic: bool
     space_before: bool
     font: str = ""
+    shrunk: bool = False  # reported with a box much smaller than its glyph (see below)
 
 
 def page_box(page: pdfium.PdfPage) -> Tuple[float, float, float, float]:
@@ -223,6 +224,8 @@ def extract_native_text(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage,
 
     chars: List[_Char] = []
     pending_space = False
+    space_x: Optional[float] = None   # where the pending space character itself sits
+    word_span: Optional[List[float]] = None  # left and right of the word read since the last space
     for index in range(count):
         code = pdfium_c.FPDFText_GetUnicode(textpage, index)
         if not code or code > 0x10FFFF:
@@ -230,6 +233,11 @@ def extract_native_text(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage,
         ch = chr(code)
         if ch in "\r\n\t" or ch.isspace():
             pending_space = True
+            space_x = None
+            if ch == " ":
+                left, bottom, right, top = textpage.get_charbox(index, loose=True)
+                sx0, _, sx1, _ = frame.rect(left, bottom, right, top)
+                space_x = (sx0 + sx1) / 2
             continue
         if 0xFFFE <= code or ch in REPLACEMENT_GLYPHS or (0xE000 <= code <= 0xF8FF and not map_symbol_char(ch, "")):
             result.broken_chars += 1
@@ -264,17 +272,48 @@ def extract_native_text(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage,
         ch = fold_presentation_forms(ch)
         if not ch.strip():
             continue
+        shrunk = False
+        if chars and not pending_space and is_rtl_char(ch) and is_rtl_char(chars[-1].ch) \
+                and (y_bottom - y_top) < 0.6 * (chars[-1].y1 - chars[-1].y0) \
+                and min(abs(x0 - chars[-1].x1), abs(chars[-1].x0 - x1)) < chars[-1].size:
+            # Some fonts give a letter that carries a vowel mark the mark's small box.
+            # Its height and baseline are then the neighbour's, and its edges are not
+            # trusted to measure gaps.
+            y_top, y_bottom, base, size = chars[-1].y0, chars[-1].y1, chars[-1].base, chars[-1].size
+            shrunk = True
+        elif chars and is_rtl_char(ch) and is_rtl_char(chars[-1].ch) \
+                and (chars[-1].y1 - chars[-1].y0) < 0.6 * (y_bottom - y_top) \
+                and min(abs(x0 - chars[-1].x1), abs(chars[-1].x0 - x1)) < (y_bottom - y_top):
+            previous = chars[-1]
+            previous.y0, previous.y1, previous.shrunk = y_top, y_bottom, True
+            previous.size = (y_bottom - y_top) / 1.2
+            previous.base = base
+        if unicodedata.category(ch[0]) == "Mn" and chars and abs(base - chars[-1].base) < 0.5 * size:
+            # A vowel mark (tanween, shadda...) has a small box of its own above or
+            # below its letter; measured as a letter it splits the word in two.
+            chars[-1].ch += ch
+            result.visible_chars += 1
+            continue
         # The nominal size is often 1pt with the real size in the text matrix, so the
         # glyph's loose box (ascent to descent, about 1.2 em) is the dependable measure.
         if y_bottom > y_top:
             size = (y_bottom - y_top) / 1.2
         size = max(1.0, size)
-        room = ((chars[-1].x0 - x1) if chars and (is_rtl_char(ch) or is_rtl_char(chars[-1].ch))
+        # Room for a space on either side: some files list right-to-left words in
+        # visual order (left to right), others in reading order.
+        room = ((max(chars[-1].x0 - x1, x0 - chars[-1].x1)) if chars and (is_rtl_char(ch) or is_rtl_char(chars[-1].ch))
                 else (x0 - chars[-1].x1) if chars else 0.0)
         if pending_space and chars and abs(base - chars[-1].base) < 0.3 * size \
                 and room < 0.06 * size:
             pending_space = False  # a space character with no room for it (inside a ligature)
-        chars.append(_Char(ch, x0, y_top, x1, y_bottom, base, size, bold, italic, pending_space, font_name))
+        if pending_space and space_x is not None and word_span and is_rtl_char(ch) \
+                and abs(base - chars[-1].base) < 0.3 * size and word_span[0] + 0.5 < space_x < word_span[1] - 0.5:
+            pending_space = False  # a space character placed inside the word just read
+        chars.append(_Char(ch, x0, y_top, x1, y_bottom, base, size, bold, italic, pending_space, font_name, shrunk))
+        if pending_space or word_span is None:
+            word_span = [x0, x1]
+        else:
+            word_span = [min(word_span[0], x0), max(word_span[1], x1)]
         pending_space = False
         result.visible_chars += 1
 
@@ -354,6 +393,8 @@ def _chars_to_words(chars: List[_Char]) -> List[Word]:
     # Runs of glyphs that share a baseline and advance in their writing
     # direction: rightwards for Latin, leftwards for Arabic and Hebrew.
     def advance_gap(prev: _Char, ch: _Char) -> float:
+        if prev.shrunk or ch.shrunk:
+            return 0.0  # only a space character separates words here
         if is_rtl_char(ch.ch) or is_rtl_char(prev.ch):
             if ch.x1 <= prev.x1 + 0.25 * prev.size:
                 return prev.x0 - ch.x1
@@ -387,18 +428,43 @@ def _chars_to_words(chars: List[_Char]) -> List[Word]:
         tight = [g for g in gaps if g < 0.6 * size]
         tracking = statistics.median(tight) if tight else 0.0
         threshold = max(0.0, tracking) + 0.2 * size
+        pieces: List[List[_Char]] = []
         word: List[_Char] = []
         for i, ch in enumerate(run):
             if word:
                 gap = advance_gap(word[-1], ch)
                 font_change = ch.font != word[-1].font and gap > 0.08 * size
                 if ch.space_before or gap > threshold or font_change:
-                    words.append(_make_word(word, visual))
+                    pieces.append(word)
                     word = []
             word.append(ch)
         if word:
-            words.append(_make_word(word, visual))
+            pieces.append(word)
+        words.extend(_make_word(piece, visual) for piece in _rejoin_rtl_fragments(pieces, size))
     return words
+
+
+def _rejoin_rtl_fragments(pieces: List[List[_Char]], size: float) -> List[List[_Char]]:
+    """Join pieces of one Arabic word that the file lists out of order.
+
+    Some files list the parts of a word left to right (the way they look) where
+    a letter carries a vowel mark, so "أيضًا" arrives as "ضًا" then "أي". With no
+    space character between them and boxes that touch, the pieces are one word,
+    read from the right.
+    """
+    out: List[List[_Char]] = []
+    for piece in pieces:
+        if out and not piece[0].space_before and is_rtl_char(piece[0].ch) and is_rtl_char(out[-1][-1].ch):
+            left, right = out[-1], piece
+            gap = max(min(c.x0 for c in right) - max(c.x1 for c in left),
+                      min(c.x0 for c in left) - max(c.x1 for c in right))
+            # A letter reported with a mark-sized box leaves a false gap beside it.
+            if gap < (0.35 if any(c.shrunk for c in left + right) else 0.15) * size:
+                first, second = (right, left) if min(c.x0 for c in right) > min(c.x0 for c in left) else (left, right)
+                out[-1] = first + second
+                continue
+        out.append(piece)
+    return out
 
 
 def _make_word(chars: List[_Char], visual: bool = False) -> Word:
