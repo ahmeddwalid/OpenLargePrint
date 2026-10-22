@@ -57,10 +57,11 @@ def _recognize(
             except EOFError:
                 return
             try:
-                with Image.open(image_path) as image:
-                    result = engine._analyze_page(
-                        image, page_num=page_num, language_hints=language_hints
-                    )
+                import numpy as np
+                pixels = np.load(image_path, allow_pickle=False)
+                result = engine._analyze_page(
+                    Image.fromarray(pixels), page_num=page_num, language_hints=language_hints
+                )
                 sender.send(result)
             except Exception:
                 sender.send(None)
@@ -143,8 +144,10 @@ class OcrWorker:
         assert connection is not None
         try:
             with TemporaryDirectory(prefix="olp-ocr-") as directory:
-                image_path = Path(directory) / "page.png"
-                image.save(image_path, format="PNG")
+                # Raw pixels: a 300 dpi page takes 0.3 s to write and read as PNG.
+                import numpy as np
+                image_path = Path(directory) / "page.npy"
+                np.save(image_path, np.asarray(image.convert("RGB")), allow_pickle=False)
                 deadline = time.monotonic() + self.timeout_seconds
                 assert self._sender is not None
                 self._sender.send((str(image_path), page_num, language_hints))
