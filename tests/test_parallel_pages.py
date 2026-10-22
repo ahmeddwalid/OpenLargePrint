@@ -76,3 +76,11 @@ def test_graphics_card_is_never_used_off_windows(monkeypatch):
     monkeypatch.setenv("OLP_GPU", "auto")
     assert runtime.providers() == ["CPUExecutionProvider"]
     runtime.gpu_ready.cache_clear()
+
+
+def test_graphics_card_check_declines_a_device_that_is_not_faster(monkeypatch):
+    """The check runs the detector twice; a "graphics card" that is the CPU again is not used."""
+    from openlargeprint.models import model_manager
+    monkeypatch.setattr(runtime, "DML", "CPUExecutionProvider")
+    path = str(model_manager.get_model_path("PP-OCRv6_det_small", verify=True))
+    assert runtime._probe_directml(path) is False

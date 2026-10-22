@@ -42,6 +42,26 @@ from openlargeprint.sidecar.protocol import (
 
 
 
+def _protocol_stdout() -> TextIO:
+    """Keep standard output for protocol messages only.
+
+    Libraries print to standard output now and then (ONNX Runtime prints a
+    banner when a graphics card driver fails), and one stray line breaks the
+    desktop app's reading of the protocol. The real standard output is kept for
+    protocol messages; everything else written to it, from Python, native code
+    or child processes, goes to standard error.
+    """
+    import os
+    try:
+        sys.stdout.flush()
+        protocol = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)
+        os.dup2(2, 1)
+        sys.stdout = sys.stderr
+        return protocol
+    except (OSError, ValueError, AttributeError):
+        return sys.stdout
+
+
 def _apply_gpu_choice(data: dict) -> None:
     """The reader can keep conversions off the graphics card (Settings)."""
     import os
@@ -76,7 +96,7 @@ class SidecarRunner:
         self.in_stream = in_stream or sys.stdin
         self._health_ready: bool | None = None
         self._health_lock = threading.Lock()
-        self.out_stream = out_stream or sys.stdout
+        self.out_stream = out_stream or _protocol_stdout()
         self._cancel_flags: Dict[str, bool] = {}
         self._review_stores: Dict[str, List[FlaggedPageReview]] = {}
         self._job_inputs: Dict[str, str] = {}

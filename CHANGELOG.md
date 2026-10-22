@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-22
+
+This release fixes how Arabic is read, both from PDFs and from scans, lets
+readers choose their font, converts faster, and makes updates work.
+
+### Added
+
+- A choice of reading fonts, in step 2 under **Change font**: Atkinson
+  Hyperlegible, Lexend, Andika, Noto Sans or Noto Serif for English and other
+  Latin-script text, and Noto Sans Arabic, Noto Naskh Arabic, Amiri, IBM Plex
+  Sans Arabic, Tajawal or Readex Pro for Arabic. Each choice is shown in its own
+  letters, remembered, embedded in the PDF and Word files, and used by the
+  in-app reader. The command line takes `--latin-font` and `--arabic-font`.
+- Arabic headings in the large-print PDF are set in bold.
+- Pages are converted side by side on computers with enough cores and memory,
+  with the same result as one page at a time.
+- On Windows the graphics card is used (through DirectML) when a check shows it
+  gives the same results as the processor and is clearly faster. Settings >
+  Speed turns it off.
+- Updates on Linux: an AppImage downloads, checks and swaps in the new version
+  and restarts.
+- Pages scanned upside down are detected and read the right way up.
+- `scripts/bench_ocr.py` compares the recognisers with Tesseract;
+  [docs/ocr-evaluation.md](docs/ocr-evaluation.md) has the results.
+
+### Changed
+
+- The update check is done by the app, not the web page, and is on by default
+  (once a day, at start-up; Settings turns it off). The banner shows what is
+  new, the download progress, and why an update failed.
+- The in-app reader offers the same fonts as the exported files.
+
+### Fixed
+
+- "لا" and other letters joined into one glyph came out reversed ("ال") in text
+  read from PDFs made by LibreOffice or Word.
+- Arabic words with vowel marks ("أيضًا", "وفقًا") came out split; Arabic
+  commas and colons were set apart by a space; punctuation next to numbers
+  and brackets came out in the wrong order (":١٤٧" for "١٤٧:").
+- The layout model could take a run of Arabic paragraphs for a picture; on
+  pages with a text layer such regions are read as text.
+- Scanned Arabic pages were never read with the Arabic recogniser (a missing
+  dependency made it fail every time) and came out as a few stray characters.
+- About one line in five on clear scans came out as letter salad: a line
+  orientation classifier turned upright lines upside down. It is no longer
+  used.
+- A page of Arabic read with the Latin recogniser could return one confident
+  number and pass as a good reading; readings are now compared by how much text
+  they hold.
+- Arabic text in the large-print PDF was set in the fallback font (DejaVu Sans)
+  instead of the Arabic font, and Arabic-Indic numbers were printed backwards.
+- The in-app reader showed Arabic paragraphs left to right.
+- The update check never worked: the page's security policy blocked it, so the
+  app always said it was up to date.
+
 ## [0.6.0] - 2026-10-08
 
 This release rebuilds how PDFs are read. Pages keep their pictures, tables,

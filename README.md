@@ -95,8 +95,16 @@ file.
 ## Using it
 
 1. Choose a document (PDF, DOCX, PPTX, or DOC/PPT if LibreOffice is installed).
-2. Choose a text size. 20 point is a good start.
+2. Choose a text size. 20 point is a good start. **Change font** lets you pick
+   the font for English (and other Latin-script) text and for Arabic text, each
+   shown in its own letters.
 3. Choose PDF, Word or Reader page, and A4 or A3, then **Make large print**.
+
+The fonts are Atkinson Hyperlegible (the default, made for low vision), Lexend,
+Andika, Noto Sans and Noto Serif; and Noto Sans Arabic (the default), Noto Naskh
+Arabic, Amiri, IBM Plex Sans Arabic, Tajawal and Readex Pro. They come with the
+app and are embedded in the PDF and Word files, so the copy looks the same on
+any computer.
 
 The copy is saved next to the original as `Name - large print.pdf`
 (**Save somewhere else…** changes that). When it is done, the book opens in the
@@ -112,21 +120,33 @@ text again.
 
 ### Updates
 
-Updates are off until you turn them on (Settings > Updates). When on, the app
-asks GitHub whether there is a newer version. On Windows it can download the
-new installer, checks its SHA-256 checksum against the release, and only then
-runs it. On Linux it opens the release page. Converting documents never uses
-the internet, with or without updates turned on.
+Once a day, when it starts, the app asks GitHub whether there is a newer
+version (Settings > Updates turns this off; **Look for a new version now**
+asks at any time). When there is one:
+
+- Windows, installed: **Download and install** downloads the new installer,
+  checks its SHA-256 checksum against the release, and only then runs it.
+- Linux AppImage: **Download and restart** downloads the new AppImage next to
+  the one you are running, checks it the same way, swaps it in and restarts.
+- The Windows portable zip, .deb and .rpm open the release page, because those
+  are updated by unzipping or with your package manager.
+
+Converting documents never uses the internet, with or without updates turned on.
 
 ## What to expect
 
 - A computer from the last few years is enough; no graphics card is needed.
   Pages with text take about a second each; scanned pages take a few seconds
-  each.
-- Recognition of scanned Latin-script text is well tested. Scanned **Arabic**
-  is recognised with a bundled Arabic model, but its accuracy has not yet been
-  measured on a large set of real Arabic books, so check Arabic scans against
-  the original pages. Arabic text that is already in a PDF is read exactly.
+  each. Pages are converted side by side on computers with enough cores and
+  memory. On Windows the graphics card is used when it gives the same results
+  as the processor and is clearly faster (Settings > Speed turns this off).
+- Scanned pages are read with PaddleOCR's PP-OCR models.
+  [docs/ocr-evaluation.md](docs/ocr-evaluation.md) has the measured error rates
+  on test pages, how they compare with Tesseract, and why OCRmyPDF and Docling
+  are not used. Scanned **Arabic** has
+  not yet been measured on a large set of real Arabic books, so check Arabic
+  scans against the original pages. Arabic text that is already in a PDF is
+  read exactly.
 - Hard-to-read words are marked rather than guessed, and nothing is ever
   "corrected" by rewriting it.
 - macOS is not supported.
@@ -183,11 +203,12 @@ packaged engine before anything is published.
 - [DESIGN.md](DESIGN.md): how it is built.
 - [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md): how to change it.
 - [CHANGELOG.md](CHANGELOG.md): what changed in each version.
+- [docs/ocr-evaluation.md](docs/ocr-evaluation.md): how the recogniser was chosen.
 - [SIGNING.md](SIGNING.md): Windows code signing.
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE). Bundled fonts (Atkinson Hyperlegible,
-Noto Sans Arabic, Source Sans 3: SIL Open Font License; DejaVu Sans: Bitstream
+GPL-3.0-or-later. See [LICENSE](LICENSE). Bundled fonts (the reading fonts
+listed above and Source Sans 3: SIL Open Font License; DejaVu Sans: Bitstream
 Vera license) and models (PaddlePaddle PP-OCR and PP-DocLayout: Apache 2.0)
 keep their own licenses; see [sbom.json](sbom.json).

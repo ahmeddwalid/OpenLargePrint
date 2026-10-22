@@ -397,3 +397,21 @@ def test_export_applies_review_edits_and_rejects_invalid_targets(tmp_path: Path)
         events = [json.loads(line) for line in runner.out_stream.getvalue().splitlines()]
         assert any(event.get("type") == "error" for event in events)
         assert source.read_bytes() == original
+
+
+def test_stray_output_cannot_reach_the_protocol_stream():
+    """A library printing to standard output (ONNX Runtime does when a graphics
+    driver fails) must not break the JSON-Lines protocol."""
+    import subprocess
+    import sys
+    script = (
+        "import os, sys\n"
+        "from openlargeprint.sidecar.runner import _protocol_stdout\n"
+        "protocol = _protocol_stdout()\n"
+        "print('*** EP Error ***')\n"
+        "os.write(1, b'native noise\\n')\n"
+        "protocol.write('{\"type\": \"ok\"}\\n'); protocol.flush()\n"
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60)
+    assert result.stdout.strip() == '{"type": "ok"}'
+    assert "EP Error" in result.stderr and "native noise" in result.stderr

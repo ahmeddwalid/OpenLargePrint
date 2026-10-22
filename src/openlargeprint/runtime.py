@@ -123,7 +123,14 @@ def gpu_allowed() -> bool:
 
 
 def _probe_directml(model_path: str) -> bool:
-    """Run a small input through the model on the CPU and on DirectML; True if they agree."""
+    """Run a page-sized input through the model on the CPU and on DirectML.
+
+    True only if the answers agree and the graphics card is clearly faster. On a
+    computer without a real graphics card DirectML runs on Windows' software
+    renderer, which agrees with the CPU but is much slower.
+    """
+    import time
+
     import numpy as np
     import onnxruntime as ort
 
@@ -138,12 +145,23 @@ def _probe_directml(model_path: str) -> bool:
     if DML not in dml.get_providers():
         return False
     first = cpu.get_inputs()[0]
-    shape = [d if isinstance(d, int) and d > 0 else 64 for d in first.shape]
-    rng = np.random.default_rng(7)
-    sample = rng.random(shape, dtype=np.float32)
-    expected = cpu.run(None, {first.name: sample})[0]
-    actual = dml.run(None, {first.name: sample})[0]
-    return expected.shape == actual.shape and float(np.max(np.abs(expected - actual))) < 1e-2
+    # The text detector takes pages of about this size.
+    shape = [d if isinstance(d, int) and d > 0 else (3 if i == 1 else 1 if i == 0 else 960)
+             for i, d in enumerate(first.shape)]
+    sample = np.random.default_rng(7).random(shape, dtype=np.float32)
+
+    def timed(session):
+        session.run(None, {first.name: sample})  # warm-up: kernels are prepared on first use
+        started = time.perf_counter()
+        output = session.run(None, {first.name: sample})[0]
+        return output, time.perf_counter() - started
+
+    expected, cpu_seconds = timed(cpu)
+    actual, gpu_seconds = timed(dml)
+    if expected.shape != actual.shape or float(np.mean(np.abs(expected - actual))) > 1e-3:
+        return False
+    log_safe_info(f"Graphics card check: {gpu_seconds:.2f}s against {cpu_seconds:.2f}s on the CPU")
+    return gpu_seconds < 0.75 * cpu_seconds
 
 
 @lru_cache(maxsize=1)
